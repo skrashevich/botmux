@@ -18,17 +18,23 @@ go build -o botmux .
 # Flags: -addr :8080, -db botdata.db, -webhook URL
 ```
 
-No tests, no linter configured. Single `go build` produces the binary.
+No linter configured. Single `go build` produces the binary.
+
+```bash
+# Run tests
+go test -v ./...
+```
 
 ## Architecture
 
-Monolithic Go app (all `package main`), 5 source files + 1 embedded SPA template:
+Monolithic Go app (all `package main`), 5 source files + 1 test file + 1 embedded SPA template:
 
 - **main.go** — Entry point. Token is optional — if provided, registers CLI bot; otherwise uses bots from DB. Starts ProxyManager for all bots, launches HTTP server.
 - **bot.go** — `Bot` struct wrapping `OvyFlash/telegram-bot-api`. All Telegram API calls (send, ban, pin, admin management). `processUpdate()` dispatches to message/chat/member handlers.
 - **proxy.go** — `ProxyManager` manages ALL bots uniformly (no CLI vs web distinction). Runs independent `pollLoop` per bot with raw JSON `getUpdates`. Dual-mode per bot: forwards updates to backend URL (proxy) and/or processes them for chat tracking (management). `WebhookHandler()` for bots in webhook mode. Creates managed Bot instances automatically at Start(). Periodic backend health checks every 60s.
 - **server.go** — HTTP server with `embed.FS` for SPA. REST API for all bot/chat/message/admin operations. Telegram API proxy at `/tgapi/` captures outgoing bot messages. Multi-bot: resolves bot instances via `getBotFromRequest()` / `resolveBot()`.
 - **store.go** — SQLite with WAL mode. All data models and DB operations. Auto-migrates schema on startup.
+- **server_capture_test.go** — Tests for `captureSentMessage` (copyMessage and sendMessage scenarios). Uses temp DB via `t.TempDir()`.
 - **templates/index.html** — Complete SPA (vanilla JS, no framework). Dark/light theme (Sora + JetBrains Mono, auto-switches via `prefers-color-scheme`). i18n with EN/RU support via `i18n` object and `t(key)` function. Compiled into binary via `//go:embed`.
 
 ## Key Design Decisions
