@@ -4,9 +4,11 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -72,6 +74,9 @@ func (s *Server) Start(addr string) error {
 		mux.HandleFunc(s.webhookPath, s.webhookHandler)
 		log.Printf("Webhook endpoint registered at %s", s.webhookPath)
 	}
+
+	// Telegram API proxy — backends use this instead of api.telegram.org
+	mux.HandleFunc("/tgapi/", s.handleTelegramAPIProxy)
 
 	mux.HandleFunc("/", s.handleIndex)
 
@@ -731,4 +736,173 @@ func writeError(w http.ResponseWriter, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 	json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+}
+
+// handleTelegramAPIProxy proxies requests to api.telegram.org and captures sent messages.
+// URL format: /tgapi/bot{TOKEN}/{method}
+// Backends set their API base URL to http://{addr}/tgapi/ instead of https://api.telegram.org/
+func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) {
+	// Parse path: /tgapi/bot{TOKEN}/{method}
+	path := strings.TrimPrefix(r.URL.Path, "/tgapi/")
+	parts := strings.SplitN(path, "/", 2)
+	if len(parts) < 2 || !strings.HasPrefix(parts[0], "bot") {
+		http.Error(w, "Invalid path. Use /tgapi/bot{TOKEN}/{method}", 400)
+		return
+	}
+
+	botToken := strings.TrimPrefix(parts[0], "bot")
+	method := parts[1]
+
+	// Read request body
+	reqBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", 400)
+		return
+	}
+
+	// Forward to Telegram
+	tgURL := fmt.Sprintf("https://api.telegram.org/bot%s/%s", botToken, method)
+	tgReq, err := http.NewRequestWithContext(r.Context(), r.Method, tgURL, io.NopCloser(strings.NewReader(string(reqBody))))
+	if err != nil {
+		http.Error(w, "Failed to create request", 500)
+		return
+	}
+	tgReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(tgReq)
+	if err != nil {
+		log.Printf("[tgapi-proxy] %s FAILED: %v", method, err)
+		http.Error(w, fmt.Sprintf("Telegram API error: %v", err), 502)
+		return
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	// Forward response to the backend
+	for k, vv := range resp.Header {
+		for _, v := range vv {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	w.Write(respBody)
+
+	// Capture sent messages from the response
+	if resp.StatusCode == 200 {
+		s.captureSentMessage(botToken, method, respBody)
+	}
+}
+
+// sendMethods lists Telegram API methods that return a Message in the result
+var sendMethods = map[string]bool{
+	"sendMessage":    true,
+	"sendPhoto":      true,
+	"sendAudio":      true,
+	"sendDocument":   true,
+	"sendVideo":      true,
+	"sendAnimation":  true,
+	"sendVoice":      true,
+	"sendVideoNote":  true,
+	"sendSticker":    true,
+	"sendLocation":   true,
+	"sendVenue":      true,
+	"sendContact":    true,
+	"sendPoll":       true,
+	"sendDice":       true,
+	"forwardMessage": true,
+	"copyMessage":    true,
+	"editMessageText": true,
+}
+
+func (s *Server) captureSentMessage(token, method string, respBody []byte) {
+	if !sendMethods[method] {
+		return
+	}
+
+	var resp struct {
+		OK     bool            `json:"ok"`
+		Result json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(respBody, &resp); err != nil || !resp.OK {
+		return
+	}
+
+	var msg struct {
+		MessageID int    `json:"message_id"`
+		Chat      struct {
+			ID    int64  `json:"id"`
+			Type  string `json:"type"`
+			Title string `json:"title"`
+		} `json:"chat"`
+		From struct {
+			ID        int64  `json:"id"`
+			Username  string `json:"username"`
+			FirstName string `json:"first_name"`
+			IsBot     bool   `json:"is_bot"`
+		} `json:"from"`
+		Text    string `json:"text"`
+		Caption string `json:"caption"`
+		Date    int64  `json:"date"`
+	}
+	if err := json.Unmarshal(resp.Result, &msg); err != nil || msg.MessageID == 0 {
+		return
+	}
+
+	fromUser := msg.From.FirstName
+	if msg.From.Username != "" {
+		fromUser = "@" + msg.From.Username
+	}
+
+	text := msg.Text
+	if text == "" {
+		text = msg.Caption
+	}
+
+	m := Message{
+		ID:       msg.MessageID,
+		ChatID:   msg.Chat.ID,
+		FromUser: fromUser,
+		FromID:   msg.From.ID,
+		Text:     text,
+		Date:     msg.Date,
+	}
+	if err := s.store.SaveMessage(m); err != nil {
+		log.Printf("[tgapi-proxy] Failed to save sent message: %v", err)
+	} else {
+		log.Printf("[tgapi-proxy] Captured %s: msg_id=%d chat_id=%d from=%s text=%q",
+			method, msg.MessageID, msg.Chat.ID, fromUser, truncateStr(text, 80))
+	}
+
+	// Also track the chat if we have a bot for this token
+	botCfg := s.findBotByToken(token)
+	if botCfg != nil {
+		s.store.UpsertChat(botCfg.ID, Chat{
+			ID:        msg.Chat.ID,
+			Type:      msg.Chat.Type,
+			Title:     msg.Chat.Title,
+			UpdatedAt: time.Now().Format(time.RFC3339),
+		})
+	}
+}
+
+func (s *Server) findBotByToken(token string) *BotConfig {
+	bots, err := s.store.GetBotConfigs()
+	if err != nil {
+		return nil
+	}
+	for _, b := range bots {
+		if b.Token == token {
+			return &b
+		}
+	}
+	return nil
+}
+
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }

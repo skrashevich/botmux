@@ -149,6 +149,21 @@ func (pm *ProxyManager) Start() {
 		}
 
 		if bot.ManageEnabled || bot.ProxyEnabled {
+			// Create managed Bot instance if needed for management processing
+			if bot.ManageEnabled {
+				pm.mu.Lock()
+				_, hasManagedBot := pm.managedBots[bot.ID]
+				pm.mu.Unlock()
+				if !hasManagedBot {
+					log.Printf("[proxy] Start: creating managed Bot instance for bot id=%d", bot.ID)
+					managedBot, err := NewBot(bot.Token, pm.store, bot.ID)
+					if err != nil {
+						log.Printf("[proxy] Start: failed to create Bot instance for bot id=%d: %v", bot.ID, err)
+					} else {
+						pm.RegisterManagedBot(bot.ID, managedBot)
+					}
+				}
+			}
 			log.Printf("[proxy] Start: starting polling for bot id=%d", bot.ID)
 			pm.startBot(bot.ID)
 		} else {

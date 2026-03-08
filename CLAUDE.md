@@ -8,11 +8,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Build (requires CGO for SQLite)
 CGO_ENABLED=1 go build -o gobotmygod .
 
-# Run
+# Run with token (registers CLI bot)
 ./gobotmygod -token "BOT_TOKEN"
-# or: TELEGRAM_BOT_TOKEN="..." ./gobotmygod
 
-# Flags: -addr :8080, -db botdata.db, -webhook URL, -polling
+# Run without token (uses bots from database only)
+./gobotmygod
+
+# Env var also works: TELEGRAM_BOT_TOKEN="..." ./gobotmygod
+# Flags: -addr :8080, -db botdata.db, -webhook URL
 ```
 
 No tests, no linter configured. Single `go build` produces the binary.
@@ -21,22 +24,26 @@ No tests, no linter configured. Single `go build` produces the binary.
 
 Monolithic Go app (all `package main`), 5 source files + 1 embedded SPA template:
 
-- **main.go** — Entry point. Determines update mode (polling/webhook/management-only), creates CLI bot, starts ProxyManager for web-added bots, launches HTTP server.
-- **bot.go** — `Bot` struct wrapping `go-telegram-bot-api/v5`. All Telegram API calls (send, ban, pin, admin management). Handles both polling and webhook update reception. `processUpdate()` dispatches to message/chat/member handlers.
-- **proxy.go** — `ProxyManager` manages non-CLI bots. Runs independent `pollLoop` per bot with raw JSON `getUpdates`. Dual-mode per bot: forwards updates to backend URL (proxy) and/or processes them for chat tracking (management). Periodic backend health checks every 60s.
-- **server.go** — HTTP server with `embed.FS` for SPA. REST API for all bot/chat/message/admin operations. Multi-bot: resolves bot instances via `getBotFromRequest()` / `resolveBot()` from registered bots or ProxyManager's managed bots.
+- **main.go** — Entry point. Token is optional — if provided, registers CLI bot; otherwise uses bots from DB. Starts ProxyManager for all bots, launches HTTP server.
+- **bot.go** — `Bot` struct wrapping `go-telegram-bot-api/v5`. All Telegram API calls (send, ban, pin, admin management). `processUpdate()` dispatches to message/chat/member handlers.
+- **proxy.go** — `ProxyManager` manages ALL bots uniformly (no CLI vs web distinction). Runs independent `pollLoop` per bot with raw JSON `getUpdates`. Dual-mode per bot: forwards updates to backend URL (proxy) and/or processes them for chat tracking (management). `WebhookHandler()` for bots in webhook mode. Creates managed Bot instances automatically at Start(). Periodic backend health checks every 60s.
+- **server.go** — HTTP server with `embed.FS` for SPA. REST API for all bot/chat/message/admin operations. Telegram API proxy at `/tgapi/` captures outgoing bot messages. Multi-bot: resolves bot instances via `getBotFromRequest()` / `resolveBot()`.
 - **store.go** — SQLite with WAL mode. All data models and DB operations. Auto-migrates schema on startup.
 - **templates/index.html** — Complete SPA (vanilla JS, no framework). Cyberpunk theme with IBM Plex Mono. Compiled into binary via `//go:embed`.
 
 ## Key Design Decisions
 
-**Multi-bot with unified table**: Single `bots` table with `manage_enabled` and `proxy_enabled` flags. Each bot can be proxy-only, management-only, or both. CLI bot has `source='cli'` and cannot be deleted via UI.
+**No CLI vs web bot distinction**: All bots are functionally identical. The `source` field ('cli' or 'web') is informational only. Both types support management, proxy, and all configuration options. ProxyManager handles polling for all bots. Token is optional at startup.
+
+**Multi-bot with unified table**: Single `bots` table with `manage_enabled` and `proxy_enabled` flags. Each bot can be proxy-only, management-only, or both.
 
 **Chat isolation**: `chats` table uses compound PK `(bot_id, id)`. Messages and tags are keyed by `chat_id` (globally unique in Telegram).
 
 **Bot resolution**: API endpoints accept `bot_id` param. Server checks registered bots map first, then ProxyManager's managed bots (`resolveBot` fallback chain).
 
-**CLI bot lifecycle**: Created with temporary `botID=0`, registered via `RegisterCLIBot()` to get real ID, then `MigrateLegacyChats()` moves old data.
+**Telegram API proxy** (`/tgapi/bot{TOKEN}/{method}`): Reverse-proxies backend API calls to `api.telegram.org`. For send methods (`sendMessage`, `sendPhoto`, etc.), parses the Telegram response to extract the sent `Message` and saves it to DB. This captures outgoing bot messages that don't appear in `getUpdates`.
+
+**Webhook mode**: Bots marked via `SetWebhookMode()` are not polled by ProxyManager but still show as running via `IsRunning()`. `WebhookHandler()` supports both management processing and proxy forwarding.
 
 ## Dependencies
 
