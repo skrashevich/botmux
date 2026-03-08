@@ -6,15 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Build (pure Go, no CGO required)
-go build -o gobotmygod .
+go build -o botmux .
 
 # Run with token (registers CLI bot)
-./gobotmygod -token "BOT_TOKEN"
+./botmux -token "BOT_TOKEN"
 
 # Run without token (uses bots from database only)
-./gobotmygod
+./botmux
 
-# Env var also works: TELEGRAM_BOT_TOKEN="..." ./gobotmygod
+# Env var also works: TELEGRAM_BOT_TOKEN="..." ./botmux
 # Flags: -addr :8080, -db botdata.db, -webhook URL
 ```
 

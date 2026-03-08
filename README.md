@@ -1,4 +1,4 @@
-# gobotmygod
+# botmux
 
 Web-based command center for managing Telegram groups and channels via Bot API, with built-in reverse proxy for legacy webhook bots.
 
@@ -125,14 +125,14 @@ Custom classification system for chat members:
 
 ```bash
 git clone <repo-url>
-cd gobotmygod
-go build -o gobotmygod .
+cd botmux
+go build -o botmux .
 ```
 
 Or install directly:
 
 ```bash
-go install gobotmygod@latest
+go install botmux@latest
 ```
 
 ## Usage
@@ -140,7 +140,7 @@ go install gobotmygod@latest
 ### Basic (polling mode, default)
 
 ```bash
-./gobotmygod -token "123456:ABC-DEF..."
+./botmux -token "123456:ABC-DEF..."
 ```
 
 The bot removes any existing webhook and starts long polling. Open http://localhost:8080 in your browser.
@@ -149,7 +149,7 @@ The bot removes any existing webhook and starts long polling. Open http://localh
 
 ```bash
 export TELEGRAM_BOT_TOKEN="123456:ABC-DEF..."
-./gobotmygod
+./botmux
 ```
 
 ### Command-line flags
@@ -164,7 +164,7 @@ export TELEGRAM_BOT_TOKEN="123456:ABC-DEF..."
 ### Webhook mode
 
 ```bash
-./gobotmygod -token "TOKEN" -webhook "https://myserver.com/tghook"
+./botmux -token "TOKEN" -webhook "https://myserver.com/tghook"
 ```
 
 Registers a webhook with Telegram. Updates are delivered via `POST /tghook` to your server. Requires:
@@ -194,29 +194,29 @@ The bot starts polling immediately. No restart needed.
 
 ## Reverse Proxy Setup
 
-To use gobotmygod as a reverse proxy for a legacy webhook bot:
+To use botmux as a reverse proxy for a legacy webhook bot:
 
 1. Add or edit the bot in the web UI
 2. Enable **Proxy** mode
 3. Set **Backend URL** to the legacy bot's webhook endpoint (e.g., `https://legacy-bot.example.com/webhook`)
 4. Optionally set **Secret Token** (sent as `X-Telegram-Bot-Api-Secret-Token` header)
-5. Save — gobotmygod will poll Telegram for updates and forward them as POST requests to the backend
+5. Save — botmux will poll Telegram for updates and forward them as POST requests to the backend
 
-The backend can respond with a [webhook-style reply](https://core.telegram.org/bots/api#making-requests-when-getting-updates) — JSON with a `method` field — and gobotmygod will proxy it back to the Telegram API.
+The backend can respond with a [webhook-style reply](https://core.telegram.org/bots/api#making-requests-when-getting-updates) — JSON with a `method` field — and botmux will proxy it back to the Telegram API.
 
 Use **CHECK WEBHOOK** button in the bot detail view to verify the backend is reachable. Health is also monitored automatically every 60 seconds.
 
 ### Capturing Bot Replies (API Proxy)
 
-By default, messages sent by the backend directly via the Telegram API (e.g., `sendMessage`) are not visible to gobotmygod — Telegram does not include a bot's own outgoing messages in `getUpdates`.
+By default, messages sent by the backend directly via the Telegram API (e.g., `sendMessage`) are not visible to botmux — Telegram does not include a bot's own outgoing messages in `getUpdates`.
 
-To capture these messages, gobotmygod provides a **Telegram API proxy** at `/tgapi/`. Configure your backend to use it as the API base URL instead of `api.telegram.org`:
+To capture these messages, botmux provides a **Telegram API proxy** at `/tgapi/`. Configure your backend to use it as the API base URL instead of `api.telegram.org`:
 
 ```
 # Before (direct)
 https://api.telegram.org/bot{TOKEN}/sendMessage
 
-# After (via gobotmygod proxy)
+# After (via botmux proxy)
 http://localhost:8080/tgapi/bot{TOKEN}/sendMessage
 ```
 
@@ -229,7 +229,7 @@ The **API Proxy URL** is displayed in the bot detail view when proxy mode is ena
 ## Architecture
 
 ```
-gobotmygod/
+botmux/
 ├── main.go         Entry point, flag parsing, bot registration
 ├── bot.go          Telegram Bot API wrapper (all bot methods)
 ├── proxy.go        ProxyManager: polling, forwarding, health checks for all bots
@@ -373,7 +373,7 @@ All endpoints return JSON. Errors return `{"error": "message"}` with HTTP 500. M
 2. Disable [privacy mode](https://core.telegram.org/bots/features#privacy-mode) if you want the bot to see all group messages (BotFather → `/setprivacy` → Disable)
 3. Add the bot to your group or channel
 4. Make it an administrator (with the permissions you need)
-5. Run gobotmygod — the chat will appear in the sidebar automatically
+5. Run botmux — the chat will appear in the sidebar automatically
 
 ### Required bot permissions
 

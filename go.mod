@@ -1,4 +1,4 @@
-module gobotmygod
+module github.com/skrashevich/botmux
 
 go 1.26.1
 
