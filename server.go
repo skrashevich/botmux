@@ -3,9 +3,11 @@ package main
 import (
 	"embed"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -13,15 +15,49 @@ import (
 var templateFS embed.FS
 
 type Server struct {
-	bot            *Bot
 	store          *Store
 	proxy          *ProxyManager
+	mu             sync.RWMutex
+	bots           map[int64]*Bot // botID -> Bot (for Telegram API calls)
 	webhookPath    string
 	webhookHandler http.HandlerFunc
 }
 
-func NewServer(bot *Bot, store *Store, proxy *ProxyManager) *Server {
-	return &Server{bot: bot, store: store, proxy: proxy}
+func NewServer(store *Store, proxy *ProxyManager) *Server {
+	return &Server{
+		store: store,
+		proxy: proxy,
+		bots:  make(map[int64]*Bot),
+	}
+}
+
+func (s *Server) RegisterBot(botID int64, bot *Bot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bots[botID] = bot
+}
+
+func (s *Server) getBot(botID int64) *Bot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.bots[botID]
+}
+
+// getBotFromRequest extracts bot_id from query params and returns the Bot instance
+func (s *Server) getBotFromRequest(r *http.Request) (*Bot, int64, error) {
+	botID, err := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
+	if err != nil {
+		return nil, 0, fmt.Errorf("invalid bot_id")
+	}
+	bot := s.getBot(botID)
+	if bot == nil {
+		// Try to get from proxy manager (for non-CLI managed bots)
+		bot = s.proxy.GetManagedBot(botID)
+	}
+	if bot == nil {
+		return nil, botID, fmt.Errorf("bot not found or not a management bot")
+	}
+	return bot, botID, nil
 }
 
 func (s *Server) SetWebhookHandler(path string, handler http.HandlerFunc) {
@@ -32,32 +68,42 @@ func (s *Server) SetWebhookHandler(path string, handler http.HandlerFunc) {
 func (s *Server) Start(addr string) error {
 	mux := http.NewServeMux()
 
-	// Webhook endpoint (must be before "/" catch-all)
 	if s.webhookPath != "" && s.webhookHandler != nil {
 		mux.HandleFunc(s.webhookPath, s.webhookHandler)
 		log.Printf("Webhook endpoint registered at %s", s.webhookPath)
 	}
 
-	// Serve frontend
 	mux.HandleFunc("/", s.handleIndex)
 
-	// API routes
-	mux.HandleFunc("/api/bot", s.handleBotInfo)
+	// Bot management
+	mux.HandleFunc("/api/bots", s.handleBotList)
+	mux.HandleFunc("/api/bots/add", s.handleBotAdd)
+	mux.HandleFunc("/api/bots/update", s.handleBotUpdate)
+	mux.HandleFunc("/api/bots/delete", s.handleBotDelete)
+	mux.HandleFunc("/api/bots/validate", s.handleBotValidate)
+
+	// Chat management (requires bot_id)
 	mux.HandleFunc("/api/chats", s.handleChats)
 	mux.HandleFunc("/api/chats/refresh", s.handleRefreshChat)
 	mux.HandleFunc("/api/chats/delete", s.handleDeleteChat)
+
+	// Messages
 	mux.HandleFunc("/api/messages", s.handleMessages)
 	mux.HandleFunc("/api/messages/search", s.handleSearchMessages)
 	mux.HandleFunc("/api/messages/send", s.handleSendMessage)
 	mux.HandleFunc("/api/messages/pin", s.handlePinMessage)
 	mux.HandleFunc("/api/messages/unpin", s.handleUnpinMessage)
 	mux.HandleFunc("/api/messages/delete", s.handleDeleteMessage)
+
+	// Stats
 	mux.HandleFunc("/api/stats", s.handleStats)
+
+	// Users
 	mux.HandleFunc("/api/users/list", s.handleListUsers)
 	mux.HandleFunc("/api/users/ban", s.handleBanUser)
 	mux.HandleFunc("/api/users/unban", s.handleUnbanUser)
 
-	// Admin management
+	// Admins
 	mux.HandleFunc("/api/admins", s.handleGetAdmins)
 	mux.HandleFunc("/api/admins/promote", s.handlePromoteAdmin)
 	mux.HandleFunc("/api/admins/demote", s.handleDemoteAdmin)
@@ -71,14 +117,6 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/tags/add", s.handleAddTag)
 	mux.HandleFunc("/api/tags/remove", s.handleRemoveTag)
 	mux.HandleFunc("/api/tags/user", s.handleGetUserTags)
-
-	// Proxy bots
-	mux.HandleFunc("/api/proxy/list", s.handleProxyList)
-	mux.HandleFunc("/api/proxy/add", s.handleProxyAdd)
-	mux.HandleFunc("/api/proxy/update", s.handleProxyUpdate)
-	mux.HandleFunc("/api/proxy/delete", s.handleProxyDelete)
-	mux.HandleFunc("/api/proxy/toggle", s.handleProxyToggle)
-	mux.HandleFunc("/api/proxy/validate", s.handleProxyValidate)
 
 	log.Printf("Web interface at http://%s", addr)
 	return http.ListenAndServe(addr, mux)
@@ -94,12 +132,166 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-func (s *Server) handleBotInfo(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]string{"username": s.bot.GetBotInfo()})
+// Bot management handlers
+
+func (s *Server) handleBotList(w http.ResponseWriter, r *http.Request) {
+	bots, err := s.store.GetBotConfigs()
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if bots == nil {
+		bots = []BotConfig{}
+	}
+	type BotStatus struct {
+		BotConfig
+		Running bool `json:"running"`
+	}
+	var result []BotStatus
+	for _, b := range bots {
+		running := false
+		if b.Source == "cli" {
+			running = true // CLI bot is always running
+		} else {
+			running = s.proxy.IsRunning(b.ID)
+		}
+		result = append(result, BotStatus{BotConfig: b, Running: running})
+	}
+	if result == nil {
+		result = []BotStatus{}
+	}
+	writeJSON(w, result)
 }
 
+func (s *Server) handleBotAdd(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	var req BotConfig
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, err)
+		return
+	}
+	if req.PollingTimeout <= 0 {
+		req.PollingTimeout = 30
+	}
+
+	// Delete webhook before starting polling
+	if req.ManageEnabled || req.ProxyEnabled {
+		if err := s.proxy.DeleteWebhook(req.Token); err != nil {
+			writeError(w, err)
+			return
+		}
+	}
+
+	id, err := s.store.AddBotConfig(req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	// Create managed Bot instance if needed
+	if req.ManageEnabled {
+		managedBot, err := NewBot(req.Token, s.store, id)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		s.proxy.RegisterManagedBot(id, managedBot)
+	}
+
+	if req.ManageEnabled || req.ProxyEnabled {
+		s.proxy.RestartBot(id)
+	}
+	writeJSON(w, map[string]interface{}{"status": "ok", "id": id})
+}
+
+func (s *Server) handleBotUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	var req BotConfig
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, err)
+		return
+	}
+	if req.PollingTimeout <= 0 {
+		req.PollingTimeout = 30
+	}
+
+	// Check if this is a CLI bot — don't allow changing source
+	existing, err := s.store.GetBotConfig(req.ID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if existing.Source == "cli" {
+		req.Source = "cli"
+	}
+
+	if req.ManageEnabled || req.ProxyEnabled {
+		if err := s.proxy.DeleteWebhook(req.Token); err != nil {
+			writeError(w, err)
+			return
+		}
+	}
+
+	if err := s.store.UpdateBotConfig(req); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	// For non-CLI bots, restart via proxy manager
+	if existing.Source != "cli" {
+		s.proxy.RestartBot(req.ID)
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleBotDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+
+	// Don't allow deleting CLI bots
+	bot, err := s.store.GetBotConfig(id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if bot.Source == "cli" {
+		writeError(w, fmt.Errorf("cannot delete CLI bot"))
+		return
+	}
+
+	s.proxy.stopBot(id)
+	s.proxy.UnregisterManagedBot(id)
+	if err := s.store.DeleteBotConfig(id); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleBotValidate(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	username, err := s.proxy.ValidateToken(token)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]string{"username": username})
+}
+
+// Chat handlers
+
 func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
-	chats, err := s.store.GetChats()
+	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
+	chats, err := s.store.GetChats(botID)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -111,12 +303,17 @@ func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRefreshChat(w http.ResponseWriter, r *http.Request) {
+	bot, _, err := s.getBotFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	chatID, err := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	chat, err := s.bot.RefreshChat(chatID)
+	chat, err := bot.RefreshChat(chatID)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -129,17 +326,16 @@ func (s *Server) handleDeleteChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
-	chatID, err := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	if err := s.store.DeleteChat(chatID); err != nil {
+	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
+	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
+	if err := s.store.DeleteChat(botID, chatID); err != nil {
 		writeError(w, err)
 		return
 	}
 	writeJSON(w, map[string]string{"status": "ok"})
 }
+
+// Message handlers
 
 func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
@@ -148,7 +344,6 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	if limit == 0 {
 		limit = 50
 	}
-
 	msgs, err := s.store.GetMessages(chatID, limit, offset)
 	if err != nil {
 		writeError(w, err)
@@ -180,6 +375,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
+		BotID  int64  `json:"bot_id"`
 		ChatID int64  `json:"chat_id"`
 		Text   string `json:"text"`
 	}
@@ -187,7 +383,12 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if err := s.bot.SendMessage(req.ChatID, req.Text); err != nil {
+	bot := s.resolveBot(req.BotID)
+	if bot == nil {
+		writeError(w, fmt.Errorf("bot not found"))
+		return
+	}
+	if err := bot.SendMessage(req.ChatID, req.Text); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -199,14 +400,19 @@ func (s *Server) handlePinMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
+	bot, _, err := s.getBotFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	msgID, _ := strconv.Atoi(r.URL.Query().Get("message_id"))
-	if err := s.bot.PinMessage(chatID, msgID); err != nil {
+	if err := bot.PinMessage(chatID, msgID); err != nil {
 		writeError(w, err)
 		return
 	}
 	s.store.LogAdminAction(AdminLog{
-		ChatID: chatID, Action: "pin_message", ActorName: s.bot.GetBotName(),
+		ChatID: chatID, Action: "pin_message", ActorName: bot.GetBotName(),
 		Details: "Message ID: " + strconv.Itoa(msgID), CreatedAt: time.Now().Format(time.RFC3339),
 	})
 	writeJSON(w, map[string]string{"status": "ok"})
@@ -217,9 +423,14 @@ func (s *Server) handleUnpinMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
+	bot, _, err := s.getBotFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	msgID, _ := strconv.Atoi(r.URL.Query().Get("message_id"))
-	if err := s.bot.UnpinMessage(chatID, msgID); err != nil {
+	if err := bot.UnpinMessage(chatID, msgID); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -231,15 +442,20 @@ func (s *Server) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
+	bot, _, err := s.getBotFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	msgID, _ := strconv.Atoi(r.URL.Query().Get("message_id"))
-	if err := s.bot.DeleteMessage(chatID, msgID); err != nil {
+	if err := bot.DeleteMessage(chatID, msgID); err != nil {
 		writeError(w, err)
 		return
 	}
 	s.store.MarkMessageDeleted(chatID, msgID)
 	s.store.LogAdminAction(AdminLog{
-		ChatID: chatID, Action: "delete_message", ActorName: s.bot.GetBotName(),
+		ChatID: chatID, Action: "delete_message", ActorName: bot.GetBotName(),
 		Details: "Message ID: " + strconv.Itoa(msgID), CreatedAt: time.Now().Format(time.RFC3339),
 	})
 	writeJSON(w, map[string]string{"status": "ok"})
@@ -279,14 +495,19 @@ func (s *Server) handleBanUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
+	bot, _, err := s.getBotFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	userID, _ := strconv.ParseInt(r.URL.Query().Get("user_id"), 10, 64)
-	if err := s.bot.BanUser(chatID, userID); err != nil {
+	if err := bot.BanUser(chatID, userID); err != nil {
 		writeError(w, err)
 		return
 	}
 	s.store.LogAdminAction(AdminLog{
-		ChatID: chatID, Action: "ban_user", ActorName: s.bot.GetBotName(),
+		ChatID: chatID, Action: "ban_user", ActorName: bot.GetBotName(),
 		TargetID: userID, CreatedAt: time.Now().Format(time.RFC3339),
 	})
 	writeJSON(w, map[string]string{"status": "ok"})
@@ -297,24 +518,34 @@ func (s *Server) handleUnbanUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
+	bot, _, err := s.getBotFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	userID, _ := strconv.ParseInt(r.URL.Query().Get("user_id"), 10, 64)
-	if err := s.bot.UnbanUser(chatID, userID); err != nil {
+	if err := bot.UnbanUser(chatID, userID); err != nil {
 		writeError(w, err)
 		return
 	}
 	s.store.LogAdminAction(AdminLog{
-		ChatID: chatID, Action: "unban_user", ActorName: s.bot.GetBotName(),
+		ChatID: chatID, Action: "unban_user", ActorName: bot.GetBotName(),
 		TargetID: userID, CreatedAt: time.Now().Format(time.RFC3339),
 	})
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
-// Admin management handlers
+// Admin handlers
 
 func (s *Server) handleGetAdmins(w http.ResponseWriter, r *http.Request) {
+	bot, _, err := s.getBotFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
-	admins, err := s.bot.GetAdmins(chatID)
+	admins, err := bot.GetAdmins(chatID)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -331,6 +562,7 @@ func (s *Server) handlePromoteAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
+		BotID  int64     `json:"bot_id"`
 		ChatID int64     `json:"chat_id"`
 		UserID int64     `json:"user_id"`
 		Perms  AdminInfo `json:"perms"`
@@ -339,20 +571,19 @@ func (s *Server) handlePromoteAdmin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if err := s.bot.PromoteAdmin(req.ChatID, req.UserID, req.Perms); err != nil {
+	bot := s.resolveBot(req.BotID)
+	if bot == nil {
+		writeError(w, fmt.Errorf("bot not found"))
+		return
+	}
+	if err := bot.PromoteAdmin(req.ChatID, req.UserID, req.Perms); err != nil {
 		writeError(w, err)
 		return
 	}
-
 	s.store.LogAdminAction(AdminLog{
-		ChatID:     req.ChatID,
-		Action:     "promote_admin",
-		ActorName:  s.bot.GetBotName(),
-		TargetID:   req.UserID,
-		Details:    "Promoted to admin via web UI",
-		CreatedAt:  time.Now().Format(time.RFC3339),
+		ChatID: req.ChatID, Action: "promote_admin", ActorName: bot.GetBotName(),
+		TargetID: req.UserID, Details: "Promoted via web UI", CreatedAt: time.Now().Format(time.RFC3339),
 	})
-
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
@@ -361,22 +592,21 @@ func (s *Server) handleDemoteAdmin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
-	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
-	userID, _ := strconv.ParseInt(r.URL.Query().Get("user_id"), 10, 64)
-	if err := s.bot.DemoteAdmin(chatID, userID); err != nil {
+	bot, _, err := s.getBotFromRequest(r)
+	if err != nil {
 		writeError(w, err)
 		return
 	}
-
+	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
+	userID, _ := strconv.ParseInt(r.URL.Query().Get("user_id"), 10, 64)
+	if err := bot.DemoteAdmin(chatID, userID); err != nil {
+		writeError(w, err)
+		return
+	}
 	s.store.LogAdminAction(AdminLog{
-		ChatID:    chatID,
-		Action:    "demote_admin",
-		ActorName: s.bot.GetBotName(),
-		TargetID:  userID,
-		Details:   "Demoted from admin via web UI",
-		CreatedAt: time.Now().Format(time.RFC3339),
+		ChatID: chatID, Action: "demote_admin", ActorName: bot.GetBotName(),
+		TargetID: userID, Details: "Demoted via web UI", CreatedAt: time.Now().Format(time.RFC3339),
 	})
-
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
@@ -386,6 +616,7 @@ func (s *Server) handleSetAdminTitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
+		BotID  int64  `json:"bot_id"`
 		ChatID int64  `json:"chat_id"`
 		UserID int64  `json:"user_id"`
 		Title  string `json:"title"`
@@ -394,24 +625,21 @@ func (s *Server) handleSetAdminTitle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if err := s.bot.SetAdminTitle(req.ChatID, req.UserID, req.Title); err != nil {
+	bot := s.resolveBot(req.BotID)
+	if bot == nil {
+		writeError(w, fmt.Errorf("bot not found"))
+		return
+	}
+	if err := bot.SetAdminTitle(req.ChatID, req.UserID, req.Title); err != nil {
 		writeError(w, err)
 		return
 	}
-
 	s.store.LogAdminAction(AdminLog{
-		ChatID:    req.ChatID,
-		Action:    "set_admin_title",
-		ActorName: s.bot.GetBotName(),
-		TargetID:  req.UserID,
-		Details:   "Title set to: " + req.Title,
-		CreatedAt: time.Now().Format(time.RFC3339),
+		ChatID: req.ChatID, Action: "set_admin_title", ActorName: bot.GetBotName(),
+		TargetID: req.UserID, Details: "Title: " + req.Title, CreatedAt: time.Now().Format(time.RFC3339),
 	})
-
 	writeJSON(w, map[string]string{"status": "ok"})
 }
-
-// Admin log handler
 
 func (s *Server) handleAdminLog(w http.ResponseWriter, r *http.Request) {
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
@@ -431,7 +659,7 @@ func (s *Server) handleAdminLog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, logs)
 }
 
-// User tag handlers
+// Tag handlers
 
 func (s *Server) handleGetTags(w http.ResponseWriter, r *http.Request) {
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
@@ -451,26 +679,27 @@ func (s *Server) handleAddTag(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
-	var req UserTag
+	var req struct {
+		BotID int64 `json:"bot_id"`
+		UserTag
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, err)
 		return
 	}
-	if err := s.store.AddUserTag(req); err != nil {
+	if err := s.store.AddUserTag(req.UserTag); err != nil {
 		writeError(w, err)
 		return
 	}
-
+	actorName := "Web UI"
+	if bot := s.resolveBot(req.BotID); bot != nil {
+		actorName = bot.GetBotName()
+	}
 	s.store.LogAdminAction(AdminLog{
-		ChatID:     req.ChatID,
-		Action:     "add_tag",
-		ActorName:  s.bot.GetBotName(),
-		TargetID:   req.UserID,
-		TargetName: req.Username,
-		Details:    "Tag: " + req.Tag,
-		CreatedAt:  time.Now().Format(time.RFC3339),
+		ChatID: req.ChatID, Action: "add_tag", ActorName: actorName,
+		TargetID: req.UserID, TargetName: req.Username,
+		Details: "Tag: " + req.Tag, CreatedAt: time.Now().Format(time.RFC3339),
 	})
-
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
@@ -501,142 +730,13 @@ func (s *Server) handleGetUserTags(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, tags)
 }
 
-// Proxy handlers
-
-func (s *Server) handleProxyList(w http.ResponseWriter, r *http.Request) {
-	bots, err := s.store.GetProxyBots()
-	if err != nil {
-		writeError(w, err)
-		return
+// resolveBot finds a Bot instance from either registered bots or proxy manager
+func (s *Server) resolveBot(botID int64) *Bot {
+	bot := s.getBot(botID)
+	if bot != nil {
+		return bot
 	}
-	if bots == nil {
-		bots = []ProxyBot{}
-	}
-	// Add running status
-	type ProxyBotStatus struct {
-		ProxyBot
-		Running bool `json:"running"`
-	}
-	var result []ProxyBotStatus
-	for _, b := range bots {
-		result = append(result, ProxyBotStatus{
-			ProxyBot: b,
-			Running:  s.proxy.IsRunning(b.ID),
-		})
-	}
-	writeJSON(w, result)
-}
-
-func (s *Server) handleProxyAdd(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", 405)
-		return
-	}
-	var req ProxyBot
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, err)
-		return
-	}
-	if req.PollingTimeout <= 0 {
-		req.PollingTimeout = 30
-	}
-
-	// Delete webhook before starting polling
-	if err := s.proxy.DeleteWebhook(req.Token); err != nil {
-		writeError(w, err)
-		return
-	}
-
-	id, err := s.store.AddProxyBot(req)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	if req.Enabled {
-		s.proxy.RestartBot(id)
-	}
-	writeJSON(w, map[string]interface{}{"status": "ok", "id": id})
-}
-
-func (s *Server) handleProxyUpdate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", 405)
-		return
-	}
-	var req ProxyBot
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, err)
-		return
-	}
-	if req.PollingTimeout <= 0 {
-		req.PollingTimeout = 30
-	}
-
-	// Delete webhook if token changed
-	if err := s.proxy.DeleteWebhook(req.Token); err != nil {
-		writeError(w, err)
-		return
-	}
-
-	if err := s.store.UpdateProxyBot(req); err != nil {
-		writeError(w, err)
-		return
-	}
-	s.proxy.RestartBot(req.ID)
-	writeJSON(w, map[string]string{"status": "ok"})
-}
-
-func (s *Server) handleProxyDelete(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", 405)
-		return
-	}
-	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
-	s.proxy.stopBot(id)
-	if err := s.store.DeleteProxyBot(id); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, map[string]string{"status": "ok"})
-}
-
-func (s *Server) handleProxyToggle(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", 405)
-		return
-	}
-	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
-	bot, err := s.store.GetProxyBot(id)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	bot.Enabled = !bot.Enabled
-
-	// If enabling, delete webhook first
-	if bot.Enabled {
-		if err := s.proxy.DeleteWebhook(bot.Token); err != nil {
-			writeError(w, err)
-			return
-		}
-	}
-
-	if err := s.store.UpdateProxyBot(*bot); err != nil {
-		writeError(w, err)
-		return
-	}
-	s.proxy.RestartBot(id)
-	writeJSON(w, map[string]interface{}{"status": "ok", "enabled": bot.Enabled})
-}
-
-func (s *Server) handleProxyValidate(w http.ResponseWriter, r *http.Request) {
-	token := r.URL.Query().Get("token")
-	username, err := s.proxy.ValidateToken(token)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, map[string]string{"username": username})
+	return s.proxy.GetManagedBot(botID)
 }
 
 func writeJSON(w http.ResponseWriter, v interface{}) {

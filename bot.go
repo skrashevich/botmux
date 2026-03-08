@@ -13,25 +13,25 @@ import (
 type Bot struct {
 	api   *tgbotapi.BotAPI
 	store *Store
+	botID int64 // ID in bots table
 }
 
-func NewBot(token string, store *Store) (*Bot, error) {
+func NewBot(token string, store *Store, botID int64) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("Authorized as @%s", api.Self.UserName)
-	return &Bot{api: api, store: store}, nil
+	log.Printf("Bot [%d] authorized as @%s", botID, api.Self.UserName)
+	return &Bot{api: api, store: store, botID: botID}, nil
 }
 
 // WebhookStatus represents the current webhook state of the bot
 type WebhookStatus struct {
-	URL            string // webhook URL if set
-	HasWebhook     bool   // whether a webhook is configured
-	PendingUpdates int    // number of pending updates
+	URL            string
+	HasWebhook     bool
+	PendingUpdates int
 }
 
-// CheckWebhook queries Telegram for current webhook info
 func (b *Bot) CheckWebhook() (*WebhookStatus, error) {
 	info, err := b.api.GetWebhookInfo()
 	if err != nil {
@@ -44,7 +44,6 @@ func (b *Bot) CheckWebhook() (*WebhookStatus, error) {
 	}, nil
 }
 
-// SetWebhook configures a webhook URL on Telegram side
 func (b *Bot) SetWebhook(url string) error {
 	wh, err := tgbotapi.NewWebhook(url)
 	if err != nil {
@@ -58,13 +57,12 @@ func (b *Bot) SetWebhook(url string) error {
 	return nil
 }
 
-// RemoveWebhook removes the webhook, allowing polling
 func (b *Bot) RemoveWebhook() error {
 	_, err := b.api.Request(tgbotapi.DeleteWebhookConfig{})
 	return err
 }
 
-// StartPolling removes any webhook and starts long polling for updates
+// StartPolling for CLI bot only (UI bots use ProxyManager)
 func (b *Bot) StartPolling() {
 	if err := b.RemoveWebhook(); err != nil {
 		log.Printf("Warning: could not remove webhook: %v", err)
@@ -81,7 +79,6 @@ func (b *Bot) StartPolling() {
 	}
 }
 
-// WebhookHandler returns an http.HandlerFunc that accepts updates from Telegram
 func (b *Bot) WebhookHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -125,10 +122,8 @@ func formatUsername(user *tgbotapi.User) string {
 }
 
 func (b *Bot) handleMessage(msg *tgbotapi.Message) {
-	// Track the chat
 	b.trackChat(msg.Chat)
 
-	// Save message
 	fromUser := ""
 	var fromID int64
 	if msg.From != nil {
@@ -137,7 +132,6 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 		b.store.TrackUser(msg.Chat.ID, fromID, fromUser)
 	}
 
-	// Track new members joining via this message
 	if msg.NewChatMembers != nil {
 		for i := range msg.NewChatMembers {
 			u := &msg.NewChatMembers[i]
@@ -210,7 +204,6 @@ func (b *Bot) trackChat(chat *tgbotapi.Chat) {
 	isAdmin := false
 	memberCount := 0
 
-	// Try to get bot's member info to check admin status
 	me, err := b.api.GetChatMember(tgbotapi.GetChatMemberConfig{
 		ChatConfigWithUser: tgbotapi.ChatConfigWithUser{
 			ChatID: chat.ID,
@@ -221,7 +214,6 @@ func (b *Bot) trackChat(chat *tgbotapi.Chat) {
 		isAdmin = me.IsAdministrator() || me.IsCreator()
 	}
 
-	// Try to get member count
 	count, err := b.api.GetChatMembersCount(tgbotapi.ChatMemberCountConfig{
 		ChatConfig: tgbotapi.ChatConfig{ChatID: chat.ID},
 	})
@@ -230,7 +222,6 @@ func (b *Bot) trackChat(chat *tgbotapi.Chat) {
 	}
 
 	desc := ""
-	// Get full chat info for description
 	fullChat, err := b.api.GetChat(tgbotapi.ChatInfoConfig{
 		ChatConfig: tgbotapi.ChatConfig{ChatID: chat.ID},
 	})
@@ -249,12 +240,11 @@ func (b *Bot) trackChat(chat *tgbotapi.Chat) {
 		UpdatedAt:   time.Now().Format(time.RFC3339),
 	}
 
-	if err := b.store.UpsertChat(c); err != nil {
+	if err := b.store.UpsertChat(b.botID, c); err != nil {
 		log.Printf("Error upserting chat: %v", err)
 	}
 }
 
-// RefreshChat refreshes info for a specific chat
 func (b *Bot) RefreshChat(chatID int64) (*Chat, error) {
 	fullChat, err := b.api.GetChat(tgbotapi.ChatInfoConfig{
 		ChatConfig: tgbotapi.ChatConfig{ChatID: chatID},
@@ -293,13 +283,12 @@ func (b *Bot) RefreshChat(chatID int64) (*Chat, error) {
 		UpdatedAt:   time.Now().Format(time.RFC3339),
 	}
 
-	if err := b.store.UpsertChat(c); err != nil {
+	if err := b.store.UpsertChat(b.botID, c); err != nil {
 		return nil, err
 	}
 	return &c, nil
 }
 
-// SendMessage sends a text message to a chat
 func (b *Bot) SendMessage(chatID int64, text string) error {
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "HTML"
@@ -307,59 +296,41 @@ func (b *Bot) SendMessage(chatID int64, text string) error {
 	return err
 }
 
-// PinMessage pins a message in a chat
 func (b *Bot) PinMessage(chatID int64, messageID int) error {
-	pin := tgbotapi.PinChatMessageConfig{
-		ChatID:    chatID,
-		MessageID: messageID,
-	}
+	pin := tgbotapi.PinChatMessageConfig{ChatID: chatID, MessageID: messageID}
 	_, err := b.api.Request(pin)
 	return err
 }
 
-// UnpinMessage unpins a message
 func (b *Bot) UnpinMessage(chatID int64, messageID int) error {
-	unpin := tgbotapi.UnpinChatMessageConfig{
-		ChatID:    chatID,
-		MessageID: messageID,
-	}
+	unpin := tgbotapi.UnpinChatMessageConfig{ChatID: chatID, MessageID: messageID}
 	_, err := b.api.Request(unpin)
 	return err
 }
 
-// DeleteMessage deletes a message
 func (b *Bot) DeleteMessage(chatID int64, messageID int) error {
 	del := tgbotapi.NewDeleteMessage(chatID, messageID)
 	_, err := b.api.Request(del)
 	return err
 }
 
-// BanUser bans a user from a chat
 func (b *Bot) BanUser(chatID int64, userID int64) error {
 	ban := tgbotapi.BanChatMemberConfig{
-		ChatMemberConfig: tgbotapi.ChatMemberConfig{
-			ChatID: chatID,
-			UserID: userID,
-		},
+		ChatMemberConfig: tgbotapi.ChatMemberConfig{ChatID: chatID, UserID: userID},
 	}
 	_, err := b.api.Request(ban)
 	return err
 }
 
-// UnbanUser unbans a user from a chat
 func (b *Bot) UnbanUser(chatID int64, userID int64) error {
 	unban := tgbotapi.UnbanChatMemberConfig{
-		ChatMemberConfig: tgbotapi.ChatMemberConfig{
-			ChatID: chatID,
-			UserID: userID,
-		},
-		OnlyIfBanned: true,
+		ChatMemberConfig: tgbotapi.ChatMemberConfig{ChatID: chatID, UserID: userID},
+		OnlyIfBanned:     true,
 	}
 	_, err := b.api.Request(unban)
 	return err
 }
 
-// GetAdmins returns list of chat administrators
 func (b *Bot) GetAdmins(chatID int64) ([]AdminInfo, error) {
 	admins, err := b.api.GetChatAdministrators(tgbotapi.ChatAdministratorsConfig{
 		ChatConfig: tgbotapi.ChatConfig{ChatID: chatID},
@@ -372,18 +343,12 @@ func (b *Bot) GetAdmins(chatID int64) ([]AdminInfo, error) {
 	for _, a := range admins {
 		username := ""
 		if a.User != nil {
-			username = a.User.FirstName
-			if a.User.LastName != "" {
-				username += " " + a.User.LastName
-			}
-			if a.User.UserName != "" {
-				username = "@" + a.User.UserName
-			}
+			username = formatUsername(a.User)
 		}
 		info := AdminInfo{
-			UserID:   a.User.ID,
-			Username: username,
-			Status:   a.Status,
+			UserID:      a.User.ID,
+			Username:    username,
+			Status:      a.Status,
 			CustomTitle: a.CustomTitle,
 		}
 		if a.CanDeleteMessages {
@@ -407,7 +372,6 @@ func (b *Bot) GetAdmins(chatID int64) ([]AdminInfo, error) {
 		if a.CanManageChat {
 			info.CanManageChat = true
 		}
-		// Creator has all rights
 		if a.Status == "creator" {
 			info.CanDeleteMessages = true
 			info.CanRestrictMembers = true
@@ -422,13 +386,9 @@ func (b *Bot) GetAdmins(chatID int64) ([]AdminInfo, error) {
 	return result, nil
 }
 
-// PromoteAdmin promotes a user to admin with specified permissions
 func (b *Bot) PromoteAdmin(chatID int64, userID int64, perms AdminInfo) error {
 	promo := tgbotapi.PromoteChatMemberConfig{
-		ChatMemberConfig: tgbotapi.ChatMemberConfig{
-			ChatID: chatID,
-			UserID: userID,
-		},
+		ChatMemberConfig: tgbotapi.ChatMemberConfig{ChatID: chatID, UserID: userID},
 		CanDeleteMessages:  perms.CanDeleteMessages,
 		CanRestrictMembers: perms.CanRestrictMembers,
 		CanPromoteMembers:  perms.CanPromoteMembers,
@@ -441,37 +401,27 @@ func (b *Bot) PromoteAdmin(chatID int64, userID int64, perms AdminInfo) error {
 	return err
 }
 
-// DemoteAdmin removes admin rights from a user
 func (b *Bot) DemoteAdmin(chatID int64, userID int64) error {
 	promo := tgbotapi.PromoteChatMemberConfig{
-		ChatMemberConfig: tgbotapi.ChatMemberConfig{
-			ChatID: chatID,
-			UserID: userID,
-		},
+		ChatMemberConfig: tgbotapi.ChatMemberConfig{ChatID: chatID, UserID: userID},
 	}
 	_, err := b.api.Request(promo)
 	return err
 }
 
-// SetAdminTitle sets custom title for an admin
 func (b *Bot) SetAdminTitle(chatID int64, userID int64, title string) error {
 	cfg := tgbotapi.SetChatAdministratorCustomTitle{
-		ChatMemberConfig: tgbotapi.ChatMemberConfig{
-			ChatID: chatID,
-			UserID: userID,
-		},
-		CustomTitle: title,
+		ChatMemberConfig: tgbotapi.ChatMemberConfig{ChatID: chatID, UserID: userID},
+		CustomTitle:      title,
 	}
 	_, err := b.api.Request(cfg)
 	return err
 }
 
-// GetBotInfo returns bot username
 func (b *Bot) GetBotInfo() string {
 	return b.api.Self.UserName
 }
 
-// GetBotName returns display name for logging
 func (b *Bot) GetBotName() string {
 	return "Bot (@" + b.api.Self.UserName + ")"
 }

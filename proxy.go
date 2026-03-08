@@ -10,30 +10,17 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// ProxyBot represents a bot configuration for reverse proxy mode
-type ProxyBot struct {
-	ID             int64  `json:"id"`
-	Name           string `json:"name"`
-	Token          string `json:"token"`
-	BackendURL     string `json:"backend_url"`
-	SecretToken    string `json:"secret_token,omitempty"`
-	Enabled        bool   `json:"enabled"`
-	PollingTimeout int    `json:"polling_timeout"`
-	Offset         int64  `json:"offset"`
-	BotUsername     string `json:"bot_username,omitempty"`
-	LastError      string `json:"last_error,omitempty"`
-	LastActivity   string `json:"last_activity,omitempty"`
-	UpdatesForwarded int64 `json:"updates_forwarded"`
-}
-
-// ProxyManager manages multiple polling→webhook proxy goroutines
+// ProxyManager manages polling and forwarding for all non-CLI bots
 type ProxyManager struct {
-	store   *Store
-	mu      sync.Mutex
-	runners map[int64]*proxyRunner
-	client  *http.Client
+	store       *Store
+	mu          sync.Mutex
+	runners     map[int64]*proxyRunner
+	managedBots map[int64]*Bot // botID -> Bot instance for management processing
+	client      *http.Client
 }
 
 type proxyRunner struct {
@@ -43,37 +30,48 @@ type proxyRunner struct {
 
 func NewProxyManager(store *Store) *ProxyManager {
 	return &ProxyManager{
-		store:   store,
-		runners: make(map[int64]*proxyRunner),
-		client: &http.Client{
-			Timeout: 120 * time.Second,
-		},
+		store:       store,
+		runners:     make(map[int64]*proxyRunner),
+		managedBots: make(map[int64]*Bot),
+		client:      &http.Client{Timeout: 120 * time.Second},
 	}
 }
 
-// Start launches proxy goroutines for all enabled bots
+// RegisterManagedBot registers a Bot instance for management processing
+func (pm *ProxyManager) RegisterManagedBot(botID int64, bot *Bot) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.managedBots[botID] = bot
+}
+
+// UnregisterManagedBot removes a Bot instance
+func (pm *ProxyManager) UnregisterManagedBot(botID int64) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	delete(pm.managedBots, botID)
+}
+
+// Start launches goroutines for all active non-CLI bots
 func (pm *ProxyManager) Start() {
-	bots, err := pm.store.GetProxyBots()
+	bots, err := pm.store.GetBotConfigs()
 	if err != nil {
 		log.Printf("Proxy: failed to load bots: %v", err)
 		return
 	}
 	for _, bot := range bots {
-		if bot.Enabled {
+		if bot.Source == "cli" {
+			continue // CLI bot uses its own polling
+		}
+		if bot.ManageEnabled || bot.ProxyEnabled {
 			pm.startBot(bot.ID)
 		}
 	}
-	if len(bots) > 0 {
-		log.Printf("Proxy: loaded %d bot(s)", len(bots))
-	}
 }
 
-// startBot starts polling for a specific bot
 func (pm *ProxyManager) startBot(botID int64) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	// Stop existing runner if any
 	if r, ok := pm.runners[botID]; ok {
 		r.cancel()
 		delete(pm.runners, botID)
@@ -85,7 +83,6 @@ func (pm *ProxyManager) startBot(botID int64) {
 	go pm.pollLoop(ctx, botID)
 }
 
-// stopBot stops polling for a specific bot
 func (pm *ProxyManager) stopBot(botID int64) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
@@ -96,7 +93,6 @@ func (pm *ProxyManager) stopBot(botID int64) {
 	}
 }
 
-// StopAll stops all proxy goroutines
 func (pm *ProxyManager) StopAll() {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
@@ -107,7 +103,6 @@ func (pm *ProxyManager) StopAll() {
 	}
 }
 
-// IsRunning checks if a bot is currently running
 func (pm *ProxyManager) IsRunning(botID int64) bool {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
@@ -115,14 +110,38 @@ func (pm *ProxyManager) IsRunning(botID int64) bool {
 	return ok
 }
 
-// RestartBot restarts proxy for a bot (used after config changes)
+// RestartBot restarts a bot after config changes. Creates/removes managed Bot instance as needed.
 func (pm *ProxyManager) RestartBot(botID int64) error {
-	bot, err := pm.store.GetProxyBot(botID)
+	bot, err := pm.store.GetBotConfig(botID)
 	if err != nil {
 		return err
 	}
+
 	pm.stopBot(botID)
-	if bot.Enabled {
+
+	if bot.Source == "cli" {
+		return nil // CLI bot manages its own polling
+	}
+
+	active := bot.ManageEnabled || bot.ProxyEnabled
+
+	// Create or remove managed Bot instance
+	if bot.ManageEnabled {
+		pm.mu.Lock()
+		_, hasManagedBot := pm.managedBots[botID]
+		pm.mu.Unlock()
+		if !hasManagedBot {
+			managedBot, err := NewBot(bot.Token, pm.store, botID)
+			if err != nil {
+				return fmt.Errorf("failed to create bot instance: %w", err)
+			}
+			pm.RegisterManagedBot(botID, managedBot)
+		}
+	} else {
+		pm.UnregisterManagedBot(botID)
+	}
+
+	if active {
 		pm.startBot(botID)
 	}
 	return nil
@@ -139,8 +158,11 @@ func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
 		default:
 		}
 
-		bot, err := pm.store.GetProxyBot(botID)
-		if err != nil || !bot.Enabled {
+		bot, err := pm.store.GetBotConfig(botID)
+		if err != nil {
+			return
+		}
+		if !bot.ManageEnabled && !bot.ProxyEnabled {
 			return
 		}
 
@@ -151,7 +173,7 @@ func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
 
 		updates, err := pm.getUpdates(ctx, bot.Token, bot.Offset, timeout)
 		if err != nil {
-			pm.store.UpdateProxyBotStatus(botID, fmt.Sprintf("getUpdates error: %v", err), "")
+			pm.store.UpdateBotStatus(botID, fmt.Sprintf("getUpdates error: %v", err), "")
 			log.Printf("Proxy [%s]: getUpdates error: %v", bot.Name, err)
 
 			select {
@@ -177,29 +199,55 @@ func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
 				continue
 			}
 
-			err := pm.forwardUpdate(ctx, bot, update)
-			if err != nil {
-				pm.store.UpdateProxyBotStatus(botID, fmt.Sprintf("forward error: %v", err), "")
-				log.Printf("Proxy [%s]: forward error for update %d: %v", bot.Name, int64(updateID), err)
+			// Proxy: forward to backend
+			if bot.ProxyEnabled && bot.BackendURL != "" {
+				err := pm.forwardUpdate(ctx, bot, update)
+				if err != nil {
+					pm.store.UpdateBotStatus(botID, fmt.Sprintf("forward error: %v", err), "")
+					log.Printf("Proxy [%s]: forward error for update %d: %v", bot.Name, int64(updateID), err)
 
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(retryDelay):
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(retryDelay):
+					}
+					retryDelay = min(retryDelay*2, maxRetryDelay)
+					continue
 				}
-				retryDelay = min(retryDelay*2, maxRetryDelay)
-				continue
+				pm.store.IncrementBotForwarded(botID)
+			}
+
+			// Management: process update for chat/message tracking
+			if bot.ManageEnabled {
+				pm.processForManagement(botID, update)
 			}
 
 			newOffset := int64(updateID) + 1
-			pm.store.UpdateProxyBotOffset(botID, newOffset)
-			pm.store.UpdateProxyBotStatus(botID, "", time.Now().Format(time.RFC3339))
-			pm.store.IncrementProxyBotForwarded(botID)
+			pm.store.UpdateBotOffset(botID, newOffset)
+			pm.store.UpdateBotStatus(botID, "", time.Now().Format(time.RFC3339))
 		}
 	}
 }
 
-// getUpdates calls Telegram getUpdates API
+func (pm *ProxyManager) processForManagement(botID int64, rawUpdate map[string]interface{}) {
+	pm.mu.Lock()
+	bot := pm.managedBots[botID]
+	pm.mu.Unlock()
+	if bot == nil {
+		return
+	}
+
+	data, err := json.Marshal(rawUpdate)
+	if err != nil {
+		return
+	}
+	var update tgbotapi.Update
+	if err := json.Unmarshal(data, &update); err != nil {
+		return
+	}
+	bot.processUpdate(update)
+}
+
 func (pm *ProxyManager) getUpdates(ctx context.Context, token string, offset int64, timeout int) ([]map[string]interface{}, error) {
 	reqBody, _ := json.Marshal(map[string]interface{}{
 		"offset":  offset,
@@ -214,7 +262,6 @@ func (pm *ProxyManager) getUpdates(ctx context.Context, token string, offset int
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	// Use a client with timeout longer than polling timeout
 	client := &http.Client{Timeout: time.Duration(timeout+10) * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -248,8 +295,7 @@ func (pm *ProxyManager) getUpdates(ctx context.Context, token string, offset int
 	return result.Result, nil
 }
 
-// forwardUpdate sends an update to the backend URL as a webhook POST
-func (pm *ProxyManager) forwardUpdate(ctx context.Context, bot *ProxyBot, update map[string]interface{}) error {
+func (pm *ProxyManager) forwardUpdate(ctx context.Context, bot *BotConfig, update map[string]interface{}) error {
 	data, err := json.Marshal(update)
 	if err != nil {
 		return err
@@ -277,14 +323,10 @@ func (pm *ProxyManager) forwardUpdate(ctx context.Context, bot *ProxyBot, update
 		return fmt.Errorf("backend returned %d: %s", resp.StatusCode, string(respBody[:min(200, len(respBody))]))
 	}
 
-	// Handle webhook reply pattern: if backend responds with JSON containing "method",
-	// proxy it to Telegram API
 	pm.handleWebhookReply(bot.Token, respBody)
-
 	return nil
 }
 
-// handleWebhookReply proxies webhook-style replies back to Telegram
 func (pm *ProxyManager) handleWebhookReply(token string, body []byte) {
 	if len(body) == 0 {
 		return
@@ -304,7 +346,6 @@ func (pm *ProxyManager) handleWebhookReply(token string, body []byte) {
 		return
 	}
 
-	// Remove "method" key and forward to Telegram
 	delete(reply, "method")
 	data, err := json.Marshal(reply)
 	if err != nil {
@@ -320,7 +361,6 @@ func (pm *ProxyManager) handleWebhookReply(token string, body []byte) {
 	resp.Body.Close()
 }
 
-// ValidateToken checks if a bot token is valid by calling getMe
 func (pm *ProxyManager) ValidateToken(token string) (string, error) {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/getMe", token)
 	resp, err := pm.client.Get(url)
@@ -345,7 +385,6 @@ func (pm *ProxyManager) ValidateToken(token string) (string, error) {
 	return result.Result.Username, nil
 }
 
-// DeleteWebhook removes webhook for a bot token (required before polling)
 func (pm *ProxyManager) DeleteWebhook(token string) error {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/deleteWebhook", token)
 	resp, err := pm.client.Get(url)
@@ -365,4 +404,11 @@ func (pm *ProxyManager) DeleteWebhook(token string) error {
 		return fmt.Errorf("deleteWebhook failed: %s", result.Description)
 	}
 	return nil
+}
+
+// GetManagedBot returns a managed Bot instance by botID
+func (pm *ProxyManager) GetManagedBot(botID int64) *Bot {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	return pm.managedBots[botID]
 }

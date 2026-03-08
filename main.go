@@ -27,30 +27,41 @@ func main() {
 	}
 	defer store.Close()
 
-	bot, err := NewBot(*token, store)
+	// Start proxy manager (handles all non-CLI bots)
+	proxy := NewProxyManager(store)
+
+	// Register CLI bot in the bots table and get its ID
+	// We need a temporary bot to get the username first
+	cliBot, err := NewBot(*token, store, 0) // temporary botID=0
 	if err != nil {
 		log.Fatalf("Failed to create bot: %v", err)
 	}
 
-	// Determine update reception mode
+	botID, err := store.RegisterCLIBot(*token, cliBot.GetBotInfo())
+	if err != nil {
+		log.Fatalf("Failed to register CLI bot: %v", err)
+	}
+	cliBot.botID = botID // set the real botID
+
+	// Migrate legacy chats (bot_id=0 -> real botID)
+	store.MigrateLegacyChats(botID)
+
+	// Determine update reception mode for CLI bot
 	mode := "management-only"
 	webhookPath := ""
 
 	if *forcePolling {
-		// Explicit polling: remove any webhook and poll
 		mode = "polling"
 		log.Println("Mode: forced long polling (will remove existing webhook)")
 	} else if *webhookURL != "" {
-		// Explicit webhook: set our webhook, accept updates via HTTP
 		mode = "webhook"
 		webhookPath = "/tghook"
-		if err := bot.SetWebhook(*webhookURL); err != nil {
+		if err := cliBot.SetWebhook(*webhookURL); err != nil {
 			log.Fatalf("Failed to set webhook: %v", err)
 		}
 		log.Printf("Mode: webhook at %s", *webhookURL)
 	} else {
-		// Auto-detect: check if webhook is already set
-		status, err := bot.CheckWebhook()
+		status, err := cliBot.CheckWebhook()
 		if err != nil {
 			log.Printf("Warning: could not check webhook status: %v", err)
 			log.Println("Falling back to polling mode")
@@ -70,22 +81,25 @@ func main() {
 
 	switch mode {
 	case "polling":
-		go bot.StartPolling()
+		go cliBot.StartPolling()
 	case "webhook":
 		// webhook handler will be registered with the server
 	case "management-only":
 		log.Println("Bot API calls (send, ban, pin, etc.) will work. Message tracking is disabled.")
 	}
 
-	// Start reverse proxy manager
-	proxy := NewProxyManager(store)
+	// Start proxy manager for non-CLI bots
 	proxy.Start()
 	defer proxy.StopAll()
 
-	server := NewServer(bot, store, proxy)
+	// Create server and register CLI bot
+	server := NewServer(store, proxy)
+	server.RegisterBot(botID, cliBot)
+
 	if mode == "webhook" {
-		server.SetWebhookHandler(webhookPath, bot.WebhookHandler())
+		server.SetWebhookHandler(webhookPath, cliBot.WebhookHandler())
 	}
+
 	if err := server.Start(*addr); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}

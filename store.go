@@ -11,6 +11,24 @@ type Store struct {
 	db *sql.DB
 }
 
+// BotConfig represents a bot in the unified bots table
+type BotConfig struct {
+	ID               int64  `json:"id"`
+	Name             string `json:"name"`
+	Token            string `json:"token"`
+	BotUsername       string `json:"bot_username"`
+	ManageEnabled    bool   `json:"manage_enabled"`
+	ProxyEnabled     bool   `json:"proxy_enabled"`
+	BackendURL       string `json:"backend_url"`
+	SecretToken      string `json:"secret_token"`
+	PollingTimeout   int    `json:"polling_timeout"`
+	Offset           int64  `json:"offset"`
+	LastError        string `json:"last_error,omitempty"`
+	LastActivity     string `json:"last_activity,omitempty"`
+	UpdatesForwarded int64  `json:"updates_forwarded"`
+	Source           string `json:"source"` // "cli" or "web"
+}
+
 type Chat struct {
 	ID          int64  `json:"id"`
 	Type        string `json:"type"`
@@ -56,14 +74,14 @@ type HourlyStat struct {
 }
 
 type AdminLog struct {
-	ID        int64  `json:"id"`
-	ChatID    int64  `json:"chat_id"`
-	Action    string `json:"action"`
-	ActorName string `json:"actor_name"`
-	TargetID  int64  `json:"target_id,omitempty"`
+	ID         int64  `json:"id"`
+	ChatID     int64  `json:"chat_id"`
+	Action     string `json:"action"`
+	ActorName  string `json:"actor_name"`
+	TargetID   int64  `json:"target_id,omitempty"`
 	TargetName string `json:"target_name,omitempty"`
-	Details   string `json:"details,omitempty"`
-	CreatedAt string `json:"created_at"`
+	Details    string `json:"details,omitempty"`
+	CreatedAt  string `json:"created_at"`
 }
 
 type UserTag struct {
@@ -84,17 +102,17 @@ type ChatUser struct {
 }
 
 type AdminInfo struct {
-	UserID           int64  `json:"user_id"`
-	Username         string `json:"username"`
-	Status           string `json:"status"`
-	CustomTitle      string `json:"custom_title"`
-	CanDeleteMessages bool  `json:"can_delete_messages"`
-	CanRestrictMembers bool `json:"can_restrict_members"`
-	CanPromoteMembers bool  `json:"can_promote_members"`
-	CanChangeInfo     bool  `json:"can_change_info"`
-	CanInviteUsers    bool  `json:"can_invite_users"`
-	CanPinMessages    bool  `json:"can_pin_messages"`
-	CanManageChat     bool  `json:"can_manage_chat"`
+	UserID             int64  `json:"user_id"`
+	Username           string `json:"username"`
+	Status             string `json:"status"`
+	CustomTitle        string `json:"custom_title"`
+	CanDeleteMessages  bool   `json:"can_delete_messages"`
+	CanRestrictMembers bool   `json:"can_restrict_members"`
+	CanPromoteMembers  bool   `json:"can_promote_members"`
+	CanChangeInfo      bool   `json:"can_change_info"`
+	CanInviteUsers     bool   `json:"can_invite_users"`
+	CanPinMessages     bool   `json:"can_pin_messages"`
+	CanManageChat      bool   `json:"can_manage_chat"`
 }
 
 func NewStore(path string) (*Store, error) {
@@ -111,17 +129,68 @@ func NewStore(path string) (*Store, error) {
 }
 
 func (s *Store) migrate() error {
+	// Create bots table
 	_, err := s.db.Exec(`
-		CREATE TABLE IF NOT EXISTS chats (
-			id INTEGER PRIMARY KEY,
+		CREATE TABLE IF NOT EXISTS bots (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL DEFAULT '',
+			token TEXT NOT NULL DEFAULT '',
+			bot_username TEXT NOT NULL DEFAULT '',
+			manage_enabled INTEGER NOT NULL DEFAULT 0,
+			proxy_enabled INTEGER NOT NULL DEFAULT 0,
+			backend_url TEXT NOT NULL DEFAULT '',
+			secret_token TEXT NOT NULL DEFAULT '',
+			polling_timeout INTEGER NOT NULL DEFAULT 30,
+			offset_id INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			last_activity TEXT NOT NULL DEFAULT '',
+			updates_forwarded INTEGER NOT NULL DEFAULT 0,
+			source TEXT NOT NULL DEFAULT 'web'
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Migrate proxy_bots -> bots if exists
+	var hasProxyBots int
+	s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='proxy_bots'`).Scan(&hasProxyBots)
+	if hasProxyBots > 0 {
+		s.db.Exec(`INSERT INTO bots (name, token, bot_username, proxy_enabled, backend_url, secret_token, polling_timeout, offset_id, last_error, last_activity, updates_forwarded, source)
+			SELECT name, token, bot_username, enabled, backend_url, secret_token, polling_timeout, offset_id, last_error, last_activity, updates_forwarded, 'web' FROM proxy_bots`)
+		s.db.Exec(`DROP TABLE proxy_bots`)
+	}
+
+	// Migrate chats table to include bot_id
+	var hasBotID int
+	s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('chats') WHERE name='bot_id'`).Scan(&hasBotID)
+	if hasBotID == 0 {
+		var hasOldChats int
+		s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='chats'`).Scan(&hasOldChats)
+		if hasOldChats > 0 {
+			s.db.Exec(`ALTER TABLE chats RENAME TO _chats_old`)
+		}
+		s.db.Exec(`CREATE TABLE IF NOT EXISTS chats (
+			bot_id INTEGER NOT NULL DEFAULT 0,
+			id INTEGER NOT NULL,
 			type TEXT NOT NULL DEFAULT '',
 			title TEXT NOT NULL DEFAULT '',
 			username TEXT NOT NULL DEFAULT '',
 			member_count INTEGER NOT NULL DEFAULT 0,
 			description TEXT NOT NULL DEFAULT '',
 			is_admin INTEGER NOT NULL DEFAULT 0,
-			updated_at TEXT NOT NULL DEFAULT ''
-		);
+			updated_at TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (bot_id, id)
+		)`)
+		if hasOldChats > 0 {
+			s.db.Exec(`INSERT INTO chats (bot_id, id, type, title, username, member_count, description, is_admin, updated_at)
+				SELECT 0, id, type, title, username, member_count, description, is_admin, updated_at FROM _chats_old`)
+			s.db.Exec(`DROP TABLE _chats_old`)
+		}
+	}
+
+	// Create other tables
+	_, err = s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS messages (
 			id INTEGER NOT NULL,
 			chat_id INTEGER NOT NULL,
@@ -165,27 +234,12 @@ func (s *Store) migrate() error {
 
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_user_tags_unique ON user_tags(chat_id, user_id, tag);
 		CREATE INDEX IF NOT EXISTS idx_user_tags_chat ON user_tags(chat_id);
-
-		CREATE TABLE IF NOT EXISTS proxy_bots (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL DEFAULT '',
-			token TEXT NOT NULL DEFAULT '',
-			backend_url TEXT NOT NULL DEFAULT '',
-			secret_token TEXT NOT NULL DEFAULT '',
-			enabled INTEGER NOT NULL DEFAULT 0,
-			polling_timeout INTEGER NOT NULL DEFAULT 30,
-			offset_id INTEGER NOT NULL DEFAULT 0,
-			bot_username TEXT NOT NULL DEFAULT '',
-			last_error TEXT NOT NULL DEFAULT '',
-			last_activity TEXT NOT NULL DEFAULT '',
-			updates_forwarded INTEGER NOT NULL DEFAULT 0
-		);
 	`)
 	if err != nil {
 		return err
 	}
 
-	// Add deleted column if missing (migration)
+	// Add deleted column if missing
 	var colCount int
 	s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name='deleted'`).Scan(&colCount)
 	if colCount == 0 {
@@ -201,23 +255,116 @@ func (s *Store) migrate() error {
 		FROM messages WHERE from_id != 0
 		GROUP BY chat_id, from_id
 	`)
+
+	return nil
+}
+
+// Bot config methods
+
+func (s *Store) RegisterCLIBot(token, username string) (int64, error) {
+	var id int64
+	err := s.db.QueryRow(`SELECT id FROM bots WHERE token=?`, token).Scan(&id)
+	if err == nil {
+		s.db.Exec(`UPDATE bots SET bot_username=?, manage_enabled=1 WHERE id=?`, username, id)
+		return id, nil
+	}
+	res, err := s.db.Exec(`INSERT INTO bots (name, token, bot_username, manage_enabled, source) VALUES (?, ?, ?, 1, 'cli')`,
+		username, token, username)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (s *Store) MigrateLegacyChats(botID int64) {
+	s.db.Exec(`UPDATE chats SET bot_id=? WHERE bot_id=0`, botID)
+}
+
+func (s *Store) AddBotConfig(b BotConfig) (int64, error) {
+	res, err := s.db.Exec(`
+		INSERT INTO bots (name, token, bot_username, manage_enabled, proxy_enabled, backend_url, secret_token, polling_timeout, source)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'web')
+	`, b.Name, b.Token, b.BotUsername, b.ManageEnabled, b.ProxyEnabled, b.BackendURL, b.SecretToken, b.PollingTimeout)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (s *Store) UpdateBotConfig(b BotConfig) error {
+	_, err := s.db.Exec(`
+		UPDATE bots SET name=?, token=?, bot_username=?, manage_enabled=?, proxy_enabled=?, backend_url=?, secret_token=?, polling_timeout=?
+		WHERE id=?
+	`, b.Name, b.Token, b.BotUsername, b.ManageEnabled, b.ProxyEnabled, b.BackendURL, b.SecretToken, b.PollingTimeout, b.ID)
 	return err
 }
 
-func (s *Store) UpsertChat(c Chat) error {
+func (s *Store) DeleteBotConfig(id int64) error {
+	_, err := s.db.Exec(`DELETE FROM bots WHERE id=?`, id)
+	return err
+}
+
+func (s *Store) GetBotConfigs() ([]BotConfig, error) {
+	rows, err := s.db.Query(`SELECT id, name, token, bot_username, manage_enabled, proxy_enabled, backend_url, secret_token, polling_timeout, offset_id, last_error, last_activity, updates_forwarded, source FROM bots ORDER BY source DESC, name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var bots []BotConfig
+	for rows.Next() {
+		var b BotConfig
+		if err := rows.Scan(&b.ID, &b.Name, &b.Token, &b.BotUsername, &b.ManageEnabled, &b.ProxyEnabled, &b.BackendURL, &b.SecretToken, &b.PollingTimeout, &b.Offset, &b.LastError, &b.LastActivity, &b.UpdatesForwarded, &b.Source); err != nil {
+			return nil, err
+		}
+		bots = append(bots, b)
+	}
+	return bots, nil
+}
+
+func (s *Store) GetBotConfig(id int64) (*BotConfig, error) {
+	var b BotConfig
+	err := s.db.QueryRow(`SELECT id, name, token, bot_username, manage_enabled, proxy_enabled, backend_url, secret_token, polling_timeout, offset_id, last_error, last_activity, updates_forwarded, source FROM bots WHERE id=?`, id).
+		Scan(&b.ID, &b.Name, &b.Token, &b.BotUsername, &b.ManageEnabled, &b.ProxyEnabled, &b.BackendURL, &b.SecretToken, &b.PollingTimeout, &b.Offset, &b.LastError, &b.LastActivity, &b.UpdatesForwarded, &b.Source)
+	if err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+func (s *Store) UpdateBotOffset(id int64, offset int64) {
+	s.db.Exec(`UPDATE bots SET offset_id=? WHERE id=?`, offset, id)
+}
+
+func (s *Store) UpdateBotStatus(id int64, lastError string, lastActivity string) {
+	if lastError != "" {
+		s.db.Exec(`UPDATE bots SET last_error=? WHERE id=?`, lastError, id)
+	}
+	if lastActivity != "" {
+		s.db.Exec(`UPDATE bots SET last_activity=?, last_error='' WHERE id=?`, lastActivity, id)
+	}
+}
+
+func (s *Store) IncrementBotForwarded(id int64) {
+	s.db.Exec(`UPDATE bots SET updates_forwarded = updates_forwarded + 1 WHERE id=?`, id)
+}
+
+// Chat methods (now with botID)
+
+func (s *Store) UpsertChat(botID int64, c Chat) error {
 	_, err := s.db.Exec(`
-		INSERT INTO chats (id, type, title, username, member_count, description, is_admin, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
+		INSERT INTO chats (bot_id, id, type, title, username, member_count, description, is_admin, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(bot_id, id) DO UPDATE SET
 			type=excluded.type, title=excluded.title, username=excluded.username,
 			member_count=excluded.member_count, description=excluded.description,
 			is_admin=excluded.is_admin, updated_at=excluded.updated_at
-	`, c.ID, c.Type, c.Title, c.Username, c.MemberCount, c.Description, c.IsAdmin, c.UpdatedAt)
+	`, botID, c.ID, c.Type, c.Title, c.Username, c.MemberCount, c.Description, c.IsAdmin, c.UpdatedAt)
 	return err
 }
 
-func (s *Store) GetChats() ([]Chat, error) {
-	rows, err := s.db.Query(`SELECT id, type, title, username, member_count, description, is_admin, updated_at FROM chats ORDER BY title`)
+func (s *Store) GetChats(botID int64) ([]Chat, error) {
+	rows, err := s.db.Query(`SELECT id, type, title, username, member_count, description, is_admin, updated_at FROM chats WHERE bot_id=? ORDER BY title`, botID)
 	if err != nil {
 		return nil, err
 	}
@@ -233,6 +380,17 @@ func (s *Store) GetChats() ([]Chat, error) {
 	}
 	return chats, nil
 }
+
+func (s *Store) DeleteChat(botID int64, chatID int64) error {
+	_, err := s.db.Exec(`DELETE FROM chats WHERE bot_id=? AND id=?`, botID, chatID)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`DELETE FROM messages WHERE chat_id = ?`, chatID)
+	return err
+}
+
+// Message methods (unchanged - keyed by chat_id which is globally unique)
 
 func (s *Store) SaveMessage(m Message) error {
 	_, err := s.db.Exec(`
@@ -266,22 +424,15 @@ func (s *Store) GetMessages(chatID int64, limit, offset int) ([]Message, error) 
 
 func (s *Store) GetChatStats(chatID int64) (*ChatStats, error) {
 	stats := &ChatStats{ChatID: chatID}
-
-	// Title
 	s.db.QueryRow(`SELECT title FROM chats WHERE id = ?`, chatID).Scan(&stats.Title)
-
-	// Total messages
 	s.db.QueryRow(`SELECT COUNT(*) FROM messages WHERE chat_id = ?`, chatID).Scan(&stats.TotalMessages)
 
-	// Today messages
 	todayStart := time.Now().Truncate(24 * time.Hour).Unix()
 	s.db.QueryRow(`SELECT COUNT(*) FROM messages WHERE chat_id = ? AND date >= ?`, chatID, todayStart).Scan(&stats.TodayMessages)
 
-	// Active users (last 7 days)
 	weekAgo := time.Now().Add(-7 * 24 * time.Hour).Unix()
 	s.db.QueryRow(`SELECT COUNT(DISTINCT from_id) FROM messages WHERE chat_id = ? AND date >= ? AND from_id != 0`, chatID, weekAgo).Scan(&stats.ActiveUsers)
 
-	// Top users
 	rows, err := s.db.Query(`
 		SELECT from_id, from_user, COUNT(*) as cnt
 		FROM messages WHERE chat_id = ? AND from_id != 0
@@ -296,7 +447,6 @@ func (s *Store) GetChatStats(chatID int64) (*ChatStats, error) {
 		}
 	}
 
-	// Hourly distribution (last 7 days)
 	rows2, err := s.db.Query(`
 		SELECT CAST(strftime('%H', date, 'unixepoch', 'localtime') AS INTEGER) as hour, COUNT(*) as cnt
 		FROM messages WHERE chat_id = ? AND date >= ?
@@ -444,7 +594,6 @@ func (s *Store) TrackUser(chatID int64, userID int64, username string) {
 }
 
 func (s *Store) GetChatUsers(chatID int64, search string, limit, offset int) ([]ChatUser, error) {
-	// Merge known_users with message stats via LEFT JOIN
 	q := `
 		SELECT ku.user_id, ku.username,
 			COALESCE(m.cnt, 0) as message_count,
@@ -481,7 +630,6 @@ func (s *Store) GetChatUsers(chatID int64, search string, limit, offset int) ([]
 		users = append(users, u)
 	}
 
-	// Load tags for each user
 	for i := range users {
 		tags, err := s.GetUserTagsByUser(chatID, users[i].UserID)
 		if err == nil {
@@ -493,86 +641,6 @@ func (s *Store) GetChatUsers(chatID int64, search string, limit, offset int) ([]
 	}
 
 	return users, nil
-}
-
-// Proxy bots
-
-func (s *Store) AddProxyBot(b ProxyBot) (int64, error) {
-	res, err := s.db.Exec(`
-		INSERT INTO proxy_bots (name, token, backend_url, secret_token, enabled, polling_timeout, bot_username)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, b.Name, b.Token, b.BackendURL, b.SecretToken, b.Enabled, b.PollingTimeout, b.BotUsername)
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
-}
-
-func (s *Store) UpdateProxyBot(b ProxyBot) error {
-	_, err := s.db.Exec(`
-		UPDATE proxy_bots SET name=?, token=?, backend_url=?, secret_token=?, enabled=?, polling_timeout=?, bot_username=?
-		WHERE id=?
-	`, b.Name, b.Token, b.BackendURL, b.SecretToken, b.Enabled, b.PollingTimeout, b.BotUsername, b.ID)
-	return err
-}
-
-func (s *Store) DeleteProxyBot(id int64) error {
-	_, err := s.db.Exec(`DELETE FROM proxy_bots WHERE id=?`, id)
-	return err
-}
-
-func (s *Store) GetProxyBots() ([]ProxyBot, error) {
-	rows, err := s.db.Query(`SELECT id, name, token, backend_url, secret_token, enabled, polling_timeout, offset_id, bot_username, last_error, last_activity, updates_forwarded FROM proxy_bots ORDER BY name`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var bots []ProxyBot
-	for rows.Next() {
-		var b ProxyBot
-		if err := rows.Scan(&b.ID, &b.Name, &b.Token, &b.BackendURL, &b.SecretToken, &b.Enabled, &b.PollingTimeout, &b.Offset, &b.BotUsername, &b.LastError, &b.LastActivity, &b.UpdatesForwarded); err != nil {
-			return nil, err
-		}
-		bots = append(bots, b)
-	}
-	return bots, nil
-}
-
-func (s *Store) GetProxyBot(id int64) (*ProxyBot, error) {
-	var b ProxyBot
-	err := s.db.QueryRow(`SELECT id, name, token, backend_url, secret_token, enabled, polling_timeout, offset_id, bot_username, last_error, last_activity, updates_forwarded FROM proxy_bots WHERE id=?`, id).
-		Scan(&b.ID, &b.Name, &b.Token, &b.BackendURL, &b.SecretToken, &b.Enabled, &b.PollingTimeout, &b.Offset, &b.BotUsername, &b.LastError, &b.LastActivity, &b.UpdatesForwarded)
-	if err != nil {
-		return nil, err
-	}
-	return &b, nil
-}
-
-func (s *Store) UpdateProxyBotOffset(id int64, offset int64) {
-	s.db.Exec(`UPDATE proxy_bots SET offset_id=? WHERE id=?`, offset, id)
-}
-
-func (s *Store) UpdateProxyBotStatus(id int64, lastError string, lastActivity string) {
-	if lastError != "" {
-		s.db.Exec(`UPDATE proxy_bots SET last_error=? WHERE id=?`, lastError, id)
-	}
-	if lastActivity != "" {
-		s.db.Exec(`UPDATE proxy_bots SET last_activity=?, last_error='' WHERE id=?`, lastActivity, id)
-	}
-}
-
-func (s *Store) IncrementProxyBotForwarded(id int64) {
-	s.db.Exec(`UPDATE proxy_bots SET updates_forwarded = updates_forwarded + 1 WHERE id=?`, id)
-}
-
-func (s *Store) DeleteChat(chatID int64) error {
-	_, err := s.db.Exec(`DELETE FROM chats WHERE id = ?`, chatID)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`DELETE FROM messages WHERE chat_id = ?`, chatID)
-	return err
 }
 
 func (s *Store) Close() error {
