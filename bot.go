@@ -292,8 +292,21 @@ func (b *Bot) RefreshChat(chatID int64) (*Chat, error) {
 func (b *Bot) SendMessage(chatID int64, text string) error {
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "HTML"
-	_, err := b.api.Send(msg)
-	return err
+	sent, err := b.api.Send(msg)
+	if err != nil {
+		return err
+	}
+	// Save the sent message to DB
+	fromUser := "@" + b.api.Self.UserName
+	b.store.SaveMessage(Message{
+		ID:       sent.MessageID,
+		ChatID:   sent.Chat.ID,
+		FromUser: fromUser,
+		FromID:   b.api.Self.ID,
+		Text:     text,
+		Date:     int64(sent.Date),
+	})
+	return nil
 }
 
 func (b *Bot) PinMessage(chatID int64, messageID int) error {

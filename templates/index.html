@@ -697,6 +697,16 @@ function highlight(text, query) {
 async function init() {
   await loadBots();
   setInterval(loadBots, 15000);
+  setInterval(() => {
+    if (!currentChat) return;
+    const activeTab = document.querySelector('.tab.active');
+    if (!activeTab) return;
+    const tab = activeTab.dataset.tab;
+    if (tab === 'messages' && !document.getElementById('searchInput')?.value.trim()) loadMessages();
+    else if (tab === 'stats') loadStats();
+    else if (tab === 'users') loadUsers();
+    else if (tab === 'adminlog') loadAdminLog();
+  }, 5000);
 }
 
 // ===== BOT LIST =====
@@ -952,6 +962,7 @@ async function sendMessage() {
     });
     document.getElementById('sendText').value = '';
     toast('Message transmitted');
+    setTimeout(() => loadMessages(), 500);
   } catch(e) { toast(e.message, 'error'); }
 }
 
