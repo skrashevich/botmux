@@ -81,6 +81,7 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/bots/update", s.handleBotUpdate)
 	mux.HandleFunc("/api/bots/delete", s.handleBotDelete)
 	mux.HandleFunc("/api/bots/validate", s.handleBotValidate)
+	mux.HandleFunc("/api/bots/health", s.handleBotHealth)
 
 	// Chat management (requires bot_id)
 	mux.HandleFunc("/api/chats", s.handleChats)
@@ -285,6 +286,16 @@ func (s *Server) handleBotValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]string{"username": username})
+}
+
+func (s *Server) handleBotHealth(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	status, err := s.proxy.CheckAndStoreHealth(id)
+	if err != nil {
+		writeJSON(w, map[string]interface{}{"status": status, "error": err.Error(), "checked_at": time.Now().Format(time.RFC3339)})
+		return
+	}
+	writeJSON(w, map[string]interface{}{"status": status, "checked_at": time.Now().Format(time.RFC3339)})
 }
 
 // Chat handlers

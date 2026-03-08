@@ -150,6 +150,8 @@ func (pm *ProxyManager) RestartBot(botID int64) error {
 func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
 	retryDelay := time.Second
 	maxRetryDelay := 30 * time.Second
+	lastHealthCheck := time.Time{}
+	healthCheckInterval := 60 * time.Second
 
 	for {
 		select {
@@ -186,6 +188,12 @@ func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
 		}
 
 		retryDelay = time.Second
+
+		// Periodic backend health check for proxy bots
+		if bot.ProxyEnabled && bot.BackendURL != "" && time.Since(lastHealthCheck) >= healthCheckInterval {
+			lastHealthCheck = time.Now()
+			pm.CheckAndStoreHealth(botID)
+		}
 
 		for _, update := range updates {
 			select {
@@ -404,6 +412,51 @@ func (pm *ProxyManager) DeleteWebhook(token string) error {
 		return fmt.Errorf("deleteWebhook failed: %s", result.Description)
 	}
 	return nil
+}
+
+// CheckBackendHealth sends a test POST to the backend URL and returns status
+func (pm *ProxyManager) CheckBackendHealth(backendURL, secretToken string) (string, error) {
+	if backendURL == "" {
+		return "no_url", fmt.Errorf("no backend URL configured")
+	}
+
+	testPayload := []byte(`{"health_check":true}`)
+	req, err := http.NewRequest("POST", backendURL, bytes.NewReader(testPayload))
+	if err != nil {
+		return "error", fmt.Errorf("invalid URL: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if secretToken != "" {
+		req.Header.Set("X-Telegram-Bot-Api-Secret-Token", secretToken)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "unreachable", fmt.Errorf("connection failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+		return fmt.Sprintf("ok:%d", resp.StatusCode), nil
+	}
+	return fmt.Sprintf("error:%d", resp.StatusCode), fmt.Errorf("backend returned %d", resp.StatusCode)
+}
+
+// CheckAndStoreHealth runs a health check and stores the result
+func (pm *ProxyManager) CheckAndStoreHealth(botID int64) (string, error) {
+	bot, err := pm.store.GetBotConfig(botID)
+	if err != nil {
+		return "", err
+	}
+	status, checkErr := pm.CheckBackendHealth(bot.BackendURL, bot.SecretToken)
+	now := time.Now().Format(time.RFC3339)
+	if checkErr != nil {
+		pm.store.UpdateBackendHealth(botID, status+": "+checkErr.Error(), now)
+		return status, checkErr
+	}
+	pm.store.UpdateBackendHealth(botID, status, now)
+	return status, nil
 }
 
 // GetManagedBot returns a managed Bot instance by botID

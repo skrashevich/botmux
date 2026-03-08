@@ -774,6 +774,9 @@ function showBotDetail() {
 
   const actions = [];
   actions.push(`<button class="btn btn-sm btn-primary" onclick="editCurrentBot()">EDIT</button>`);
+  if (b.proxy_enabled && b.backend_url) {
+    actions.push(`<button class="btn btn-sm" onclick="checkBackendHealth()" id="btnCheckHealth">CHECK WEBHOOK</button>`);
+  }
   if (b.source !== 'cli') {
     actions.push(`<button class="btn btn-danger btn-sm" onclick="deleteCurrentBot()">DELETE</button>`);
   }
@@ -788,6 +791,12 @@ function showBotDetail() {
   if (b.proxy_enabled) {
     rows.push(['Backend URL', `<span style="font-family:var(--ff-mono);font-size:11px;word-break:break-all">${esc(b.backend_url)}</span>`]);
     rows.push(['Forwarded', b.updates_forwarded.toLocaleString()]);
+    if (b.backend_status) {
+      const isOk = b.backend_status.startsWith('ok:');
+      const healthColor = isOk ? 'var(--green)' : 'var(--magenta)';
+      const checkedAt = b.backend_checked_at ? b.backend_checked_at.replace('T',' ').substring(0,19) : '';
+      rows.push(['Backend Health', `<span style="color:${healthColor};font-family:var(--ff-mono);font-size:11px">${esc(b.backend_status)}</span>${checkedAt ? `<span style="color:var(--text3);font-size:10px;margin-left:8px">${checkedAt}</span>` : ''}`]);
+    }
   }
   rows.push(['Offset', b.offset]);
   rows.push(['Polling Timeout', b.polling_timeout + 's']);
@@ -1359,6 +1368,23 @@ async function saveBot() {
       showBotDetail();
     }
   } catch(e) { toast(e.message, 'error'); }
+}
+
+async function checkBackendHealth() {
+  const btn = document.getElementById('btnCheckHealth');
+  if (btn) { btn.textContent = 'CHECKING...'; btn.disabled = true; }
+  try {
+    const result = await api(`/api/bots/health?id=${currentBotID}`);
+    if (result.error) {
+      toast(`Backend: ${result.status} — ${result.error}`, 'error');
+    } else {
+      toast(`Backend: ${result.status}`, 'success');
+    }
+    await loadBots();
+    currentBot = allBots.find(b => b.id === currentBotID);
+    if (currentBot) showBotDetail();
+  } catch(e) { toast(e.message, 'error'); }
+  if (btn) { btn.textContent = 'CHECK WEBHOOK'; btn.disabled = false; }
 }
 
 function editCurrentBot() {

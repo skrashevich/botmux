@@ -25,8 +25,10 @@ type BotConfig struct {
 	Offset           int64  `json:"offset"`
 	LastError        string `json:"last_error,omitempty"`
 	LastActivity     string `json:"last_activity,omitempty"`
-	UpdatesForwarded int64  `json:"updates_forwarded"`
-	Source           string `json:"source"` // "cli" or "web"
+	UpdatesForwarded  int64  `json:"updates_forwarded"`
+	Source            string `json:"source"` // "cli" or "web"
+	BackendStatus     string `json:"backend_status"`
+	BackendCheckedAt  string `json:"backend_checked_at"`
 }
 
 type Chat struct {
@@ -248,6 +250,14 @@ func (s *Store) migrate() error {
 		}
 	}
 
+	// Add backend health columns if missing
+	var hasBackendStatus int
+	s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('bots') WHERE name='backend_status'`).Scan(&hasBackendStatus)
+	if hasBackendStatus == 0 {
+		s.db.Exec(`ALTER TABLE bots ADD COLUMN backend_status TEXT NOT NULL DEFAULT ''`)
+		s.db.Exec(`ALTER TABLE bots ADD COLUMN backend_checked_at TEXT NOT NULL DEFAULT ''`)
+	}
+
 	// Backfill known_users from messages
 	s.db.Exec(`
 		INSERT OR IGNORE INTO known_users (chat_id, user_id, username, first_seen)
@@ -305,7 +315,7 @@ func (s *Store) DeleteBotConfig(id int64) error {
 }
 
 func (s *Store) GetBotConfigs() ([]BotConfig, error) {
-	rows, err := s.db.Query(`SELECT id, name, token, bot_username, manage_enabled, proxy_enabled, backend_url, secret_token, polling_timeout, offset_id, last_error, last_activity, updates_forwarded, source FROM bots ORDER BY source DESC, name`)
+	rows, err := s.db.Query(`SELECT id, name, token, bot_username, manage_enabled, proxy_enabled, backend_url, secret_token, polling_timeout, offset_id, last_error, last_activity, updates_forwarded, source, backend_status, backend_checked_at FROM bots ORDER BY source DESC, name`)
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +324,7 @@ func (s *Store) GetBotConfigs() ([]BotConfig, error) {
 	var bots []BotConfig
 	for rows.Next() {
 		var b BotConfig
-		if err := rows.Scan(&b.ID, &b.Name, &b.Token, &b.BotUsername, &b.ManageEnabled, &b.ProxyEnabled, &b.BackendURL, &b.SecretToken, &b.PollingTimeout, &b.Offset, &b.LastError, &b.LastActivity, &b.UpdatesForwarded, &b.Source); err != nil {
+		if err := rows.Scan(&b.ID, &b.Name, &b.Token, &b.BotUsername, &b.ManageEnabled, &b.ProxyEnabled, &b.BackendURL, &b.SecretToken, &b.PollingTimeout, &b.Offset, &b.LastError, &b.LastActivity, &b.UpdatesForwarded, &b.Source, &b.BackendStatus, &b.BackendCheckedAt); err != nil {
 			return nil, err
 		}
 		bots = append(bots, b)
@@ -324,8 +334,8 @@ func (s *Store) GetBotConfigs() ([]BotConfig, error) {
 
 func (s *Store) GetBotConfig(id int64) (*BotConfig, error) {
 	var b BotConfig
-	err := s.db.QueryRow(`SELECT id, name, token, bot_username, manage_enabled, proxy_enabled, backend_url, secret_token, polling_timeout, offset_id, last_error, last_activity, updates_forwarded, source FROM bots WHERE id=?`, id).
-		Scan(&b.ID, &b.Name, &b.Token, &b.BotUsername, &b.ManageEnabled, &b.ProxyEnabled, &b.BackendURL, &b.SecretToken, &b.PollingTimeout, &b.Offset, &b.LastError, &b.LastActivity, &b.UpdatesForwarded, &b.Source)
+	err := s.db.QueryRow(`SELECT id, name, token, bot_username, manage_enabled, proxy_enabled, backend_url, secret_token, polling_timeout, offset_id, last_error, last_activity, updates_forwarded, source, backend_status, backend_checked_at FROM bots WHERE id=?`, id).
+		Scan(&b.ID, &b.Name, &b.Token, &b.BotUsername, &b.ManageEnabled, &b.ProxyEnabled, &b.BackendURL, &b.SecretToken, &b.PollingTimeout, &b.Offset, &b.LastError, &b.LastActivity, &b.UpdatesForwarded, &b.Source, &b.BackendStatus, &b.BackendCheckedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -347,6 +357,10 @@ func (s *Store) UpdateBotStatus(id int64, lastError string, lastActivity string)
 
 func (s *Store) IncrementBotForwarded(id int64) {
 	s.db.Exec(`UPDATE bots SET updates_forwarded = updates_forwarded + 1 WHERE id=?`, id)
+}
+
+func (s *Store) UpdateBackendHealth(id int64, status string, checkedAt string) {
+	s.db.Exec(`UPDATE bots SET backend_status=?, backend_checked_at=? WHERE id=?`, status, checkedAt, id)
 }
 
 // Chat methods (now with botID)
