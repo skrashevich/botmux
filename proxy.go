@@ -8,10 +8,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
+	"strconv"
 	"sync"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tgbotapi "github.com/OvyFlash/telegram-bot-api"
 )
 
 // ProxyManager manages polling and forwarding for all bots
@@ -123,6 +125,12 @@ func (pm *ProxyManager) processUpdate(botID int64, rawUpdate map[string]interfac
 	if bot.ManageEnabled {
 		pm.processForManagement(botID, rawUpdate)
 	}
+
+	// Reverse routing (Source-NAT): check if this is a reply in a routed chat
+	pm.applyReverseRoutes(botID, rawUpdate)
+
+	// Routing: check rules and forward to other bots
+	pm.applyRoutes(botID, rawUpdate)
 
 	pm.store.UpdateBotOffset(botID, int64(updateID)+1)
 	pm.store.UpdateBotStatus(botID, "", time.Now().Format(time.RFC3339))
@@ -409,6 +417,239 @@ func (pm *ProxyManager) processForManagement(botID int64, rawUpdate map[string]i
 		return
 	}
 	bot.processUpdate(update)
+}
+
+// applyRoutes checks routing rules for the source bot and forwards matching updates to target bots
+func (pm *ProxyManager) applyRoutes(sourceBotID int64, rawUpdate map[string]interface{}) {
+	routes, err := pm.store.GetRoutes(sourceBotID)
+	if err != nil {
+		return
+	}
+
+	// Extract message info from raw update
+	var msgText string
+	var fromID int64
+	var chatID int64
+
+	msg, _ := rawUpdate["message"].(map[string]interface{})
+	if msg == nil {
+		msg, _ = rawUpdate["channel_post"].(map[string]interface{})
+	}
+	if msg == nil {
+		return // no message to route
+	}
+
+	if t, ok := msg["text"].(string); ok {
+		msgText = t
+	}
+	if caption, ok := msg["caption"].(string); ok && msgText == "" {
+		msgText = caption
+	}
+	if from, ok := msg["from"].(map[string]interface{}); ok {
+		if id, ok := from["id"].(float64); ok {
+			fromID = int64(id)
+		}
+	}
+	if chat, ok := msg["chat"].(map[string]interface{}); ok {
+		if id, ok := chat["id"].(float64); ok {
+			chatID = int64(id)
+		}
+	}
+
+	for _, route := range routes {
+		if !route.Enabled {
+			continue
+		}
+
+		matched := false
+		switch route.ConditionType {
+		case "text":
+			if msgText != "" && route.ConditionValue != "" {
+				re, err := regexp.Compile("(?i)" + route.ConditionValue)
+				if err != nil {
+					log.Printf("[routing] route id=%d invalid regex %q: %v", route.ID, route.ConditionValue, err)
+					continue
+				}
+				matched = re.MatchString(msgText)
+			}
+		case "user_id":
+			if fromID != 0 {
+				targetUID, _ := strconv.ParseInt(route.ConditionValue, 10, 64)
+				matched = fromID == targetUID
+			}
+		case "chat_id":
+			if chatID != 0 {
+				targetCID, _ := strconv.ParseInt(route.ConditionValue, 10, 64)
+				matched = chatID == targetCID
+			}
+		}
+
+		if !matched {
+			continue
+		}
+
+		log.Printf("[routing] route id=%d MATCHED: %s=%q on bot %d → bot %d",
+			route.ID, route.ConditionType, route.ConditionValue, sourceBotID, route.TargetBotID)
+
+		pm.mu.Lock()
+		targetBot := pm.managedBots[route.TargetBotID]
+		pm.mu.Unlock()
+
+		if targetBot == nil {
+			log.Printf("[routing] route id=%d target bot %d has no managed instance", route.ID, route.TargetBotID)
+			continue
+		}
+
+		destChatID := route.TargetChatID
+		if destChatID == 0 {
+			destChatID = chatID
+		}
+
+		var sourceMsgID int
+		if msgIDFloat, ok := msg["message_id"].(float64); ok {
+			sourceMsgID = int(msgIDFloat)
+		}
+
+		var targetMsgID int
+		switch route.Action {
+		case "forward":
+			if msgText != "" {
+				sentID, err := targetBot.SendMessageGetID(destChatID, msgText)
+				if err != nil {
+					log.Printf("[routing] route id=%d forward FAILED: %v", route.ID, err)
+				} else {
+					targetMsgID = sentID
+					log.Printf("[routing] route id=%d forwarded to chat %d via bot %d (msg %d)", route.ID, destChatID, route.TargetBotID, sentID)
+				}
+			}
+		case "copy":
+			if sourceMsgID != 0 {
+				sentID, err := targetBot.ForwardMessageGetID(destChatID, chatID, sourceMsgID)
+				if err != nil {
+					log.Printf("[routing] route id=%d copy FAILED: %v", route.ID, err)
+				} else {
+					targetMsgID = sentID
+					log.Printf("[routing] route id=%d copied msg %d to chat %d via bot %d (msg %d)", route.ID, sourceMsgID, destChatID, route.TargetBotID, sentID)
+				}
+			}
+		}
+
+		// Save mapping for reverse routing (Source-NAT)
+		if targetMsgID != 0 && sourceMsgID != 0 {
+			pm.store.SaveRouteMapping(RouteMapping{
+				RouteID:      route.ID,
+				SourceBotID:  sourceBotID,
+				SourceChatID: chatID,
+				SourceMsgID:  sourceMsgID,
+				TargetBotID:  route.TargetBotID,
+				TargetChatID: destChatID,
+				TargetMsgID:  targetMsgID,
+				CreatedAt:    time.Now().Format(time.RFC3339),
+			})
+			log.Printf("[routing] saved mapping: bot%d/chat%d/msg%d ↔ bot%d/chat%d/msg%d",
+				sourceBotID, chatID, sourceMsgID, route.TargetBotID, destChatID, targetMsgID)
+		}
+	}
+}
+
+// applyReverseRoutes checks if a message on a target bot is a reply to a routed message,
+// and if so, sends the reply back via the source bot to the original chat (Source-NAT return path)
+func (pm *ProxyManager) applyReverseRoutes(botID int64, rawUpdate map[string]interface{}) {
+	msg, _ := rawUpdate["message"].(map[string]interface{})
+	if msg == nil {
+		return
+	}
+
+	// Get the chat ID for this message
+	var chatID int64
+	if chat, ok := msg["chat"].(map[string]interface{}); ok {
+		if id, ok := chat["id"].(float64); ok {
+			chatID = int64(id)
+		}
+	}
+	if chatID == 0 {
+		return
+	}
+
+	// Get reply info — if it's a reply to a routed message, we do exact matching
+	// If not a reply, check if there's any mapping for this bot+chat (conversation mode)
+	var mapping *RouteMapping
+	var err error
+
+	if replyTo, ok := msg["reply_to_message"].(map[string]interface{}); ok {
+		if replyMsgID, ok := replyTo["message_id"].(float64); ok {
+			mapping, err = pm.store.FindReverseMappingByReply(botID, chatID, int(replyMsgID))
+		}
+	}
+
+	if mapping == nil || err != nil {
+		// Fallback: check if this chat has any active mapping (latest conversation)
+		mapping, err = pm.store.FindReverseMapping(botID, chatID)
+	}
+
+	if mapping == nil || err != nil {
+		return // no reverse route for this message
+	}
+
+	// Don't reverse-route messages sent by the target bot itself (avoid loops)
+	if from, ok := msg["from"].(map[string]interface{}); ok {
+		if isBot, ok := from["is_bot"].(bool); ok && isBot {
+			return
+		}
+	}
+
+	var msgText string
+	if t, ok := msg["text"].(string); ok {
+		msgText = t
+	}
+	if caption, ok := msg["caption"].(string); ok && msgText == "" {
+		msgText = caption
+	}
+	if msgText == "" {
+		return
+	}
+
+	// Send reply back via source bot
+	pm.mu.Lock()
+	sourceBot := pm.managedBots[mapping.SourceBotID]
+	pm.mu.Unlock()
+
+	if sourceBot == nil {
+		log.Printf("[routing-reverse] source bot %d has no managed instance", mapping.SourceBotID)
+		return
+	}
+
+	sentID, sendErr := sourceBot.SendMessageReply(mapping.SourceChatID, msgText, mapping.SourceMsgID)
+	if sendErr != nil {
+		// Fallback: send without reply if original message is too old
+		sentID, sendErr = sourceBot.SendMessageGetID(mapping.SourceChatID, msgText)
+		if sendErr != nil {
+			log.Printf("[routing-reverse] FAILED to send reply via bot %d to chat %d: %v",
+				mapping.SourceBotID, mapping.SourceChatID, sendErr)
+			return
+		}
+	}
+
+	log.Printf("[routing-reverse] bot%d/chat%d → bot%d/chat%d (reply to msg %d, sent msg %d)",
+		botID, chatID, mapping.SourceBotID, mapping.SourceChatID, mapping.SourceMsgID, sentID)
+
+	// Save reverse mapping so the conversation can continue
+	var thisMsgID int
+	if msgIDFloat, ok := msg["message_id"].(float64); ok {
+		thisMsgID = int(msgIDFloat)
+	}
+	if sentID != 0 && thisMsgID != 0 {
+		pm.store.SaveRouteMapping(RouteMapping{
+			RouteID:      mapping.RouteID,
+			SourceBotID:  mapping.SourceBotID,
+			SourceChatID: mapping.SourceChatID,
+			SourceMsgID:  sentID,
+			TargetBotID:  botID,
+			TargetChatID: chatID,
+			TargetMsgID:  thisMsgID,
+			CreatedAt:    time.Now().Format(time.RFC3339),
+		})
+	}
 }
 
 func (pm *ProxyManager) getUpdates(ctx context.Context, token string, offset int64, timeout int) ([]map[string]interface{}, error) {

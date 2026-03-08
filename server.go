@@ -118,6 +118,12 @@ func (s *Server) Start(addr string) error {
 	// Admin log
 	mux.HandleFunc("/api/adminlog", s.handleAdminLog)
 
+	// Routes
+	mux.HandleFunc("/api/routes", s.handleGetRoutes)
+	mux.HandleFunc("/api/routes/add", s.handleAddRoute)
+	mux.HandleFunc("/api/routes/update", s.handleUpdateRoute)
+	mux.HandleFunc("/api/routes/delete", s.handleDeleteRoute)
+
 	// User tags
 	mux.HandleFunc("/api/tags", s.handleGetTags)
 	mux.HandleFunc("/api/tags/add", s.handleAddTag)
@@ -716,6 +722,70 @@ func (s *Server) handleGetUserTags(w http.ResponseWriter, r *http.Request) {
 		tags = []UserTag{}
 	}
 	writeJSON(w, tags)
+}
+
+// Route handlers
+
+func (s *Server) handleGetRoutes(w http.ResponseWriter, r *http.Request) {
+	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
+	routes, err := s.store.GetRoutes(botID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if routes == nil {
+		routes = []Route{}
+	}
+	writeJSON(w, routes)
+}
+
+func (s *Server) handleAddRoute(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	var req Route
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, err)
+		return
+	}
+	req.CreatedAt = time.Now().Format(time.RFC3339)
+	id, err := s.store.AddRoute(req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]interface{}{"status": "ok", "id": id})
+}
+
+func (s *Server) handleUpdateRoute(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	var req Route
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := s.store.UpdateRoute(req); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleDeleteRoute(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	if err := s.store.DeleteRoute(id); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
 }
 
 // resolveBot finds a Bot instance from either registered bots or proxy manager

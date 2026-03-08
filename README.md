@@ -91,6 +91,19 @@ Custom classification system for chat members:
 - Multiple tags per user
 - Tags are per-chat — the same user can have different tags in different chats
 
+### Inter-Bot Routing (Source-NAT)
+- Route messages between bots based on configurable conditions:
+  - **Text match** — regex pattern matching on message text (case-insensitive)
+  - **User ID** — messages from a specific Telegram user
+  - **Chat ID** — all messages from a specific chat/group
+- Two routing actions:
+  - **Forward** — sends message text as a new message via the target bot
+  - **Copy** — forwards the original message (preserving author attribution) via Telegram's `forwardMessage`
+- **Source-NAT return path** — replies to routed messages are automatically sent back through the original source bot to the original chat, maintaining conversational context
+- Bidirectional conversation tracking: each reply creates a new mapping, enabling ongoing cross-bot dialogs
+- Route rules managed per-bot from the web UI with enable/disable toggle
+- Loop protection: bot-originated messages are not reverse-routed
+
 ### Chat Info
 - Chat ID, type, title, username
 - Member count
@@ -228,9 +241,16 @@ gobotmygod/
 Telegram ──getUpdates──> ProxyManager (polling loop per bot)
                             │
                             ├── Management: trackChat() / saveMessage() ──> SQLite
-                            └── Proxy: POST update ──> Backend URL
-                                          │
-                                          └── webhook reply ──> Telegram API
+                            ├── Proxy: POST update ──> Backend URL
+                            │                │
+                            │                └── webhook reply ──> Telegram API
+                            │
+                            ├── Routing: match rules ──> send via Target Bot ──> Telegram
+                            │                │
+                            │                └── save mapping ──> route_mappings (SQLite)
+                            │
+                            └── Reverse Route: check mappings ──> reply via Source Bot ──> Telegram
+                                                                       (Source-NAT return)
 
 Backend ──sendMessage──> /tgapi/ (API proxy) ──> Telegram API
                             │
@@ -251,6 +271,8 @@ SQLite with WAL mode. Tables:
 - **known_users** — users seen in chats
 - **admin_log** — audit trail of actions performed via web UI
 - **user_tags** — custom per-chat user classifications
+- **routes** — inter-bot routing rules (condition type/value, action, target bot/chat)
+- **route_mappings** — Source-NAT tracking of source↔target message pairs for bidirectional routing
 
 The database file is created automatically on first run. Schema migrations run automatically.
 
@@ -325,6 +347,15 @@ All endpoints return JSON. Errors return `{"error": "message"}` with HTTP 500. M
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/stats?chat_id=` | Chat statistics (messages, users, hourly, top contributors) |
+
+### Routes
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/routes?bot_id=` | List routing rules for a bot |
+| POST | `/api/routes/add` | Add route (JSON body: `{source_bot_id, target_bot_id, condition_type, condition_value, action, target_chat_id, enabled, description}`) |
+| POST | `/api/routes/update` | Update route (JSON body with `id`) |
+| POST | `/api/routes/delete?id=` | Delete route |
 
 ### Telegram API Proxy
 

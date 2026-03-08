@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tgbotapi "github.com/OvyFlash/telegram-bot-api"
 )
 
 type Bot struct {
@@ -59,6 +59,13 @@ func (b *Bot) SetWebhook(url string) error {
 
 func (b *Bot) RemoveWebhook() error {
 	_, err := b.api.Request(tgbotapi.DeleteWebhookConfig{})
+	return err
+}
+
+// ForwardMessage forwards a message from one chat to another via Telegram API
+func (b *Bot) ForwardMessage(toChatID, fromChatID int64, messageID int) error {
+	fwd := tgbotapi.NewForward(toChatID, fromChatID, messageID)
+	_, err := b.api.Send(fwd)
 	return err
 }
 
@@ -122,7 +129,7 @@ func formatUsername(user *tgbotapi.User) string {
 }
 
 func (b *Bot) handleMessage(msg *tgbotapi.Message) {
-	b.trackChat(msg.Chat)
+	b.trackChat(&msg.Chat)
 
 	fromUser := ""
 	var fromID int64
@@ -164,7 +171,7 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 }
 
 func (b *Bot) handleChannelPost(msg *tgbotapi.Message) {
-	b.trackChat(msg.Chat)
+	b.trackChat(&msg.Chat)
 
 	fromUser := "Channel"
 	if msg.AuthorSignature != "" {
@@ -206,8 +213,8 @@ func (b *Bot) trackChat(chat *tgbotapi.Chat) {
 
 	me, err := b.api.GetChatMember(tgbotapi.GetChatMemberConfig{
 		ChatConfigWithUser: tgbotapi.ChatConfigWithUser{
-			ChatID: chat.ID,
-			UserID: b.api.Self.ID,
+			ChatConfig: tgbotapi.ChatConfig{ChatID: chat.ID},
+			UserID:     b.api.Self.ID,
 		},
 	})
 	if err == nil {
@@ -256,8 +263,8 @@ func (b *Bot) RefreshChat(chatID int64) (*Chat, error) {
 	isAdmin := false
 	me, err := b.api.GetChatMember(tgbotapi.GetChatMemberConfig{
 		ChatConfigWithUser: tgbotapi.ChatConfigWithUser{
-			ChatID: chatID,
-			UserID: b.api.Self.ID,
+			ChatConfig: tgbotapi.ChatConfig{ChatID: chatID},
+			UserID:     b.api.Self.ID,
 		},
 	})
 	if err == nil {
@@ -309,14 +316,60 @@ func (b *Bot) SendMessage(chatID int64, text string) error {
 	return nil
 }
 
+// SendMessageGetID sends a message and returns the sent message ID
+func (b *Bot) SendMessageGetID(chatID int64, text string) (int, error) {
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "HTML"
+	sent, err := b.api.Send(msg)
+	if err != nil {
+		return 0, err
+	}
+	fromUser := "@" + b.api.Self.UserName
+	b.store.SaveMessage(Message{
+		ID: sent.MessageID, ChatID: sent.Chat.ID,
+		FromUser: fromUser, FromID: b.api.Self.ID,
+		Text: text, Date: int64(sent.Date),
+	})
+	return sent.MessageID, nil
+}
+
+// SendMessageReply sends a message as a reply to a specific message
+func (b *Bot) SendMessageReply(chatID int64, text string, replyToMsgID int) (int, error) {
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "HTML"
+	msg.ReplyParameters.MessageID = replyToMsgID
+	sent, err := b.api.Send(msg)
+	if err != nil {
+		return 0, err
+	}
+	fromUser := "@" + b.api.Self.UserName
+	b.store.SaveMessage(Message{
+		ID: sent.MessageID, ChatID: sent.Chat.ID,
+		FromUser: fromUser, FromID: b.api.Self.ID,
+		Text: text, Date: int64(sent.Date),
+		ReplyToID: replyToMsgID,
+	})
+	return sent.MessageID, nil
+}
+
+// ForwardMessageGetID forwards a message and returns the new message ID
+func (b *Bot) ForwardMessageGetID(toChatID, fromChatID int64, messageID int) (int, error) {
+	fwd := tgbotapi.NewForward(toChatID, fromChatID, messageID)
+	sent, err := b.api.Send(fwd)
+	if err != nil {
+		return 0, err
+	}
+	return sent.MessageID, nil
+}
+
 func (b *Bot) PinMessage(chatID int64, messageID int) error {
-	pin := tgbotapi.PinChatMessageConfig{ChatID: chatID, MessageID: messageID}
+	pin := tgbotapi.PinChatMessageConfig{BaseChatMessage: tgbotapi.BaseChatMessage{ChatConfig: tgbotapi.ChatConfig{ChatID: chatID}, MessageID: messageID}}
 	_, err := b.api.Request(pin)
 	return err
 }
 
 func (b *Bot) UnpinMessage(chatID int64, messageID int) error {
-	unpin := tgbotapi.UnpinChatMessageConfig{ChatID: chatID, MessageID: messageID}
+	unpin := tgbotapi.UnpinChatMessageConfig{BaseChatMessage: tgbotapi.BaseChatMessage{ChatConfig: tgbotapi.ChatConfig{ChatID: chatID}, MessageID: messageID}}
 	_, err := b.api.Request(unpin)
 	return err
 }
@@ -329,7 +382,7 @@ func (b *Bot) DeleteMessage(chatID int64, messageID int) error {
 
 func (b *Bot) BanUser(chatID int64, userID int64) error {
 	ban := tgbotapi.BanChatMemberConfig{
-		ChatMemberConfig: tgbotapi.ChatMemberConfig{ChatID: chatID, UserID: userID},
+		ChatMemberConfig: tgbotapi.ChatMemberConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: chatID}, UserID: userID},
 	}
 	_, err := b.api.Request(ban)
 	return err
@@ -337,7 +390,7 @@ func (b *Bot) BanUser(chatID int64, userID int64) error {
 
 func (b *Bot) UnbanUser(chatID int64, userID int64) error {
 	unban := tgbotapi.UnbanChatMemberConfig{
-		ChatMemberConfig: tgbotapi.ChatMemberConfig{ChatID: chatID, UserID: userID},
+		ChatMemberConfig: tgbotapi.ChatMemberConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: chatID}, UserID: userID},
 		OnlyIfBanned:     true,
 	}
 	_, err := b.api.Request(unban)
@@ -401,7 +454,7 @@ func (b *Bot) GetAdmins(chatID int64) ([]AdminInfo, error) {
 
 func (b *Bot) PromoteAdmin(chatID int64, userID int64, perms AdminInfo) error {
 	promo := tgbotapi.PromoteChatMemberConfig{
-		ChatMemberConfig: tgbotapi.ChatMemberConfig{ChatID: chatID, UserID: userID},
+		ChatMemberConfig: tgbotapi.ChatMemberConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: chatID}, UserID: userID},
 		CanDeleteMessages:  perms.CanDeleteMessages,
 		CanRestrictMembers: perms.CanRestrictMembers,
 		CanPromoteMembers:  perms.CanPromoteMembers,
@@ -416,7 +469,7 @@ func (b *Bot) PromoteAdmin(chatID int64, userID int64, perms AdminInfo) error {
 
 func (b *Bot) DemoteAdmin(chatID int64, userID int64) error {
 	promo := tgbotapi.PromoteChatMemberConfig{
-		ChatMemberConfig: tgbotapi.ChatMemberConfig{ChatID: chatID, UserID: userID},
+		ChatMemberConfig: tgbotapi.ChatMemberConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: chatID}, UserID: userID},
 	}
 	_, err := b.api.Request(promo)
 	return err
@@ -424,7 +477,7 @@ func (b *Bot) DemoteAdmin(chatID int64, userID int64) error {
 
 func (b *Bot) SetAdminTitle(chatID int64, userID int64, title string) error {
 	cfg := tgbotapi.SetChatAdministratorCustomTitle{
-		ChatMemberConfig: tgbotapi.ChatMemberConfig{ChatID: chatID, UserID: userID},
+		ChatMemberConfig: tgbotapi.ChatMemberConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: chatID}, UserID: userID},
 		CustomTitle:      title,
 	}
 	_, err := b.api.Request(cfg)

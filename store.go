@@ -103,6 +103,33 @@ type ChatUser struct {
 	Tags         []UserTag `json:"tags"`
 }
 
+// RouteMapping tracks source↔target message pairs for reverse routing (Source-NAT)
+type RouteMapping struct {
+	ID            int64 `json:"id"`
+	RouteID       int64 `json:"route_id"`
+	SourceBotID   int64 `json:"source_bot_id"`
+	SourceChatID  int64 `json:"source_chat_id"`
+	SourceMsgID   int   `json:"source_msg_id"`
+	TargetBotID   int64 `json:"target_bot_id"`
+	TargetChatID  int64 `json:"target_chat_id"`
+	TargetMsgID   int   `json:"target_msg_id"`
+	CreatedAt     string `json:"created_at"`
+}
+
+// Route defines a routing rule: updates matching conditions on source bot get forwarded to target bot
+type Route struct {
+	ID           int64  `json:"id"`
+	SourceBotID  int64  `json:"source_bot_id"`
+	TargetBotID  int64  `json:"target_bot_id"`
+	ConditionType string `json:"condition_type"` // "text", "user_id", "chat_id"
+	ConditionValue string `json:"condition_value"` // regex pattern for text, ID for user/chat
+	Action       string `json:"action"`          // "forward" (send via target bot) or "copy" (proxy raw update)
+	TargetChatID int64  `json:"target_chat_id"`  // chat to forward/copy to (0 = same chat)
+	Enabled      bool   `json:"enabled"`
+	Description  string `json:"description"`
+	CreatedAt    string `json:"created_at"`
+}
+
 type AdminInfo struct {
 	UserID             int64  `json:"user_id"`
 	Username           string `json:"username"`
@@ -256,6 +283,40 @@ func (s *Store) migrate() error {
 	if hasBackendStatus == 0 {
 		s.db.Exec(`ALTER TABLE bots ADD COLUMN backend_status TEXT NOT NULL DEFAULT ''`)
 		s.db.Exec(`ALTER TABLE bots ADD COLUMN backend_checked_at TEXT NOT NULL DEFAULT ''`)
+	}
+
+	// Create routes table
+	_, err = s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS routes (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			source_bot_id INTEGER NOT NULL,
+			target_bot_id INTEGER NOT NULL,
+			condition_type TEXT NOT NULL DEFAULT 'text',
+			condition_value TEXT NOT NULL DEFAULT '',
+			action TEXT NOT NULL DEFAULT 'forward',
+			target_chat_id INTEGER NOT NULL DEFAULT 0,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			description TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL DEFAULT ''
+		);
+		CREATE INDEX IF NOT EXISTS idx_routes_source ON routes(source_bot_id);
+
+		CREATE TABLE IF NOT EXISTS route_mappings (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			route_id INTEGER NOT NULL,
+			source_bot_id INTEGER NOT NULL,
+			source_chat_id INTEGER NOT NULL,
+			source_msg_id INTEGER NOT NULL,
+			target_bot_id INTEGER NOT NULL,
+			target_chat_id INTEGER NOT NULL,
+			target_msg_id INTEGER NOT NULL,
+			created_at TEXT NOT NULL DEFAULT ''
+		);
+		CREATE INDEX IF NOT EXISTS idx_route_mappings_target ON route_mappings(target_bot_id, target_chat_id);
+		CREATE INDEX IF NOT EXISTS idx_route_mappings_source ON route_mappings(source_bot_id, source_chat_id, source_msg_id);
+	`)
+	if err != nil {
+		return err
 	}
 
 	// Backfill known_users from messages
@@ -655,6 +716,121 @@ func (s *Store) GetChatUsers(chatID int64, search string, limit, offset int) ([]
 	}
 
 	return users, nil
+}
+
+// Route methods
+
+func (s *Store) AddRoute(r Route) (int64, error) {
+	res, err := s.db.Exec(`
+		INSERT INTO routes (source_bot_id, target_bot_id, condition_type, condition_value, action, target_chat_id, enabled, description, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, r.SourceBotID, r.TargetBotID, r.ConditionType, r.ConditionValue, r.Action, r.TargetChatID, r.Enabled, r.Description, r.CreatedAt)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (s *Store) UpdateRoute(r Route) error {
+	_, err := s.db.Exec(`
+		UPDATE routes SET target_bot_id=?, condition_type=?, condition_value=?, action=?, target_chat_id=?, enabled=?, description=?
+		WHERE id=?
+	`, r.TargetBotID, r.ConditionType, r.ConditionValue, r.Action, r.TargetChatID, r.Enabled, r.Description, r.ID)
+	return err
+}
+
+func (s *Store) DeleteRoute(id int64) error {
+	_, err := s.db.Exec(`DELETE FROM routes WHERE id=?`, id)
+	return err
+}
+
+func (s *Store) GetRoutes(sourceBotID int64) ([]Route, error) {
+	rows, err := s.db.Query(`
+		SELECT id, source_bot_id, target_bot_id, condition_type, condition_value, action, target_chat_id, enabled, description, created_at
+		FROM routes WHERE source_bot_id=? ORDER BY id
+	`, sourceBotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var routes []Route
+	for rows.Next() {
+		var r Route
+		if err := rows.Scan(&r.ID, &r.SourceBotID, &r.TargetBotID, &r.ConditionType, &r.ConditionValue, &r.Action, &r.TargetChatID, &r.Enabled, &r.Description, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		routes = append(routes, r)
+	}
+	return routes, nil
+}
+
+func (s *Store) GetAllEnabledRoutes() ([]Route, error) {
+	rows, err := s.db.Query(`
+		SELECT id, source_bot_id, target_bot_id, condition_type, condition_value, action, target_chat_id, enabled, description, created_at
+		FROM routes WHERE enabled=1 ORDER BY source_bot_id, id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var routes []Route
+	for rows.Next() {
+		var r Route
+		if err := rows.Scan(&r.ID, &r.SourceBotID, &r.TargetBotID, &r.ConditionType, &r.ConditionValue, &r.Action, &r.TargetChatID, &r.Enabled, &r.Description, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		routes = append(routes, r)
+	}
+	return routes, nil
+}
+
+// Route mapping methods (Source-NAT tracking)
+
+func (s *Store) SaveRouteMapping(m RouteMapping) (int64, error) {
+	res, err := s.db.Exec(`
+		INSERT INTO route_mappings (route_id, source_bot_id, source_chat_id, source_msg_id, target_bot_id, target_chat_id, target_msg_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, m.RouteID, m.SourceBotID, m.SourceChatID, m.SourceMsgID, m.TargetBotID, m.TargetChatID, m.TargetMsgID, m.CreatedAt)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// FindReverseMapping looks up a mapping by target bot+chat to find the source bot+chat for reverse routing.
+// It finds the most recent mapping for this target bot+chat combination.
+func (s *Store) FindReverseMapping(targetBotID, targetChatID int64) (*RouteMapping, error) {
+	var m RouteMapping
+	err := s.db.QueryRow(`
+		SELECT id, route_id, source_bot_id, source_chat_id, source_msg_id, target_bot_id, target_chat_id, target_msg_id, created_at
+		FROM route_mappings WHERE target_bot_id=? AND target_chat_id=?
+		ORDER BY id DESC LIMIT 1
+	`, targetBotID, targetChatID).Scan(&m.ID, &m.RouteID, &m.SourceBotID, &m.SourceChatID, &m.SourceMsgID, &m.TargetBotID, &m.TargetChatID, &m.TargetMsgID, &m.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+// FindReverseMappingByReply finds a mapping where the target message matches the reply_to_message_id
+func (s *Store) FindReverseMappingByReply(targetBotID, targetChatID int64, targetMsgID int) (*RouteMapping, error) {
+	var m RouteMapping
+	err := s.db.QueryRow(`
+		SELECT id, route_id, source_bot_id, source_chat_id, source_msg_id, target_bot_id, target_chat_id, target_msg_id, created_at
+		FROM route_mappings WHERE target_bot_id=? AND target_chat_id=? AND target_msg_id=?
+		ORDER BY id DESC LIMIT 1
+	`, targetBotID, targetChatID, targetMsgID).Scan(&m.ID, &m.RouteID, &m.SourceBotID, &m.SourceChatID, &m.SourceMsgID, &m.TargetBotID, &m.TargetChatID, &m.TargetMsgID, &m.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+// CleanOldRouteMappings removes mappings older than the given duration
+func (s *Store) CleanOldRouteMappings(olderThan string) {
+	s.db.Exec(`DELETE FROM route_mappings WHERE created_at < ?`, olderThan)
 }
 
 func (s *Store) Close() error {

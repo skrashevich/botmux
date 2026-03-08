@@ -454,6 +454,13 @@ body::before {
         <div class="panel-title">Bot Configuration</div>
         <div class="bot-detail-grid" id="botDetailGrid"></div>
       </div>
+      <div class="panel" style="margin-top:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <div class="panel-title" style="margin:0; border:0; padding:0">Routing Rules</div>
+          <button class="btn btn-primary btn-sm" onclick="showRouteModal()">+ ADD ROUTE</button>
+        </div>
+        <div id="routesList" style="font-family:var(--ff-mono);font-size:12px;color:var(--text3)">No routes configured</div>
+      </div>
     </div>
   </div>
 
@@ -651,6 +658,51 @@ body::before {
   </div>
 </div>
 
+<!-- Route Modal -->
+<div id="routeModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeRouteModal()">
+  <div class="modal" style="max-width:500px">
+    <h3 id="routeModalTitle">Add Routing Rule</h3>
+    <input type="hidden" id="routeEditID">
+    <div class="modal-field">
+      <label>Condition Type</label>
+      <select id="routeCondType" style="width:100%;padding:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:3px;font-family:var(--ff-mono);font-size:12px">
+        <option value="text">Text (regex)</option>
+        <option value="user_id">User ID</option>
+        <option value="chat_id">Chat ID</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label>Condition Value</label>
+      <input type="text" id="routeCondValue" placeholder="regex pattern or ID...">
+    </div>
+    <div class="modal-field">
+      <label>Target Bot</label>
+      <select id="routeTargetBot" style="width:100%;padding:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:3px;font-family:var(--ff-mono);font-size:12px">
+      </select>
+    </div>
+    <div class="modal-field">
+      <label>Action</label>
+      <select id="routeAction" style="width:100%;padding:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:3px;font-family:var(--ff-mono);font-size:12px">
+        <option value="forward">Forward (send text via target bot)</option>
+        <option value="copy">Copy (forward original message)</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label>Target Chat ID (0 = same chat)</label>
+      <input type="number" id="routeTargetChat" value="0" placeholder="0">
+    </div>
+    <div class="modal-field">
+      <label>Description</label>
+      <input type="text" id="routeDescription" placeholder="optional note...">
+    </div>
+    <label class="modal-perm" style="margin:10px 0"><input type="checkbox" id="routeEnabled" checked> Enabled</label>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeRouteModal()">CANCEL</button>
+      <button class="btn btn-primary" onclick="saveRoute()">SAVE</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let currentBotID = null;
 let currentBot = null;
@@ -816,6 +868,127 @@ function showBotDetail() {
   document.getElementById('botDetailGrid').innerHTML = rows.map(([k,v]) =>
     `<div class="info-label">${k}</div><div>${v}</div>`
   ).join('');
+
+  loadRoutes();
+}
+
+// ===== ROUTES =====
+
+async function loadRoutes() {
+  if (!currentBotID) return;
+  try {
+    const routes = await api(`/api/routes?bot_id=${currentBotID}`);
+    renderRoutes(routes);
+  } catch(e) { console.error(e); }
+}
+
+function renderRoutes(routes) {
+  const el = document.getElementById('routesList');
+  if (!routes || routes.length === 0) {
+    el.innerHTML = '<div style="text-align:center;color:var(--text3);padding:14px;font-family:var(--ff-mono);font-size:11px">No routing rules configured</div>';
+    return;
+  }
+  el.innerHTML = routes.map(r => {
+    const targetBot = allBots.find(b => b.id === r.target_bot_id);
+    const targetName = targetBot ? (targetBot.name || '@' + targetBot.bot_username) : `Bot #${r.target_bot_id}`;
+    const condLabel = {text: 'Text', user_id: 'User ID', chat_id: 'Chat ID'}[r.condition_type] || r.condition_type;
+    const actionLabel = r.action === 'copy' ? 'COPY' : 'FWD';
+    const enabledClass = r.enabled ? 'var(--green)' : 'var(--text3)';
+    const statusDot = r.enabled ? 'status-running' : 'status-stopped';
+    return `
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-left:2px solid ${r.enabled ? 'var(--cyan-dim)' : 'var(--border)'};margin-bottom:4px;background:var(--surface2);border-radius:0 3px 3px 0">
+        <span class="status-dot ${statusDot}"></span>
+        <div style="flex:1;min-width:0">
+          <div style="color:var(--text);font-size:12px">
+            <span class="badge badge-proxy" style="font-size:8px;padding:0 4px">${actionLabel}</span>
+            <span style="color:var(--cyan)">${esc(condLabel)}</span>:
+            <span style="color:var(--amber);word-break:break-all">${esc(r.condition_value)}</span>
+            → <span style="color:var(--green)">${esc(targetName)}</span>
+            ${r.target_chat_id ? `<span style="color:var(--text2)"> (chat: ${r.target_chat_id})</span>` : ''}
+          </div>
+          ${r.description ? `<div style="color:var(--text3);font-size:10px;margin-top:2px">${esc(r.description)}</div>` : ''}
+        </div>
+        <button class="btn btn-sm" onclick="editRoute(${r.id})">EDIT</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteRoute(${r.id})">DEL</button>
+      </div>`;
+  }).join('');
+}
+
+let routesCache = [];
+
+function showRouteModal(route) {
+  document.getElementById('routeModal').style.display = 'flex';
+  const sel = document.getElementById('routeTargetBot');
+  sel.innerHTML = allBots.filter(b => b.id !== currentBotID).map(b =>
+    `<option value="${b.id}" ${route && route.target_bot_id === b.id ? 'selected' : ''}>${esc(b.name || '@' + b.bot_username)}</option>`
+  ).join('');
+  if (!route) {
+    document.getElementById('routeModalTitle').textContent = 'Add Routing Rule';
+    document.getElementById('routeEditID').value = '';
+    document.getElementById('routeCondType').value = 'text';
+    document.getElementById('routeCondValue').value = '';
+    document.getElementById('routeAction').value = 'forward';
+    document.getElementById('routeTargetChat').value = '0';
+    document.getElementById('routeDescription').value = '';
+    document.getElementById('routeEnabled').checked = true;
+  } else {
+    document.getElementById('routeModalTitle').textContent = 'Edit Routing Rule';
+    document.getElementById('routeEditID').value = route.id;
+    document.getElementById('routeCondType').value = route.condition_type;
+    document.getElementById('routeCondValue').value = route.condition_value;
+    document.getElementById('routeAction').value = route.action;
+    document.getElementById('routeTargetChat').value = route.target_chat_id || '0';
+    document.getElementById('routeDescription').value = route.description || '';
+    document.getElementById('routeEnabled').checked = route.enabled;
+  }
+}
+
+function closeRouteModal() {
+  document.getElementById('routeModal').style.display = 'none';
+}
+
+async function editRoute(id) {
+  try {
+    const routes = await api(`/api/routes?bot_id=${currentBotID}`);
+    const route = routes.find(r => r.id === id);
+    if (route) showRouteModal(route);
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function saveRoute() {
+  const editID = document.getElementById('routeEditID').value;
+  const data = {
+    source_bot_id: currentBotID,
+    target_bot_id: parseInt(document.getElementById('routeTargetBot').value),
+    condition_type: document.getElementById('routeCondType').value,
+    condition_value: document.getElementById('routeCondValue').value,
+    action: document.getElementById('routeAction').value,
+    target_chat_id: parseInt(document.getElementById('routeTargetChat').value) || 0,
+    enabled: document.getElementById('routeEnabled').checked,
+    description: document.getElementById('routeDescription').value,
+  };
+  if (!data.condition_value) { toast('Condition value required', 'error'); return; }
+  if (!data.target_bot_id) { toast('Select target bot', 'error'); return; }
+  try {
+    if (editID) {
+      data.id = parseInt(editID);
+      await api('/api/routes/update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+    } else {
+      await api('/api/routes/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+    }
+    closeRouteModal();
+    toast('Route saved');
+    loadRoutes();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteRoute(id) {
+  if (!confirm('Delete this routing rule?')) return;
+  try {
+    await api(`/api/routes/delete?id=${id}`, { method: 'POST' });
+    toast('Route deleted');
+    loadRoutes();
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 // ===== CHAT LIST =====

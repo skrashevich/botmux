@@ -25,7 +25,7 @@ No tests, no linter configured. Single `go build` produces the binary.
 Monolithic Go app (all `package main`), 5 source files + 1 embedded SPA template:
 
 - **main.go** — Entry point. Token is optional — if provided, registers CLI bot; otherwise uses bots from DB. Starts ProxyManager for all bots, launches HTTP server.
-- **bot.go** — `Bot` struct wrapping `go-telegram-bot-api/v5`. All Telegram API calls (send, ban, pin, admin management). `processUpdate()` dispatches to message/chat/member handlers.
+- **bot.go** — `Bot` struct wrapping `OvyFlash/telegram-bot-api`. All Telegram API calls (send, ban, pin, admin management). `processUpdate()` dispatches to message/chat/member handlers.
 - **proxy.go** — `ProxyManager` manages ALL bots uniformly (no CLI vs web distinction). Runs independent `pollLoop` per bot with raw JSON `getUpdates`. Dual-mode per bot: forwards updates to backend URL (proxy) and/or processes them for chat tracking (management). `WebhookHandler()` for bots in webhook mode. Creates managed Bot instances automatically at Start(). Periodic backend health checks every 60s.
 - **server.go** — HTTP server with `embed.FS` for SPA. REST API for all bot/chat/message/admin operations. Telegram API proxy at `/tgapi/` captures outgoing bot messages. Multi-bot: resolves bot instances via `getBotFromRequest()` / `resolveBot()`.
 - **store.go** — SQLite with WAL mode. All data models and DB operations. Auto-migrates schema on startup.
@@ -47,7 +47,7 @@ Monolithic Go app (all `package main`), 5 source files + 1 embedded SPA template
 
 ## Dependencies
 
-- `github.com/go-telegram-bot-api/telegram-bot-api/v5` — Telegram Bot API
+- `github.com/OvyFlash/telegram-bot-api` — Telegram Bot API (actively maintained fork)
 - `github.com/mattn/go-sqlite3` — SQLite driver (CGO required)
 
 ## Language
