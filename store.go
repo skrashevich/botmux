@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 type Store struct {
@@ -145,7 +145,7 @@ type AdminInfo struct {
 }
 
 func NewStore(path string) (*Store, error) {
-	db, err := sql.Open("sqlite3", path+"?_journal_mode=WAL")
+	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL")
 	if err != nil {
 		return nil, err
 	}

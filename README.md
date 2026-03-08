@@ -114,7 +114,6 @@ Custom classification system for chat members:
 ## Requirements
 
 - Go 1.21+
-- CGO enabled (required by SQLite driver)
 - A Telegram bot token (create via [@BotFather](https://t.me/BotFather))
 
 ## Installation

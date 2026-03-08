@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Run
 
 ```bash
-# Build (requires CGO for SQLite)
-CGO_ENABLED=1 go build -o gobotmygod .
+# Build (pure Go, no CGO required)
+go build -o gobotmygod .
 
 # Run with token (registers CLI bot)
 ./gobotmygod -token "BOT_TOKEN"
@@ -48,7 +48,7 @@ Monolithic Go app (all `package main`), 5 source files + 1 embedded SPA template
 ## Dependencies
 
 - `github.com/OvyFlash/telegram-bot-api` — Telegram Bot API (actively maintained fork)
-- `github.com/mattn/go-sqlite3` — SQLite driver (CGO required)
+- `modernc.org/sqlite` — SQLite driver (pure Go, no CGO)
 
 ## Language
 
