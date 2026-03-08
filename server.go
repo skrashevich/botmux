@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -864,7 +866,7 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 
 	// Capture sent messages from the response
 	if resp.StatusCode == 200 {
-		s.captureSentMessage(botToken, method, respBody)
+		s.captureSentMessage(botToken, method, reqBody, r.Header.Get("Content-Type"), respBody)
 	}
 }
 
@@ -957,11 +959,23 @@ var sendMethods = map[string]bool{
 	"sendPoll":       true,
 	"sendDice":       true,
 	"forwardMessage": true,
-	"copyMessage":    true,
 	"editMessageText": true,
 }
 
-func (s *Server) captureSentMessage(token, method string, respBody []byte) {
+type telegramRequestParams struct {
+	ChatID        int64
+	FromChatID    int64
+	MessageID     int
+	Caption       string
+	RemoveCaption bool
+}
+
+func (s *Server) captureSentMessage(token, method string, reqBody []byte, contentType string, respBody []byte) {
+	if method == "copyMessage" {
+		s.captureCopiedMessage(token, reqBody, contentType, respBody)
+		return
+	}
+
 	if !sendMethods[method] {
 		return
 	}
@@ -1065,6 +1079,55 @@ func (s *Server) captureSentMessage(token, method string, respBody []byte) {
 	}
 }
 
+func (s *Server) captureCopiedMessage(token string, reqBody []byte, contentType string, respBody []byte) {
+	var resp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			MessageID int `json:"message_id"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(respBody, &resp); err != nil || !resp.OK || resp.Result.MessageID == 0 {
+		return
+	}
+
+	params, ok := parseTelegramRequestParams(reqBody, contentType)
+	if !ok || params.ChatID == 0 || params.FromChatID == 0 || params.MessageID == 0 {
+		return
+	}
+
+	sourceMsg, err := s.store.GetMessage(params.FromChatID, params.MessageID)
+	if err != nil {
+		return
+	}
+
+	text := sourceMsg.Text
+	if params.RemoveCaption {
+		text = ""
+	}
+	if params.Caption != "" {
+		text = params.Caption
+	}
+
+	fromUser, fromID := s.findBotSenderByToken(token)
+	msg := Message{
+		ID:        resp.Result.MessageID,
+		ChatID:    params.ChatID,
+		FromUser:  fromUser,
+		FromID:    fromID,
+		Text:      text,
+		Date:      time.Now().Unix(),
+		MediaType: sourceMsg.MediaType,
+		FileID:    sourceMsg.FileID,
+	}
+	if err := s.store.SaveMessage(msg); err != nil {
+		log.Printf("[tgapi-proxy] Failed to save copied message: %v", err)
+		return
+	}
+
+	log.Printf("[tgapi-proxy] Captured copyMessage: msg_id=%d chat_id=%d source_chat_id=%d source_msg_id=%d text=%q",
+		resp.Result.MessageID, params.ChatID, params.FromChatID, params.MessageID, truncateStr(text, 80))
+}
+
 func (s *Server) findBotByToken(token string) *BotConfig {
 	bots, err := s.store.GetBotConfigs()
 	if err != nil {
@@ -1076,6 +1139,116 @@ func (s *Server) findBotByToken(token string) *BotConfig {
 		}
 	}
 	return nil
+}
+
+func (s *Server) findBotSenderByToken(token string) (string, int64) {
+	botCfg := s.findBotByToken(token)
+	if botCfg == nil {
+		return "", 0
+	}
+
+	if s.proxy != nil {
+		if bot := s.resolveBot(botCfg.ID); bot != nil {
+			if bot.api.Self.UserName != "" {
+				return "@" + bot.api.Self.UserName, bot.api.Self.ID
+			}
+			return bot.GetBotName(), bot.api.Self.ID
+		}
+	}
+
+	if botCfg.BotUsername != "" {
+		return "@" + botCfg.BotUsername, 0
+	}
+	return botCfg.Name, 0
+}
+
+func parseTelegramRequestParams(body []byte, contentType string) (telegramRequestParams, bool) {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mediaType = contentType
+	}
+
+	switch mediaType {
+	case "application/json":
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(body, &raw); err != nil {
+			return telegramRequestParams{}, false
+		}
+
+		params := telegramRequestParams{
+			ChatID:        rawInt64(raw["chat_id"]),
+			FromChatID:    rawInt64(raw["from_chat_id"]),
+			MessageID:     int(rawInt64(raw["message_id"])),
+			Caption:       rawString(raw["caption"]),
+			RemoveCaption: rawBool(raw["remove_caption"]),
+		}
+		return params, true
+	case "application/x-www-form-urlencoded", "":
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			return telegramRequestParams{}, false
+		}
+		params := telegramRequestParams{
+			ChatID:        valueInt64(values.Get("chat_id")),
+			FromChatID:    valueInt64(values.Get("from_chat_id")),
+			MessageID:     int(valueInt64(values.Get("message_id"))),
+			Caption:       values.Get("caption"),
+			RemoveCaption: valueBool(values.Get("remove_caption")),
+		}
+		return params, true
+	default:
+		return telegramRequestParams{}, false
+	}
+}
+
+func rawInt64(value json.RawMessage) int64 {
+	var n int64
+	if err := json.Unmarshal(value, &n); err == nil {
+		return n
+	}
+
+	var s string
+	if err := json.Unmarshal(value, &s); err == nil {
+		return valueInt64(s)
+	}
+	return 0
+}
+
+func rawString(value json.RawMessage) string {
+	var s string
+	if err := json.Unmarshal(value, &s); err == nil {
+		return s
+	}
+	return ""
+}
+
+func rawBool(value json.RawMessage) bool {
+	var b bool
+	if err := json.Unmarshal(value, &b); err == nil {
+		return b
+	}
+
+	var s string
+	if err := json.Unmarshal(value, &s); err == nil {
+		return valueBool(s)
+	}
+	return false
+}
+
+func valueInt64(value string) int64 {
+	n, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+func valueBool(value string) bool {
+	b, err := strconv.ParseBool(value)
+	if err != nil {
+		return false
+	}
+	return b
 }
 
 func truncateStr(s string, maxLen int) string {

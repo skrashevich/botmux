@@ -507,6 +507,19 @@ func (s *Store) GetMessages(chatID int64, limit, offset int) ([]Message, error) 
 	return msgs, nil
 }
 
+func (s *Store) GetMessage(chatID int64, messageID int) (*Message, error) {
+	var m Message
+	err := s.db.QueryRow(`
+		SELECT id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id
+		FROM messages WHERE chat_id = ? AND id = ?
+	`, chatID, messageID).Scan(&m.ID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID)
+	if err != nil {
+		return nil, err
+	}
+	m.DateStr = time.Unix(m.Date, 0).Format("2006-01-02 15:04:05")
+	return &m, nil
+}
+
 func (s *Store) GetChatStats(chatID int64) (*ChatStats, error) {
 	stats := &ChatStats{ChatID: chatID}
 	s.db.QueryRow(`SELECT title FROM chats WHERE id = ?`, chatID).Scan(&stats.Title)
