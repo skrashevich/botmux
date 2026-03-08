@@ -124,6 +124,9 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/routes/update", s.handleUpdateRoute)
 	mux.HandleFunc("/api/routes/delete", s.handleDeleteRoute)
 
+	// Media proxy
+	mux.HandleFunc("/api/media", s.handleMediaProxy)
+
 	// User tags
 	mux.HandleFunc("/api/tags", s.handleGetTags)
 	mux.HandleFunc("/api/tags/add", s.handleAddTag)
@@ -865,6 +868,78 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// handleMediaProxy proxies file downloads from Telegram API
+func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
+	botID := r.URL.Query().Get("bot_id")
+	fileID := r.URL.Query().Get("file_id")
+	if fileID == "" {
+		http.Error(w, "file_id required", 400)
+		return
+	}
+
+	// Find bot token
+	var token string
+	if botID != "" {
+		bots, _ := s.store.GetBotConfigs()
+		for _, b := range bots {
+			if fmt.Sprintf("%d", b.ID) == botID {
+				token = b.Token
+				break
+			}
+		}
+	}
+	if token == "" {
+		// Try CLI bot
+		s.mu.RLock()
+		for _, bot := range s.bots {
+			token = bot.api.Token
+			break
+		}
+		s.mu.RUnlock()
+	}
+	if token == "" {
+		http.Error(w, "no bot available", 400)
+		return
+	}
+
+	// Step 1: getFile to get file_path
+	getFileURL := fmt.Sprintf("https://api.telegram.org/bot%s/getFile?file_id=%s", token, fileID)
+	resp, err := http.Get(getFileURL)
+	if err != nil {
+		http.Error(w, "getFile failed", 500)
+		return
+	}
+	defer resp.Body.Close()
+
+	var fileResp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			FilePath string `json:"file_path"`
+			FileSize int64  `json:"file_size"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&fileResp); err != nil || !fileResp.OK {
+		http.Error(w, "getFile failed", 500)
+		return
+	}
+
+	// Step 2: Download the file
+	downloadURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", token, fileResp.Result.FilePath)
+	fileResp2, err := http.Get(downloadURL)
+	if err != nil {
+		http.Error(w, "download failed", 500)
+		return
+	}
+	defer fileResp2.Body.Close()
+
+	// Forward content type and cache
+	if ct := fileResp2.Header.Get("Content-Type"); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	io.Copy(w, fileResp2.Body)
+}
+
 // sendMethods lists Telegram API methods that return a Message in the result
 var sendMethods = map[string]bool{
 	"sendMessage":    true,
@@ -915,6 +990,16 @@ func (s *Server) captureSentMessage(token, method string, respBody []byte) {
 		Text    string `json:"text"`
 		Caption string `json:"caption"`
 		Date    int64  `json:"date"`
+		Photo   []struct {
+			FileID string `json:"file_id"`
+		} `json:"photo"`
+		Video     *struct{ FileID string `json:"file_id"` } `json:"video"`
+		Animation *struct{ FileID string `json:"file_id"` } `json:"animation"`
+		Sticker   *struct{ FileID string `json:"file_id"` } `json:"sticker"`
+		Voice     *struct{ FileID string `json:"file_id"` } `json:"voice"`
+		Audio     *struct{ FileID string `json:"file_id"` } `json:"audio"`
+		Document  *struct{ FileID string `json:"file_id"` } `json:"document"`
+		VideoNote *struct{ FileID string `json:"file_id"` } `json:"video_note"`
 	}
 	if err := json.Unmarshal(resp.Result, &msg); err != nil || msg.MessageID == 0 {
 		return
@@ -930,13 +1015,36 @@ func (s *Server) captureSentMessage(token, method string, respBody []byte) {
 		text = msg.Caption
 	}
 
+	// Detect media type and file_id from response
+	var mediaType, fileID string
+	switch {
+	case len(msg.Photo) > 0:
+		mediaType, fileID = "photo", msg.Photo[len(msg.Photo)-1].FileID
+	case msg.Video != nil:
+		mediaType, fileID = "video", msg.Video.FileID
+	case msg.Animation != nil:
+		mediaType, fileID = "animation", msg.Animation.FileID
+	case msg.Sticker != nil:
+		mediaType, fileID = "sticker", msg.Sticker.FileID
+	case msg.Voice != nil:
+		mediaType, fileID = "voice", msg.Voice.FileID
+	case msg.Audio != nil:
+		mediaType, fileID = "audio", msg.Audio.FileID
+	case msg.Document != nil:
+		mediaType, fileID = "document", msg.Document.FileID
+	case msg.VideoNote != nil:
+		mediaType, fileID = "video_note", msg.VideoNote.FileID
+	}
+
 	m := Message{
-		ID:       msg.MessageID,
-		ChatID:   msg.Chat.ID,
-		FromUser: fromUser,
-		FromID:   msg.From.ID,
-		Text:     text,
-		Date:     msg.Date,
+		ID:        msg.MessageID,
+		ChatID:    msg.Chat.ID,
+		FromUser:  fromUser,
+		FromID:    msg.From.ID,
+		Text:      text,
+		Date:      msg.Date,
+		MediaType: mediaType,
+		FileID:    fileID,
 	}
 	if err := s.store.SaveMessage(m); err != nil {
 		log.Printf("[tgapi-proxy] Failed to save sent message: %v", err)

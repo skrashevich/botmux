@@ -128,6 +128,38 @@ func formatUsername(user *tgbotapi.User) string {
 	return name
 }
 
+// extractMedia returns media type and file_id from a Telegram message
+func extractMedia(msg *tgbotapi.Message) (mediaType, fileID string) {
+	switch {
+	case msg.Photo != nil && len(msg.Photo) > 0:
+		// Pick the largest photo (last in array)
+		mediaType = "photo"
+		fileID = msg.Photo[len(msg.Photo)-1].FileID
+	case msg.Video != nil:
+		mediaType = "video"
+		fileID = msg.Video.FileID
+	case msg.Animation != nil:
+		mediaType = "animation"
+		fileID = msg.Animation.FileID
+	case msg.Sticker != nil:
+		mediaType = "sticker"
+		fileID = msg.Sticker.FileID
+	case msg.Voice != nil:
+		mediaType = "voice"
+		fileID = msg.Voice.FileID
+	case msg.Audio != nil:
+		mediaType = "audio"
+		fileID = msg.Audio.FileID
+	case msg.Document != nil:
+		mediaType = "document"
+		fileID = msg.Document.FileID
+	case msg.VideoNote != nil:
+		mediaType = "video_note"
+		fileID = msg.VideoNote.FileID
+	}
+	return
+}
+
 func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 	b.trackChat(&msg.Chat)
 
@@ -156,6 +188,8 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 		text = msg.Caption
 	}
 
+	mediaType, fileID := extractMedia(msg)
+
 	m := Message{
 		ID:        msg.MessageID,
 		ChatID:    msg.Chat.ID,
@@ -164,6 +198,8 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 		Text:      text,
 		Date:      int64(msg.Date),
 		ReplyToID: replyToID,
+		MediaType: mediaType,
+		FileID:    fileID,
 	}
 	if err := b.store.SaveMessage(m); err != nil {
 		log.Printf("Error saving message: %v", err)
@@ -183,12 +219,16 @@ func (b *Bot) handleChannelPost(msg *tgbotapi.Message) {
 		text = msg.Caption
 	}
 
+	mediaType, fileID := extractMedia(msg)
+
 	m := Message{
-		ID:       msg.MessageID,
-		ChatID:   msg.Chat.ID,
-		FromUser: fromUser,
-		Text:     text,
-		Date:     int64(msg.Date),
+		ID:        msg.MessageID,
+		ChatID:    msg.Chat.ID,
+		FromUser:  fromUser,
+		Text:      text,
+		Date:      int64(msg.Date),
+		MediaType: mediaType,
+		FileID:    fileID,
 	}
 	if err := b.store.SaveMessage(m); err != nil {
 		log.Printf("Error saving channel post: %v", err)

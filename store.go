@@ -52,6 +52,8 @@ type Message struct {
 	DateStr   string `json:"date_str"`
 	ReplyToID int    `json:"reply_to_id,omitempty"`
 	Deleted   bool   `json:"deleted"`
+	MediaType string `json:"media_type,omitempty"` // photo, video, animation, sticker, voice, audio, document, video_note
+	FileID    string `json:"file_id,omitempty"`
 }
 
 type ChatStats struct {
@@ -277,6 +279,14 @@ func (s *Store) migrate() error {
 		}
 	}
 
+	// Add media columns if missing
+	var hasMediaType int
+	s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name='media_type'`).Scan(&hasMediaType)
+	if hasMediaType == 0 {
+		s.db.Exec(`ALTER TABLE messages ADD COLUMN media_type TEXT NOT NULL DEFAULT ''`)
+		s.db.Exec(`ALTER TABLE messages ADD COLUMN file_id TEXT NOT NULL DEFAULT ''`)
+	}
+
 	// Add backend health columns if missing
 	var hasBackendStatus int
 	s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('bots') WHERE name='backend_status'`).Scan(&hasBackendStatus)
@@ -469,15 +479,15 @@ func (s *Store) DeleteChat(botID int64, chatID int64) error {
 
 func (s *Store) SaveMessage(m Message) error {
 	_, err := s.db.Exec(`
-		INSERT OR IGNORE INTO messages (id, chat_id, from_user, from_id, text, date, reply_to_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, m.ID, m.ChatID, m.FromUser, m.FromID, m.Text, m.Date, m.ReplyToID)
+		INSERT OR IGNORE INTO messages (id, chat_id, from_user, from_id, text, date, reply_to_id, media_type, file_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, m.ID, m.ChatID, m.FromUser, m.FromID, m.Text, m.Date, m.ReplyToID, m.MediaType, m.FileID)
 	return err
 }
 
 func (s *Store) GetMessages(chatID int64, limit, offset int) ([]Message, error) {
 	rows, err := s.db.Query(`
-		SELECT id, chat_id, from_user, from_id, text, date, reply_to_id, deleted
+		SELECT id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id
 		FROM messages WHERE chat_id = ? ORDER BY date DESC LIMIT ? OFFSET ?
 	`, chatID, limit, offset)
 	if err != nil {
@@ -488,7 +498,7 @@ func (s *Store) GetMessages(chatID int64, limit, offset int) ([]Message, error) 
 	var msgs []Message
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted); err != nil {
+		if err := rows.Scan(&m.ID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID); err != nil {
 			return nil, err
 		}
 		m.DateStr = time.Unix(m.Date, 0).Format("2006-01-02 15:04:05")
@@ -545,7 +555,7 @@ func (s *Store) GetChatStats(chatID int64) (*ChatStats, error) {
 
 func (s *Store) SearchMessages(chatID int64, query string, limit int) ([]Message, error) {
 	rows, err := s.db.Query(`
-		SELECT id, chat_id, from_user, from_id, text, date, reply_to_id, deleted
+		SELECT id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id
 		FROM messages WHERE chat_id = ? AND text LIKE ?
 		ORDER BY date DESC LIMIT ?
 	`, chatID, "%"+query+"%", limit)
@@ -557,7 +567,7 @@ func (s *Store) SearchMessages(chatID int64, query string, limit int) ([]Message
 	var msgs []Message
 	for rows.Next() {
 		var m Message
-		rows.Scan(&m.ID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted)
+		rows.Scan(&m.ID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID)
 		m.DateStr = time.Unix(m.Date, 0).Format("2006-01-02 15:04:05")
 		msgs = append(msgs, m)
 	}

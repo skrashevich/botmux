@@ -5,27 +5,30 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TG Command Center</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;600;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #060810;
-  --bg2: #0b0e18;
-  --surface: #0f1320;
-  --surface2: #151a2e;
-  --surface3: #1a2038;
-  --border: #1e2744;
-  --border-glow: #00f0ff18;
-  --text: #c8d0e8;
-  --text2: #5a6488;
-  --text3: #3a4060;
-  --cyan: #00f0ff;
-  --cyan-dim: #00889a;
-  --magenta: #ff3366;
-  --amber: #ffaa00;
-  --green: #00ff88;
-  --green-dim: #00884a;
-  --ff-display: 'Libre Franklin', sans-serif;
-  --ff-mono: 'IBM Plex Mono', monospace;
+  --bg: #06080e;
+  --bg2: #0b0e17;
+  --surface: #101523;
+  --surface2: #161d2d;
+  --surface3: #1c2438;
+  --border: #253050;
+  --border-hl: #354570;
+  --text: #d8e0f0;
+  --text2: #8494b8;
+  --text3: #4e5e80;
+  --cyan: #22d3ee;
+  --cyan-dim: #0e7490;
+  --magenta: #f472b6;
+  --amber: #fbbf24;
+  --green: #34d399;
+  --green-dim: #059669;
+  --ff-display: 'Sora', sans-serif;
+  --ff-mono: 'JetBrains Mono', monospace;
+  --radius: 8px;
+  --radius-sm: 5px;
+  --transition: 0.15s ease;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -37,13 +40,17 @@ body {
   display: flex;
   height: 100vh;
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body::before {
   content: '';
   position: fixed; inset: 0; z-index: 9999;
   pointer-events: none;
-  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,240,255,0.008) 2px, rgba(0,240,255,0.008) 4px);
+  background:
+    radial-gradient(ellipse at 15% 0%, rgba(34,211,238,0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 85% 100%, rgba(244,114,182,0.025) 0%, transparent 50%);
 }
 
 ::-webkit-scrollbar { width: 4px; }
@@ -67,26 +74,31 @@ body::before {
   opacity: 0.3;
 }
 .sidebar-header {
-  padding: 20px 18px;
+  padding: 24px 20px 20px;
   border-bottom: 1px solid var(--border);
   position: relative; overflow: hidden;
 }
 .sidebar-header::before {
   content: '';
   position: absolute; inset: 0;
-  background: linear-gradient(135deg, rgba(0,240,255,0.04) 0%, transparent 60%);
+  background: linear-gradient(160deg, rgba(34,211,238,0.05) 0%, transparent 40%, rgba(244,114,182,0.02) 100%);
 }
 .logo {
   font-family: var(--ff-mono);
-  font-size: 11px; font-weight: 600;
-  letter-spacing: 3px; text-transform: uppercase;
+  font-size: 10px; font-weight: 500;
+  letter-spacing: 4px; text-transform: uppercase;
   color: var(--cyan); position: relative;
+  opacity: 0.7;
 }
 .logo-main {
   font-family: var(--ff-display);
-  font-size: 22px; font-weight: 900;
+  font-size: 24px; font-weight: 800;
   letter-spacing: -0.5px;
-  color: var(--text); margin-top: 2px; position: relative;
+  margin-top: 4px; position: relative;
+  background: linear-gradient(135deg, var(--text) 30%, var(--cyan) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 /* Bot list in sidebar */
@@ -112,13 +124,13 @@ body::before {
 .bot-item:hover { background: var(--surface2); border-color: var(--border); }
 .bot-item.active {
   background: var(--surface2);
-  border-color: var(--cyan);
-  box-shadow: 0 0 12px rgba(0,240,255,0.08);
+  border-color: var(--cyan-dim);
+  box-shadow: 0 0 16px rgba(34,211,238,0.06), inset 0 0 16px rgba(34,211,238,0.02);
 }
 .bot-item.active::before {
   content: '';
-  position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px;
-  background: var(--cyan); box-shadow: 0 0 6px var(--cyan);
+  position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px;
+  background: var(--cyan); border-radius: 0 2px 2px 0; box-shadow: 0 0 8px var(--cyan);
 }
 .bot-item-info { flex: 1; min-width: 0; }
 .bot-item-name {
@@ -161,13 +173,13 @@ body::before {
 .chat-item:hover { background: var(--surface2); border-color: var(--border); }
 .chat-item.active {
   background: var(--surface2);
-  border-color: var(--cyan);
-  box-shadow: 0 0 12px rgba(0,240,255,0.08), inset 0 0 12px rgba(0,240,255,0.03);
+  border-color: var(--cyan-dim);
+  box-shadow: 0 0 16px rgba(34,211,238,0.06), inset 0 0 12px rgba(34,211,238,0.02);
 }
 .chat-item.active::before {
   content: '';
-  position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px;
-  background: var(--cyan); box-shadow: 0 0 6px var(--cyan);
+  position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px;
+  background: var(--cyan); border-radius: 0 2px 2px 0; box-shadow: 0 0 8px var(--cyan);
 }
 .chat-title {
   font-size: 13px; font-weight: 600;
@@ -188,37 +200,32 @@ body::before {
   letter-spacing: 0.5px; text-transform: uppercase;
   border: 1px solid;
 }
-.badge-admin { color: var(--green); border-color: var(--green-dim); background: rgba(0,255,136,0.06); }
-.badge-channel { color: var(--cyan); border-color: var(--cyan-dim); background: rgba(0,240,255,0.06); }
-.badge-group { color: var(--amber); border-color: rgba(255,170,0,0.3); background: rgba(255,170,0,0.06); }
-.badge-proxy { color: var(--magenta); border-color: rgba(255,51,102,0.25); background: rgba(255,51,102,0.06); }
+.badge-admin { color: var(--green); border-color: var(--green-dim); background: rgba(0,255,136,0.14); }
+.badge-channel { color: var(--cyan); border-color: var(--cyan-dim); background: rgba(0,240,255,0.14); }
+.badge-group { color: var(--amber); border-color: rgba(255,170,0,0.4); background: rgba(255,170,0,0.14); }
+.badge-proxy { color: var(--magenta); border-color: rgba(255,51,102,0.4); background: rgba(255,51,102,0.14); }
 
 /* ===== MAIN ===== */
 .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg2); }
 
 .tab-bar {
-  display: flex; gap: 0;
+  display: flex; gap: 2px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-  padding: 0 20px; position: relative;
-}
-.tab-bar::after {
-  content: '';
-  position: absolute; bottom: -1px; left: 0; right: 0; height: 1px;
-  background: linear-gradient(90deg, transparent, var(--cyan) 20%, var(--cyan) 80%, transparent);
-  opacity: 0.1;
+  padding: 6px 16px 0; position: relative;
 }
 .tab {
-  padding: 12px 16px;
+  padding: 10px 16px;
   font-family: var(--ff-mono);
-  font-size: 11px; font-weight: 600;
-  letter-spacing: 0.8px; text-transform: uppercase;
+  font-size: 11px; font-weight: 500;
+  letter-spacing: 0.5px; text-transform: uppercase;
   color: var(--text3); cursor: pointer;
   border-bottom: 2px solid transparent;
-  transition: all 0.12s; position: relative;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  transition: all var(--transition); position: relative;
 }
-.tab:hover { color: var(--text2); }
-.tab.active { color: var(--cyan); border-bottom-color: var(--cyan); text-shadow: 0 0 8px rgba(0,240,255,0.4); }
+.tab:hover { color: var(--text2); background: rgba(34,211,238,0.06); }
+.tab.active { color: var(--cyan); border-bottom-color: var(--cyan); background: rgba(34,211,238,0.1); }
 
 .chat-header {
   padding: 14px 24px;
@@ -241,22 +248,23 @@ body::before {
 
 /* Buttons */
 .btn {
-  padding: 7px 14px; border-radius: 3px;
-  border: 1px solid var(--border);
+  padding: 8px 16px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-hl);
   font-family: var(--ff-mono);
   font-size: 11px; font-weight: 600;
   letter-spacing: 0.5px; cursor: pointer;
-  transition: all 0.12s;
-  display: inline-flex; align-items: center; gap: 5px;
+  transition: all var(--transition);
+  display: inline-flex; align-items: center; gap: 6px;
   text-transform: uppercase;
-  background: transparent; color: var(--text2);
+  background: var(--surface2); color: var(--text2);
 }
-.btn:hover { border-color: var(--text2); color: var(--text); }
-.btn-primary { background: rgba(0,240,255,0.1); border-color: var(--cyan-dim); color: var(--cyan); }
-.btn-primary:hover { background: rgba(0,240,255,0.18); border-color: var(--cyan); box-shadow: 0 0 12px rgba(0,240,255,0.15); }
-.btn-danger { background: rgba(255,51,102,0.08); border-color: rgba(255,51,102,0.25); color: var(--magenta); }
-.btn-danger:hover { background: rgba(255,51,102,0.15); border-color: var(--magenta); box-shadow: 0 0 10px rgba(255,51,102,0.12); }
-.btn-sm { padding: 4px 10px; font-size: 10px; }
+.btn:hover { border-color: var(--text3); color: var(--text); background: var(--surface3); }
+.btn:active { transform: scale(0.97); }
+.btn-primary { background: linear-gradient(135deg, rgba(34,211,238,0.18), rgba(14,116,144,0.18)); border-color: var(--cyan-dim); color: var(--cyan); }
+.btn-primary:hover { background: linear-gradient(135deg, rgba(34,211,238,0.3), rgba(14,116,144,0.3)); border-color: var(--cyan); box-shadow: 0 0 16px rgba(34,211,238,0.15); }
+.btn-danger { background: rgba(244,114,182,0.14); border-color: rgba(244,114,182,0.35); color: var(--magenta); }
+.btn-danger:hover { background: rgba(244,114,182,0.25); border-color: var(--magenta); box-shadow: 0 0 12px rgba(244,114,182,0.12); }
+.btn-sm { padding: 5px 12px; font-size: 10px; }
 
 /* Messages */
 .messages-container { display: flex; flex-direction: column; gap: 1px; }
@@ -275,28 +283,40 @@ body::before {
 .msg-row.msg-deleted .msg-text { text-decoration: line-through; color: var(--text3); }
 .msg-deleted-badge { font-family: var(--ff-mono); font-size: 9px; font-weight: 600; color: var(--magenta); background: rgba(255,51,102,0.1); border: 1px solid rgba(255,51,102,0.2); padding: 1px 6px; border-radius: 2px; letter-spacing: 0.5px; text-transform: uppercase; white-space: nowrap; }
 
+/* Media in messages */
+.msg-media { margin: 4px 0; }
+.msg-media-img img { max-width: 280px; max-height: 200px; border-radius: var(--radius-sm); cursor: pointer; transition: opacity var(--transition); display: block; }
+.msg-media-img img:hover { opacity: 0.85; }
+.msg-media-video video { max-width: 320px; max-height: 240px; border-radius: var(--radius-sm); display: block; outline: none; }
+.msg-media-audio { display: flex; align-items: center; gap: 8px; }
+.msg-media-audio audio { height: 32px; max-width: 220px; }
+.msg-media-badge { font-family: var(--ff-mono); font-size: 11px; color: var(--text2); white-space: nowrap; }
+.msg-media-link { font-family: var(--ff-mono); font-size: 12px; color: var(--cyan); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: rgba(34,211,238,0.08); border-radius: var(--radius-sm); transition: background var(--transition); }
+.msg-media-link:hover { background: rgba(34,211,238,0.15); }
+
 /* Compose */
 .msg-compose { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: var(--surface); border-top: 1px solid var(--border); }
-.msg-compose-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 9px 14px; color: var(--text); font-family: var(--ff-mono); font-size: 12px; outline: none; }
+.msg-compose-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 14px; color: var(--text); font-family: var(--ff-mono); font-size: 12px; outline: none; transition: border-color var(--transition), box-shadow var(--transition); }
 .msg-compose-input::placeholder { color: var(--text3); }
-.msg-compose-input:focus { border-color: var(--cyan-dim); box-shadow: 0 0 8px rgba(0,240,255,0.08); }
+.msg-compose-input:focus { border-color: var(--cyan-dim); box-shadow: 0 0 12px rgba(34,211,238,0.06); }
 
 /* Stats */
-.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
-.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 18px; position: relative; overflow: hidden; }
-.stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--cyan), var(--green)); opacity: 0.6; }
-.stat-value { font-family: var(--ff-mono); font-size: 32px; font-weight: 600; color: var(--cyan); text-shadow: 0 0 20px rgba(0,240,255,0.2); line-height: 1; }
-.stat-label { font-family: var(--ff-mono); font-size: 10px; color: var(--text3); margin-top: 8px; text-transform: uppercase; letter-spacing: 1px; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 24px; }
+.stat-card { background: linear-gradient(145deg, var(--surface) 0%, var(--surface2) 100%); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px 20px; position: relative; overflow: hidden; transition: border-color var(--transition), box-shadow var(--transition); }
+.stat-card:hover { border-color: var(--border-hl); box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+.stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--cyan), var(--green)); opacity: 0.5; }
+.stat-value { font-family: var(--ff-mono); font-size: 36px; font-weight: 700; color: var(--cyan); text-shadow: 0 0 30px rgba(34,211,238,0.15); line-height: 1; }
+.stat-label { font-family: var(--ff-mono); font-size: 10px; color: var(--text3); margin-top: 10px; text-transform: uppercase; letter-spacing: 1.5px; }
 
-.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 20px; margin-bottom: 16px; }
-.panel-title { font-family: var(--ff-mono); font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
-.panel-title::before { content: '//'; color: var(--cyan-dim); margin-right: 8px; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; margin-bottom: 16px; }
+.panel-title { font-family: var(--ff-mono); font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+.panel-title::before { content: '//'; color: var(--cyan-dim); }
 
-.chart-bars { display: flex; align-items: flex-end; gap: 3px; height: 120px; }
+.chart-bars { display: flex; align-items: flex-end; gap: 3px; height: 130px; }
 .chart-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; }
-.chart-bar { width: 100%; background: linear-gradient(to top, var(--cyan-dim), var(--cyan)); border-radius: 1px 1px 0 0; min-height: 1px; transition: height 0.4s ease; }
-.chart-bar:hover { box-shadow: 0 0 8px rgba(0,240,255,0.3); }
-.chart-bar-label { font-family: var(--ff-mono); font-size: 9px; color: var(--text3); margin-top: 6px; }
+.chart-bar { width: 100%; background: linear-gradient(to top, var(--cyan-dim), var(--cyan)); border-radius: 2px 2px 0 0; min-height: 2px; transition: height 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+.chart-bar:hover { box-shadow: 0 0 10px rgba(34,211,238,0.25); filter: brightness(1.2); }
+.chart-bar-label { font-family: var(--ff-mono); font-size: 9px; color: var(--text3); margin-top: 8px; }
 
 .top-users { list-style: none; }
 .top-user { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-left: 2px solid transparent; }
@@ -310,19 +330,19 @@ body::before {
 
 /* Search */
 .search-bar { padding: 10px 20px; background: var(--surface); border-bottom: 1px solid var(--border); }
-.search-input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 9px 14px; color: var(--text); font-family: var(--ff-mono); font-size: 12px; outline: none; transition: border-color 0.15s; }
+.search-input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 14px; color: var(--text); font-family: var(--ff-mono); font-size: 12px; outline: none; transition: border-color var(--transition), box-shadow var(--transition); }
 .search-input::placeholder { color: var(--text3); }
-.search-input:focus { border-color: var(--cyan-dim); box-shadow: 0 0 8px rgba(0,240,255,0.08); }
+.search-input:focus { border-color: var(--cyan-dim); box-shadow: 0 0 12px rgba(34,211,238,0.06); }
 
 /* Info grid */
-.info-grid { display: grid; grid-template-columns: 130px 1fr; gap: 1px; font-size: 13px; }
-.info-grid > div { padding: 10px 14px; background: var(--surface2); }
+.info-grid { display: grid; grid-template-columns: 140px 1fr; gap: 1px; font-size: 13px; border-radius: var(--radius-sm); overflow: hidden; }
+.info-grid > div { padding: 12px 16px; background: var(--surface2); }
 .info-grid > div:nth-child(odd) { background: var(--surface); }
 .info-label { font-family: var(--ff-mono); font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.8px; }
 
 /* Admin cards */
-.admin-card { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 16px; margin-bottom: 8px; transition: border-color 0.15s; }
-.admin-card:hover { border-color: var(--surface3); }
+.admin-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 10px; transition: border-color var(--transition), box-shadow var(--transition); }
+.admin-card:hover { border-color: var(--border-hl); box-shadow: 0 2px 12px rgba(0,0,0,0.2); }
 .admin-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 .admin-name { font-size: 14px; font-weight: 700; }
 .admin-role { font-family: var(--ff-mono); font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 2px; letter-spacing: 0.8px; text-transform: uppercase; border: 1px solid; }
@@ -330,7 +350,7 @@ body::before {
 .admin-role-admin { color: var(--green); border-color: var(--green-dim); background: rgba(0,255,136,0.06); }
 .admin-perms { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
 .perm-badge { font-family: var(--ff-mono); font-size: 10px; font-weight: 500; padding: 2px 7px; border-radius: 2px; background: var(--surface2); color: var(--text3); border: 1px solid transparent; }
-.perm-badge.active { background: rgba(0,240,255,0.06); color: var(--cyan-dim); border-color: rgba(0,240,255,0.12); }
+.perm-badge.active { background: rgba(0,240,255,0.14); color: var(--cyan); border-color: rgba(0,240,255,0.25); }
 .admin-actions { display: flex; gap: 6px; }
 
 /* Audit log */
@@ -361,8 +381,8 @@ body::before {
 .color-input { width: 42px; height: 32px; padding: 1px !important; cursor: pointer; border-radius: 3px; }
 
 /* User cards */
-.user-card { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 14px 16px; margin-bottom: 6px; display: flex; align-items: center; gap: 14px; transition: border-color 0.15s; }
-.user-card:hover { border-color: var(--surface3); }
+.user-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 8px; display: flex; align-items: center; gap: 16px; transition: border-color var(--transition), box-shadow var(--transition); }
+.user-card:hover { border-color: var(--border-hl); box-shadow: 0 2px 12px rgba(0,0,0,0.2); }
 .user-card-info { flex: 1; min-width: 0; }
 .user-card-name { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
 .user-card-name .user-id { font-family: var(--ff-mono); font-size: 11px; color: var(--text3); font-weight: 400; }
@@ -372,10 +392,12 @@ body::before {
 .user-card-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
 /* Modals */
-.modal-overlay { position: fixed; inset: 0; background: rgba(6,8,16,0.85); backdrop-filter: blur(4px); z-index: 100; display: flex; align-items: center; justify-content: center; }
-.modal { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 24px; width: 460px; max-width: 92vw; max-height: 80vh; overflow-y: auto; position: relative; box-shadow: 0 0 40px rgba(0,240,255,0.06); }
-.modal::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--cyan), transparent); }
-.modal h3 { font-size: 16px; font-weight: 800; margin-bottom: 18px; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(6,8,14,0.88); backdrop-filter: blur(8px) saturate(120%); z-index: 100; display: flex; align-items: center; justify-content: center; animation: overlayIn 0.2s ease; }
+@keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
+.modal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px; width: 460px; max-width: 92vw; max-height: 80vh; overflow-y: auto; position: relative; box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(34,211,238,0.04); animation: modalIn 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
+@keyframes modalIn { from { transform: translateY(12px) scale(0.97); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+.modal::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--cyan), transparent 80%); border-radius: var(--radius) var(--radius) 0 0; }
+.modal h3 { font-size: 17px; font-weight: 700; margin-bottom: 20px; }
 .modal-perms { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; padding: 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; }
 .modal-perm { display: flex; align-items: center; gap: 10px; font-family: var(--ff-mono); font-size: 12px; color: var(--text2); cursor: pointer; }
 .modal-perm:hover { color: var(--text); }
@@ -383,28 +405,330 @@ body::before {
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
 .modal-field { margin-bottom: 14px; }
 .modal-field label { font-family: var(--ff-mono); font-size: 10px; color: var(--text3); display: block; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.8px; }
-.modal-field input[type="text"], .modal-field input[type="number"] { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 9px 12px; color: var(--text); font-family: var(--ff-mono); font-size: 13px; outline: none; }
-.modal-field input:focus { border-color: var(--cyan-dim); box-shadow: 0 0 8px rgba(0,240,255,0.08); }
+.modal-field input[type="text"], .modal-field input[type="number"] { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 14px; color: var(--text); font-family: var(--ff-mono); font-size: 13px; outline: none; transition: border-color var(--transition), box-shadow var(--transition); }
+.modal-field input:focus { border-color: var(--cyan-dim); box-shadow: 0 0 10px rgba(34,211,238,0.06); }
 
 /* Toast */
-.toast { position: fixed; bottom: 20px; right: 20px; padding: 10px 18px; border-radius: 3px; font-family: var(--ff-mono); font-size: 12px; font-weight: 600; z-index: 1000; border: 1px solid; animation: toastIn 0.2s ease; }
-.toast-success { background: rgba(0,255,136,0.1); border-color: var(--green-dim); color: var(--green); box-shadow: 0 0 16px rgba(0,255,136,0.1); }
-.toast-error { background: rgba(255,51,102,0.1); border-color: rgba(255,51,102,0.3); color: var(--magenta); box-shadow: 0 0 16px rgba(255,51,102,0.1); }
-@keyframes toastIn { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: var(--radius-sm); font-family: var(--ff-mono); font-size: 12px; font-weight: 600; z-index: 1000; border: 1px solid; backdrop-filter: blur(12px); animation: toastIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+.toast-success { background: rgba(52,211,153,0.12); border-color: var(--green-dim); color: var(--green); box-shadow: 0 8px 24px rgba(52,211,153,0.08); }
+.toast-error { background: rgba(244,114,182,0.12); border-color: rgba(244,114,182,0.3); color: var(--magenta); box-shadow: 0 8px 24px rgba(244,114,182,0.08); }
+@keyframes toastIn { from { transform: translateY(20px) scale(0.95); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
 
 .load-more { text-align: center; padding: 14px; }
-.send-area textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 14px; color: var(--text); font-family: var(--ff-mono); font-size: 13px; resize: vertical; outline: none; min-height: 140px; line-height: 1.6; }
-.send-area textarea:focus { border-color: var(--cyan-dim); box-shadow: 0 0 12px rgba(0,240,255,0.06); }
+.send-area textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px; color: var(--text); font-family: var(--ff-mono); font-size: 13px; resize: vertical; outline: none; min-height: 150px; line-height: 1.6; transition: border-color var(--transition), box-shadow var(--transition); }
+.send-area textarea:focus { border-color: var(--cyan-dim); box-shadow: 0 0 16px rgba(34,211,238,0.05); }
 .send-area .hint { font-family: var(--ff-mono); font-size: 11px; color: var(--text3); margin-bottom: 12px; }
 .send-area .hint code { color: var(--text2); background: var(--surface2); padding: 1px 5px; border-radius: 2px; font-size: 10px; }
 
 /* Bot detail view */
 .bot-detail-grid {
-  display: grid; grid-template-columns: 130px 1fr; gap: 1px;
+  display: grid; grid-template-columns: 140px 1fr; gap: 1px;
   font-size: 13px; margin-bottom: 16px;
+  border-radius: var(--radius-sm); overflow: hidden;
 }
 .bot-detail-grid > div { padding: 10px 14px; background: var(--surface2); }
 .bot-detail-grid > div:nth-child(odd) { background: var(--surface); }
+
+/* ===== ROUTING ===== */
+.route-panel {
+  position: relative;
+  overflow: hidden;
+}
+.route-panel::after {
+  content: '';
+  position: absolute; top: 0; right: 0; bottom: 0; width: 3px;
+  background: linear-gradient(180deg, var(--amber), var(--magenta) 50%, var(--cyan));
+  opacity: 0.2;
+}
+.route-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 14px; position: relative;
+}
+.route-header .panel-title { margin: 0; border: 0; padding: 0; }
+.route-header .panel-title::before { content: '>>'; }
+
+.route-empty {
+  text-align: center; padding: 28px 14px;
+  font-family: var(--ff-mono); font-size: 11px; color: var(--text3);
+  position: relative;
+}
+.route-empty::before {
+  content: '';
+  display: block; width: 48px; height: 48px; margin: 0 auto 14px;
+  border: 1.5px dashed var(--border);
+  border-radius: 50%;
+  position: relative;
+}
+.route-empty-hint {
+  font-size: 10px; color: var(--text3); margin-top: 6px;
+  opacity: 0.6;
+}
+
+.route-item {
+  display: flex; align-items: stretch; gap: 0;
+  margin-bottom: 8px; border-radius: var(--radius-sm); overflow: hidden;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  transition: border-color var(--transition), box-shadow var(--transition);
+  position: relative;
+  animation: routeSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.route-item:hover {
+  border-color: var(--cyan-dim);
+  box-shadow: 0 2px 16px rgba(34,211,238,0.05);
+}
+.route-item.route-disabled { opacity: 0.5; }
+.route-item.route-disabled:hover { opacity: 0.7; }
+
+@keyframes routeSlideIn {
+  from { transform: translateX(-10px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.route-indicator {
+  width: 4px; flex-shrink: 0;
+  transition: background 0.15s;
+}
+.route-indicator-active { background: linear-gradient(180deg, var(--cyan), var(--green)); }
+.route-indicator-inactive { background: var(--border); }
+
+.route-body {
+  flex: 1; min-width: 0; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+
+.route-flow {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--ff-mono); font-size: 11px;
+  flex-wrap: wrap;
+}
+.route-action-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 6px; border-radius: 2px;
+  font-family: var(--ff-mono); font-size: 9px; font-weight: 600;
+  letter-spacing: 0.5px; text-transform: uppercase;
+  flex-shrink: 0;
+}
+.route-action-fwd {
+  background: rgba(0,240,255,0.1); border: 1px solid rgba(0,240,255,0.2);
+  color: var(--cyan);
+}
+.route-action-copy {
+  background: rgba(255,170,0,0.1); border: 1px solid rgba(255,170,0,0.2);
+  color: var(--amber);
+}
+
+.route-cond {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px; border-radius: 2px;
+  background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); font-size: 11px;
+}
+.route-cond-type { color: var(--text3); font-size: 9px; text-transform: uppercase; letter-spacing: 0.3px; }
+.route-cond-value { color: var(--amber); word-break: break-all; }
+
+.route-arrow {
+  color: var(--text3); font-size: 10px;
+  display: inline-flex; align-items: center; gap: 2px;
+  flex-shrink: 0;
+}
+.route-arrow::before {
+  content: '';
+  display: inline-block; width: 14px; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--text3));
+}
+.route-arrow::after {
+  content: '\25B6'; font-size: 6px;
+}
+
+.route-target {
+  color: var(--green); font-weight: 500;
+  display: inline-flex; align-items: center; gap: 3px;
+}
+.route-target-chat { color: var(--text2); font-size: 10px; }
+
+.route-meta {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10px; color: var(--text3);
+}
+.route-desc { font-style: italic; }
+.route-snat-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 0 5px; border-radius: 2px;
+  background: rgba(255,51,102,0.08); border: 1px solid rgba(255,51,102,0.15);
+  color: var(--magenta); font-family: var(--ff-mono); font-size: 8px;
+  font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase;
+}
+
+.route-actions {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 4px; justify-content: center;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+}
+.route-actions .btn { padding: 3px 8px; font-size: 9px; border: none; }
+
+/* Route modal enhancements */
+.route-modal-flow-preview {
+  margin: 12px 0 6px;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  font-family: var(--ff-mono); font-size: 11px;
+  min-height: 42px;
+}
+.route-modal-flow-preview .route-arrow { margin: 0 4px; }
+
+.route-modal-select {
+  width: 100%; padding: 10px 14px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-family: var(--ff-mono); font-size: 12px;
+  outline: none; cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b7a9e'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.route-modal-select:focus { border-color: var(--cyan-dim); box-shadow: 0 0 10px rgba(34,211,238,0.06); }
+
+.route-toggle {
+  display: flex; align-items: center; gap: 10px;
+  margin: 14px 0; padding: 10px 14px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 3px;
+  font-family: var(--ff-mono); font-size: 12px; color: var(--text2);
+  cursor: pointer; transition: border-color 0.15s;
+}
+.route-toggle:hover { border-color: var(--cyan-dim); color: var(--text); }
+.route-toggle input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--cyan); }
+.route-toggle-label { flex: 1; }
+.route-toggle-status {
+  font-size: 9px; font-weight: 600;
+  letter-spacing: 0.5px; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 2px;
+}
+.route-toggle-on { background: rgba(0,255,136,0.1); color: var(--green); border: 1px solid var(--green-dim); }
+.route-toggle-off { background: rgba(255,51,102,0.08); color: var(--magenta); border: 1px solid rgba(255,51,102,0.2); }
+
+/* ===== LIGHT THEME ===== */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f4f6fb;
+    --bg2: #eceef5;
+    --surface: #ffffff;
+    --surface2: #f0f2f8;
+    --surface3: #e2e5ee;
+    --border: #c8ceda;
+    --border-hl: #a8b0c4;
+    --text: #1a1f30;
+    --text2: #4a5268;
+    --text3: #788096;
+    --cyan: #0891b2;
+    --cyan-dim: #0e7490;
+    --magenta: #db2777;
+    --amber: #d97706;
+    --green: #059669;
+    --green-dim: #047857;
+  }
+
+  body::before {
+    background:
+      radial-gradient(ellipse at 15% 0%, rgba(8,145,178,0.04) 0%, transparent 50%),
+      radial-gradient(ellipse at 85% 100%, rgba(219,39,119,0.03) 0%, transparent 50%);
+  }
+
+  .sidebar::after { opacity: 0.08; }
+
+  .sidebar-header::before {
+    background: linear-gradient(160deg, rgba(8,145,178,0.06) 0%, transparent 40%, rgba(219,39,119,0.03) 100%);
+  }
+
+  .logo { opacity: 0.85; }
+
+  .logo-main {
+    background: linear-gradient(135deg, var(--text) 30%, var(--cyan) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+  }
+
+  .bot-item.active {
+    box-shadow: 0 0 12px rgba(8,145,178,0.08), inset 0 0 12px rgba(8,145,178,0.04);
+  }
+  .chat-item.active {
+    box-shadow: 0 0 12px rgba(8,145,178,0.08), inset 0 0 12px rgba(8,145,178,0.04);
+  }
+
+  .tab:hover { background: rgba(8,145,178,0.06); }
+  .tab.active { background: rgba(8,145,178,0.1); }
+
+  .btn { background: var(--surface); }
+  .btn:hover { background: var(--surface3); }
+  .btn-primary {
+    background: linear-gradient(135deg, rgba(8,145,178,0.12), rgba(14,116,144,0.12));
+  }
+  .btn-primary:hover {
+    background: linear-gradient(135deg, rgba(8,145,178,0.2), rgba(14,116,144,0.2));
+    box-shadow: 0 0 12px rgba(8,145,178,0.12);
+  }
+  .btn-danger { background: rgba(219,39,119,0.08); border-color: rgba(219,39,119,0.3); }
+  .btn-danger:hover { background: rgba(219,39,119,0.15); box-shadow: 0 0 10px rgba(219,39,119,0.08); }
+
+  .badge-admin { background: rgba(5,150,105,0.1); border-color: rgba(5,150,105,0.3); }
+  .badge-channel { background: rgba(8,145,178,0.1); border-color: rgba(8,145,178,0.3); }
+  .badge-group { background: rgba(217,119,6,0.1); border-color: rgba(217,119,6,0.3); }
+  .badge-proxy { background: rgba(219,39,119,0.1); border-color: rgba(219,39,119,0.3); }
+
+  .msg-row:hover { background: var(--surface2); }
+  .msg-deleted-badge { background: rgba(219,39,119,0.08); border-color: rgba(219,39,119,0.2); }
+
+  .stat-card { background: var(--surface); }
+  .stat-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+  .stat-card::before { opacity: 0.7; }
+  .stat-value { text-shadow: none; }
+
+  .chart-bar:hover { box-shadow: 0 0 8px rgba(8,145,178,0.2); }
+
+  .top-user:nth-child(odd) { background: rgba(8,145,178,0.03); }
+  .top-user:hover { background: rgba(8,145,178,0.06); }
+
+  .perm-badge.active { background: rgba(8,145,178,0.1); color: var(--cyan); border-color: rgba(8,145,178,0.25); }
+
+  .log-row:hover { background: rgba(8,145,178,0.04); }
+  .log-row:nth-child(odd) { background: rgba(8,145,178,0.02); }
+
+  .tag-user-row:nth-child(odd) { background: rgba(8,145,178,0.02); }
+
+  .admin-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+  .user-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+
+  .admin-role-creator { background: rgba(217,119,6,0.08); border-color: rgba(217,119,6,0.25); }
+  .admin-role-admin { background: rgba(5,150,105,0.08); border-color: rgba(5,150,105,0.25); }
+
+  .modal-overlay { background: rgba(0,0,0,0.35); backdrop-filter: blur(6px) saturate(120%); }
+  .modal { box-shadow: 0 20px 60px rgba(0,0,0,0.15), 0 0 0 1px var(--border); }
+
+  .toast { backdrop-filter: blur(12px) saturate(120%); }
+  .toast-success { background: rgba(5,150,105,0.1); box-shadow: 0 8px 24px rgba(5,150,105,0.08); }
+  .toast-error { background: rgba(219,39,119,0.1); box-shadow: 0 8px 24px rgba(219,39,119,0.06); }
+
+  .route-item:hover { box-shadow: 0 2px 12px rgba(8,145,178,0.06); }
+  .route-action-fwd { background: rgba(8,145,178,0.1); border-color: rgba(8,145,178,0.25); }
+  .route-action-copy { background: rgba(217,119,6,0.1); border-color: rgba(217,119,6,0.25); }
+  .route-snat-badge { background: rgba(219,39,119,0.08); border-color: rgba(219,39,119,0.15); }
+  .route-toggle-on { background: rgba(5,150,105,0.1); border-color: rgba(5,150,105,0.25); }
+  .route-toggle-off { background: rgba(219,39,119,0.08); border-color: rgba(219,39,119,0.2); }
+
+  .route-modal-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%234a5268'/%3E%3C/svg%3E");
+  }
+
+  ::selection { background: var(--cyan); color: #fff; }
+  ::-webkit-scrollbar-thumb { background: var(--border); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-hl); }
+}
 </style>
 </head>
 <body>
@@ -454,12 +778,12 @@ body::before {
         <div class="panel-title">Bot Configuration</div>
         <div class="bot-detail-grid" id="botDetailGrid"></div>
       </div>
-      <div class="panel" style="margin-top:16px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <div class="panel-title" style="margin:0; border:0; padding:0">Routing Rules</div>
+      <div class="panel route-panel" style="margin-top:16px;">
+        <div class="route-header">
+          <div class="panel-title">Routing Rules</div>
           <button class="btn btn-primary btn-sm" onclick="showRouteModal()">+ ADD ROUTE</button>
         </div>
-        <div id="routesList" style="font-family:var(--ff-mono);font-size:12px;color:var(--text3)">No routes configured</div>
+        <div id="routesList"></div>
       </div>
     </div>
   </div>
@@ -660,45 +984,59 @@ body::before {
 
 <!-- Route Modal -->
 <div id="routeModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeRouteModal()">
-  <div class="modal" style="max-width:500px">
-    <h3 id="routeModalTitle">Add Routing Rule</h3>
+  <div class="modal" style="max-width:520px">
+    <h3 id="routeModalTitle" style="display:flex;align-items:center;gap:8px">
+      <span style="color:var(--amber);font-size:14px">&#9656;&#9656;</span>
+      Add Routing Rule
+    </h3>
     <input type="hidden" id="routeEditID">
+
+    <div id="routeFlowPreview" class="route-modal-flow-preview">
+      <span style="color:var(--text3)">configure rule below</span>
+    </div>
+
     <div class="modal-field">
-      <label>Condition Type</label>
-      <select id="routeCondType" style="width:100%;padding:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:3px;font-family:var(--ff-mono);font-size:12px">
-        <option value="text">Text (regex)</option>
-        <option value="user_id">User ID</option>
-        <option value="chat_id">Chat ID</option>
+      <label>When &mdash; Condition Type</label>
+      <select id="routeCondType" class="route-modal-select" onchange="updateRoutePreview()">
+        <option value="text">Text match (regex)</option>
+        <option value="user_id">From user (by ID)</option>
+        <option value="chat_id">From chat (by ID)</option>
       </select>
     </div>
     <div class="modal-field">
-      <label>Condition Value</label>
-      <input type="text" id="routeCondValue" placeholder="regex pattern or ID...">
+      <label>Match Value</label>
+      <input type="text" id="routeCondValue" placeholder="regex pattern or numeric ID..." oninput="updateRoutePreview()">
     </div>
     <div class="modal-field">
-      <label>Target Bot</label>
-      <select id="routeTargetBot" style="width:100%;padding:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:3px;font-family:var(--ff-mono);font-size:12px">
+      <label>Then &mdash; Action</label>
+      <select id="routeAction" class="route-modal-select" onchange="updateRoutePreview()">
+        <option value="forward">Forward &mdash; send text as new message</option>
+        <option value="copy">Copy &mdash; forward original with attribution</option>
       </select>
     </div>
     <div class="modal-field">
-      <label>Action</label>
-      <select id="routeAction" style="width:100%;padding:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:3px;font-family:var(--ff-mono);font-size:12px">
-        <option value="forward">Forward (send text via target bot)</option>
-        <option value="copy">Copy (forward original message)</option>
+      <label>Via &mdash; Target Bot</label>
+      <select id="routeTargetBot" class="route-modal-select" onchange="updateRoutePreview()">
       </select>
     </div>
     <div class="modal-field">
-      <label>Target Chat ID (0 = same chat)</label>
+      <label>To &mdash; Target Chat ID <span style="color:var(--text3);text-transform:none;letter-spacing:0">(0 = same chat as source)</span></label>
       <input type="number" id="routeTargetChat" value="0" placeholder="0">
     </div>
     <div class="modal-field">
-      <label>Description</label>
-      <input type="text" id="routeDescription" placeholder="optional note...">
+      <label>Note</label>
+      <input type="text" id="routeDescription" placeholder="optional description...">
     </div>
-    <label class="modal-perm" style="margin:10px 0"><input type="checkbox" id="routeEnabled" checked> Enabled</label>
+
+    <label class="route-toggle" onclick="updateRouteToggleStatus()">
+      <input type="checkbox" id="routeEnabled" checked onchange="updateRouteToggleStatus()">
+      <span class="route-toggle-label">Route Status</span>
+      <span class="route-toggle-status route-toggle-on" id="routeToggleStatus">ACTIVE</span>
+    </label>
+
     <div class="modal-actions">
       <button class="btn" onclick="closeRouteModal()">CANCEL</button>
-      <button class="btn btn-primary" onclick="saveRoute()">SAVE</button>
+      <button class="btn btn-primary" onclick="saveRoute()">SAVE ROUTE</button>
     </div>
   </div>
 </div>
@@ -736,6 +1074,48 @@ function esc(s) {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
+}
+
+const mediaIcons = {
+  photo: '🖼', video: '🎬', animation: '🎞', sticker: '😀',
+  voice: '🎤', audio: '🎵', document: '📎', video_note: '⏺'
+};
+const mediaLabels = {
+  photo: 'Фото', video: 'Видео', animation: 'GIF', sticker: 'Стикер',
+  voice: 'Голосовое', audio: 'Аудио', document: 'Файл', video_note: 'Видеосообщение'
+};
+
+function renderMsgContent(m) {
+  let html = '';
+  if (m.media_type && m.file_id) {
+    const icon = mediaIcons[m.media_type] || '📎';
+    const label = mediaLabels[m.media_type] || m.media_type;
+    const botParam = currentBot ? `&bot_id=${currentBot.id}` : '';
+    const mediaUrl = `/api/media?file_id=${encodeURIComponent(m.file_id)}${botParam}`;
+    if (m.media_type === 'photo' || m.media_type === 'sticker') {
+      html += `<div class="msg-media msg-media-img">
+        <img src="${mediaUrl}" alt="${label}" loading="lazy" onclick="window.open(this.src,'_blank')">
+      </div>`;
+    } else if (m.media_type === 'video' || m.media_type === 'animation' || m.media_type === 'video_note') {
+      html += `<div class="msg-media msg-media-video">
+        <video src="${mediaUrl}" controls preload="metadata" ${m.media_type === 'animation' ? 'autoplay loop muted playsinline' : ''}></video>
+      </div>`;
+    } else if (m.media_type === 'voice' || m.media_type === 'audio') {
+      html += `<div class="msg-media msg-media-audio">
+        <span class="msg-media-badge">${icon} ${label}</span>
+        <audio src="${mediaUrl}" controls preload="metadata"></audio>
+      </div>`;
+    } else {
+      html += `<a href="${mediaUrl}" target="_blank" class="msg-media-link">${icon} ${label}</a>`;
+    }
+  }
+  if (m.text) {
+    html += esc(m.text);
+  }
+  if (!html) {
+    html = `<span style="color:var(--text3);font-style:italic">${m.media_type ? (mediaIcons[m.media_type]||'📎') + ' ' + (mediaLabels[m.media_type]||'медиа') : '[пусто]'}</span>`;
+  }
+  return html;
 }
 
 function highlight(text, query) {
@@ -885,36 +1265,84 @@ async function loadRoutes() {
 function renderRoutes(routes) {
   const el = document.getElementById('routesList');
   if (!routes || routes.length === 0) {
-    el.innerHTML = '<div style="text-align:center;color:var(--text3);padding:14px;font-family:var(--ff-mono);font-size:11px">No routing rules configured</div>';
+    el.innerHTML = `<div class="route-empty">
+      <div>NO ROUTING RULES</div>
+      <div class="route-empty-hint">Route messages between bots by text, user or chat</div>
+    </div>`;
     return;
   }
-  el.innerHTML = routes.map(r => {
+  el.innerHTML = routes.map((r, i) => {
     const targetBot = allBots.find(b => b.id === r.target_bot_id);
     const targetName = targetBot ? (targetBot.name || '@' + targetBot.bot_username) : `Bot #${r.target_bot_id}`;
-    const condLabel = {text: 'Text', user_id: 'User ID', chat_id: 'Chat ID'}[r.condition_type] || r.condition_type;
-    const actionLabel = r.action === 'copy' ? 'COPY' : 'FWD';
-    const enabledClass = r.enabled ? 'var(--green)' : 'var(--text3)';
-    const statusDot = r.enabled ? 'status-running' : 'status-stopped';
+    const condLabels = {text: 'TEXT', user_id: 'USER', chat_id: 'CHAT'};
+    const condLabel = condLabels[r.condition_type] || r.condition_type;
+    const isCopy = r.action === 'copy';
+    const actionBadgeClass = isCopy ? 'route-action-copy' : 'route-action-fwd';
+    const actionLabel = isCopy ? 'COPY' : 'FWD';
     return `
-      <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-left:2px solid ${r.enabled ? 'var(--cyan-dim)' : 'var(--border)'};margin-bottom:4px;background:var(--surface2);border-radius:0 3px 3px 0">
-        <span class="status-dot ${statusDot}"></span>
-        <div style="flex:1;min-width:0">
-          <div style="color:var(--text);font-size:12px">
-            <span class="badge badge-proxy" style="font-size:8px;padding:0 4px">${actionLabel}</span>
-            <span style="color:var(--cyan)">${esc(condLabel)}</span>:
-            <span style="color:var(--amber);word-break:break-all">${esc(r.condition_value)}</span>
-            → <span style="color:var(--green)">${esc(targetName)}</span>
-            ${r.target_chat_id ? `<span style="color:var(--text2)"> (chat: ${r.target_chat_id})</span>` : ''}
+      <div class="route-item ${r.enabled ? '' : 'route-disabled'}" style="animation-delay:${i * 40}ms">
+        <div class="route-indicator ${r.enabled ? 'route-indicator-active' : 'route-indicator-inactive'}"></div>
+        <div class="route-body">
+          <div class="route-flow">
+            <span class="route-action-badge ${actionBadgeClass}">${actionLabel}</span>
+            <span class="route-cond">
+              <span class="route-cond-type">${condLabel}</span>
+              <span class="route-cond-value">${esc(r.condition_value)}</span>
+            </span>
+            <span class="route-arrow"></span>
+            <span class="route-target">${esc(targetName)}</span>
+            ${r.target_chat_id ? `<span class="route-target-chat">chat:${r.target_chat_id}</span>` : ''}
+            <span class="route-snat-badge">S-NAT</span>
           </div>
-          ${r.description ? `<div style="color:var(--text3);font-size:10px;margin-top:2px">${esc(r.description)}</div>` : ''}
+          ${r.description ? `<div class="route-meta"><span class="route-desc">${esc(r.description)}</span></div>` : ''}
         </div>
-        <button class="btn btn-sm" onclick="editRoute(${r.id})">EDIT</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteRoute(${r.id})">DEL</button>
+        <div class="route-actions">
+          <button class="btn btn-sm" onclick="editRoute(${r.id})" title="Edit">EDIT</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteRoute(${r.id})" title="Delete">DEL</button>
+        </div>
       </div>`;
   }).join('');
 }
 
 let routesCache = [];
+
+function updateRoutePreview() {
+  const condType = document.getElementById('routeCondType').value;
+  const condValue = document.getElementById('routeCondValue').value;
+  const action = document.getElementById('routeAction').value;
+  const targetSel = document.getElementById('routeTargetBot');
+  const targetName = targetSel.selectedOptions[0]?.textContent || '?';
+  const sourceName = currentBot ? (currentBot.name || '@' + currentBot.bot_username) : 'Source';
+
+  const condLabels = {text: 'TEXT', user_id: 'USER', chat_id: 'CHAT'};
+  const condLabel = condLabels[condType] || condType;
+  const isCopy = action === 'copy';
+
+  const preview = document.getElementById('routeFlowPreview');
+  if (!condValue) {
+    preview.innerHTML = '<span style="color:var(--text3)">configure rule below</span>';
+    return;
+  }
+  preview.innerHTML = `
+    <span style="color:var(--cyan)">${esc(sourceName)}</span>
+    <span class="route-cond" style="margin:0 2px">
+      <span class="route-cond-type">${condLabel}</span>
+      <span class="route-cond-value">${esc(condValue.length > 20 ? condValue.substring(0,20) + '...' : condValue)}</span>
+    </span>
+    <span class="route-arrow"></span>
+    <span class="route-action-badge ${isCopy ? 'route-action-copy' : 'route-action-fwd'}">${isCopy ? 'COPY' : 'FWD'}</span>
+    <span style="color:var(--green)">${esc(targetName)}</span>
+  `;
+}
+
+function updateRouteToggleStatus() {
+  setTimeout(() => {
+    const on = document.getElementById('routeEnabled').checked;
+    const el = document.getElementById('routeToggleStatus');
+    el.textContent = on ? 'ACTIVE' : 'DISABLED';
+    el.className = 'route-toggle-status ' + (on ? 'route-toggle-on' : 'route-toggle-off');
+  }, 0);
+}
 
 function showRouteModal(route) {
   document.getElementById('routeModal').style.display = 'flex';
@@ -922,8 +1350,10 @@ function showRouteModal(route) {
   sel.innerHTML = allBots.filter(b => b.id !== currentBotID).map(b =>
     `<option value="${b.id}" ${route && route.target_bot_id === b.id ? 'selected' : ''}>${esc(b.name || '@' + b.bot_username)}</option>`
   ).join('');
+
+  const titleEl = document.getElementById('routeModalTitle');
   if (!route) {
-    document.getElementById('routeModalTitle').textContent = 'Add Routing Rule';
+    titleEl.innerHTML = '<span style="color:var(--amber);font-size:14px">&#9656;&#9656;</span> Add Routing Rule';
     document.getElementById('routeEditID').value = '';
     document.getElementById('routeCondType').value = 'text';
     document.getElementById('routeCondValue').value = '';
@@ -932,7 +1362,7 @@ function showRouteModal(route) {
     document.getElementById('routeDescription').value = '';
     document.getElementById('routeEnabled').checked = true;
   } else {
-    document.getElementById('routeModalTitle').textContent = 'Edit Routing Rule';
+    titleEl.innerHTML = '<span style="color:var(--cyan);font-size:14px">&#9656;&#9656;</span> Edit Routing Rule';
     document.getElementById('routeEditID').value = route.id;
     document.getElementById('routeCondType').value = route.condition_type;
     document.getElementById('routeCondValue').value = route.condition_value;
@@ -941,6 +1371,8 @@ function showRouteModal(route) {
     document.getElementById('routeDescription').value = route.description || '';
     document.getElementById('routeEnabled').checked = route.enabled;
   }
+  updateRoutePreview();
+  updateRouteToggleStatus();
 }
 
 function closeRouteModal() {
@@ -1065,7 +1497,7 @@ async function loadMessages(append = false) {
     const html = reversed.map(m => `
       <div class="msg-row ${m.deleted ? 'msg-deleted' : ''}">
         <span class="msg-user" title="ID: ${m.from_id}">${esc(m.from_user)}</span>
-        <span class="msg-text">${esc(m.text) || '<span style="color:var(--text3);font-style:italic">[media]</span>'}</span>
+        <span class="msg-text">${renderMsgContent(m)}</span>
         ${m.deleted ? '<span class="msg-deleted-badge">deleted</span>' : ''}
         <span class="msg-time">${m.date_str}</span>
         <div class="msg-actions">
@@ -1099,7 +1531,7 @@ async function doSearch() {
     document.getElementById('messagesList').innerHTML = msgs.map(m => `
       <div class="msg-row ${m.deleted ? 'msg-deleted' : ''}">
         <span class="msg-user">${esc(m.from_user)}</span>
-        <span class="msg-text">${highlight(esc(m.text), esc(q))}</span>
+        <span class="msg-text">${m.media_type ? renderMsgContent(m) : highlight(esc(m.text), esc(q))}</span>
         ${m.deleted ? '<span class="msg-deleted-badge">deleted</span>' : ''}
         <span class="msg-time">${m.date_str}</span>
       </div>

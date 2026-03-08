@@ -29,7 +29,7 @@ Monolithic Go app (all `package main`), 5 source files + 1 embedded SPA template
 - **proxy.go** — `ProxyManager` manages ALL bots uniformly (no CLI vs web distinction). Runs independent `pollLoop` per bot with raw JSON `getUpdates`. Dual-mode per bot: forwards updates to backend URL (proxy) and/or processes them for chat tracking (management). `WebhookHandler()` for bots in webhook mode. Creates managed Bot instances automatically at Start(). Periodic backend health checks every 60s.
 - **server.go** — HTTP server with `embed.FS` for SPA. REST API for all bot/chat/message/admin operations. Telegram API proxy at `/tgapi/` captures outgoing bot messages. Multi-bot: resolves bot instances via `getBotFromRequest()` / `resolveBot()`.
 - **store.go** — SQLite with WAL mode. All data models and DB operations. Auto-migrates schema on startup.
-- **templates/index.html** — Complete SPA (vanilla JS, no framework). Cyberpunk theme with IBM Plex Mono. Compiled into binary via `//go:embed`.
+- **templates/index.html** — Complete SPA (vanilla JS, no framework). Dark/light theme (Sora + JetBrains Mono, auto-switches via `prefers-color-scheme`). Compiled into binary via `//go:embed`.
 
 ## Key Design Decisions
 
@@ -45,6 +45,8 @@ Monolithic Go app (all `package main`), 5 source files + 1 embedded SPA template
 
 **Webhook mode**: Bots marked via `SetWebhookMode()` are not polled by ProxyManager but still show as running via `IsRunning()`. `WebhookHandler()` supports both management processing and proxy forwarding.
 
+**Media handling**: Messages store `media_type` and `file_id`. `bot.go:extractMedia()` detects photo/video/animation/sticker/voice/audio/document/video_note from Telegram updates. `server.go:captureSentMessage` extracts media from API responses. `/api/media?file_id=&bot_id=` proxies file downloads from Telegram. Frontend renders images, video players, audio players inline.
+
 ## Dependencies
 
 - `github.com/OvyFlash/telegram-bot-api` — Telegram Bot API (actively maintained fork)
@@ -53,3 +55,7 @@ Monolithic Go app (all `package main`), 5 source files + 1 embedded SPA template
 ## Language
 
 Project uses Russian for UI labels, comments may be in English or Russian. README is English.
+
+## Screenshots
+
+Screenshots in `screenshots/` use redacted data (fake usernames/URLs). Regenerate with a puppeteer script if UI changes significantly. Use `evaluateOnNewDocument` to monkey-patch `fetch` for data redaction (DOM replacement doesn't work reliably with innerHTML-rendered content).
