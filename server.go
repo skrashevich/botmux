@@ -126,6 +126,11 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/routes/update", s.handleUpdateRoute)
 	mux.HandleFunc("/api/routes/delete", s.handleDeleteRoute)
 
+	// LLM routing config
+	mux.HandleFunc("/api/llm-config", s.handleGetLLMConfig)
+	mux.HandleFunc("/api/llm-config/save", s.handleSaveLLMConfig)
+	mux.HandleFunc("/api/bots/description", s.handleBotDescription)
+
 	// Media proxy
 	mux.HandleFunc("/api/media", s.handleMediaProxy)
 
@@ -791,6 +796,60 @@ func (s *Server) handleDeleteRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// LLM config handlers
+
+func (s *Server) handleGetLLMConfig(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.store.GetLLMConfig()
+	if err != nil {
+		writeJSON(w, LLMConfig{})
+		return
+	}
+	writeJSON(w, cfg)
+}
+
+func (s *Server) handleSaveLLMConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	var cfg LLMConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := s.store.SaveLLMConfig(cfg); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleBotDescription(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var req struct {
+			BotID       int64  `json:"bot_id"`
+			Description string `json:"description"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, err)
+			return
+		}
+		if err := s.store.UpdateBotDescription(req.BotID, req.Description); err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, map[string]string{"status": "ok"})
+		return
+	}
+	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
+	desc, err := s.store.GetBotDescription(botID)
+	if err != nil {
+		writeJSON(w, map[string]string{"description": ""})
+		return
+	}
+	writeJSON(w, map[string]string{"description": desc})
 }
 
 // resolveBot finds a Bot instance from either registered bots or proxy manager

@@ -406,8 +406,10 @@ body::before {
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
 .modal-field { margin-bottom: 14px; }
 .modal-field label { font-family: var(--ff-mono); font-size: 10px; color: var(--text3); display: block; margin-bottom: 6px; text-transform: uppercase; }
-.modal-field input[type="text"], .modal-field input[type="number"] { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 14px; color: var(--text); font-family: var(--ff-mono); font-size: 13px; outline: none; transition: border-color var(--transition), box-shadow var(--transition); }
+.modal-field input[type="text"], .modal-field input[type="number"], .modal-field input[type="password"] { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 14px; color: var(--text); font-family: var(--ff-mono); font-size: 13px; outline: none; transition: border-color var(--transition), box-shadow var(--transition); }
 .modal-field input:focus { border-color: var(--cyan-dim); }
+.modal-field textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 14px; color: var(--text); font-family: var(--ff-mono); font-size: 13px; outline: none; transition: border-color var(--transition); box-sizing: border-box; }
+.modal-field textarea:focus { border-color: var(--cyan-dim); }
 
 /* Toast */
 .toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: var(--radius-sm); font-family: var(--ff-mono); font-size: 12px; font-weight: 600; z-index: var(--z-toast); border: 1px solid; backdrop-filter: blur(12px); animation: toastIn 0.2s ease-out; }
@@ -728,7 +730,10 @@ p, .msg-text { text-wrap: pretty; }
 
   <div class="section-label">
     BOTS
-    <button class="btn btn-sm btn-primary" onclick="showBotModal()" style="padding:2px 8px;font-size:9px">+ ADD</button>
+    <div style="display:flex;gap:4px">
+      <button class="btn btn-sm" onclick="showLLMModal()" style="padding:2px 8px;font-size:9px;color:var(--cyan);border-color:var(--cyan-dim)" id="llmSettingsBtn">LLM</button>
+      <button class="btn btn-sm btn-primary" onclick="showBotModal()" style="padding:2px 8px;font-size:9px">+ ADD</button>
+    </div>
   </div>
   <div class="bot-list" id="botList"></div>
 
@@ -922,9 +927,49 @@ p, .msg-text { text-wrap: pretty; }
       <label>Polling Timeout (seconds)</label>
       <input type="number" id="botFormTimeout" value="30" min="5" max="60">
     </div>
+    <div class="modal-field">
+      <label id="botDescriptionLabel">Bot Description</label>
+      <textarea id="botFormDescription" style="width:100%;min-height:72px;resize:vertical" placeholder=""></textarea>
+      <div id="botDescriptionHint" style="font-family:var(--ff-mono);font-size:10px;color:var(--text3);margin-top:4px"></div>
+    </div>
     <div class="modal-actions">
       <button class="btn" onclick="closeBotModal()">CANCEL</button>
       <button class="btn btn-primary" onclick="saveBot()">SAVE</button>
+    </div>
+  </div>
+</div>
+
+<!-- LLM Settings Modal -->
+<div id="llmModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeLLMModal()">
+  <div class="modal" style="max-width:520px">
+    <h3 id="llmModalTitle" style="display:flex;align-items:center;gap:8px">
+      <span style="color:var(--cyan);font-family:var(--ff-mono);font-size:12px">LLM</span>
+      LLM Router
+    </h3>
+    <div class="modal-field">
+      <label id="llmApiUrlLabel">API URL</label>
+      <input type="text" id="llmApiUrl" placeholder="https://api.openai.com/v1">
+    </div>
+    <div class="modal-field">
+      <label id="llmApiKeyLabel">API Key</label>
+      <input type="password" id="llmApiKey" placeholder="sk-...">
+    </div>
+    <div class="modal-field">
+      <label id="llmModelLabel">Model</label>
+      <input type="text" id="llmModel" placeholder="gpt-4o-mini">
+    </div>
+    <div class="modal-field">
+      <label id="llmSystemPromptLabel">System Prompt</label>
+      <textarea id="llmSystemPrompt" style="width:100%;min-height:100px;resize:vertical" placeholder=""></textarea>
+    </div>
+    <label class="route-toggle" style="margin:14px 0" onclick="updateLLMEnabledStatus()">
+      <input type="checkbox" id="llmEnabled" onchange="updateLLMEnabledStatus()">
+      <span class="route-toggle-label" id="llmEnabledLabel">Enable LLM Routing</span>
+      <span class="route-toggle-status route-toggle-off" id="llmEnabledStatus">OFF</span>
+    </label>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeLLMModal()" id="llmCancelBtn">CANCEL</button>
+      <button class="btn btn-primary" onclick="saveLLMConfig()" id="llmSaveBtn">SAVE</button>
     </div>
   </div>
 </div>
@@ -984,15 +1029,17 @@ p, .msg-text { text-wrap: pretty; }
 
     <div class="modal-field">
       <label>When &mdash; Condition Type</label>
-      <select id="routeCondType" class="route-modal-select" onchange="updateRoutePreview()">
+      <select id="routeCondType" class="route-modal-select" onchange="onRouteCondTypeChange()">
         <option value="text">Text match (regex)</option>
         <option value="user_id">From user (by ID)</option>
         <option value="chat_id">From chat (by ID)</option>
+        <option value="llm">LLM (AI)</option>
       </select>
     </div>
-    <div class="modal-field">
+    <div class="modal-field" id="routeCondValueField">
       <label>Match Value</label>
       <input type="text" id="routeCondValue" placeholder="regex pattern or numeric ID..." oninput="updateRoutePreview()">
+      <textarea id="routeCondValueLLM" style="display:none;width:100%;min-height:80px;resize:vertical" placeholder="" oninput="updateRoutePreview()"></textarea>
     </div>
     <div class="modal-field">
       <label>Then &mdash; Action</label>
@@ -1002,7 +1049,7 @@ p, .msg-text { text-wrap: pretty; }
         <option value="drop">Drop &mdash; ignore message, do not forward</option>
       </select>
     </div>
-    <div class="modal-field">
+    <div class="modal-field" id="routeTargetBotField">
       <label>Via &mdash; Target Bot</label>
       <select id="routeTargetBot" class="route-modal-select" onchange="updateRoutePreview()">
       </select>
@@ -1200,6 +1247,19 @@ const i18n = {
     // channel/group
     channel: 'CHANNEL', group: 'GROUP',
     request_failed: 'Request failed',
+    // llm
+    llm_settings: 'LLM Router',
+    llm_api_url: 'API URL',
+    llm_api_key: 'API Key',
+    llm_model: 'Model',
+    llm_system_prompt: 'System Prompt',
+    llm_enabled: 'Enable LLM Routing',
+    llm_saved: 'LLM settings saved',
+    bot_description: 'Bot Description',
+    bot_description_hint: 'Describe what this bot does for LLM routing',
+    cond_llm: 'LLM (AI)',
+    cond_llm_hint: 'Describe the routing rule in natural language',
+    llm_settings_btn: 'LLM',
   },
   ru: {
     command_center: 'TELEGRAM', tg_control: 'botmux',
@@ -1320,6 +1380,19 @@ const i18n = {
     // channel/group
     channel: '\u041a\u0410\u041d\u0410\u041b', group: '\u0413\u0420\u0423\u041f\u041f\u0410',
     request_failed: '\u041e\u0448\u0438\u0431\u043a\u0430 \u0437\u0430\u043f\u0440\u043e\u0441\u0430',
+    // llm
+    llm_settings: 'LLM \u041c\u0430\u0440\u0448\u0440\u0443\u0442\u0438\u0437\u0430\u0442\u043e\u0440',
+    llm_api_url: 'URL API',
+    llm_api_key: '\u041a\u043b\u044e\u0447 API',
+    llm_model: '\u041c\u043e\u0434\u0435\u043b\u044c',
+    llm_system_prompt: '\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0439 \u043f\u0440\u043e\u043c\u043f\u0442',
+    llm_enabled: '\u0412\u043a\u043b\u044e\u0447\u0438\u0442\u044c LLM \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u0438\u0437\u0430\u0446\u0438\u044e',
+    llm_saved: '\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 LLM \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u044b',
+    bot_description: '\u041e\u043f\u0438\u0441\u0430\u043d\u0438\u0435 \u0431\u043e\u0442\u0430',
+    bot_description_hint: '\u041e\u043f\u0438\u0448\u0438\u0442\u0435 \u0447\u0442\u043e \u0434\u0435\u043b\u0430\u0435\u0442 \u044d\u0442\u043e\u0442 \u0431\u043e\u0442 \u0434\u043b\u044f LLM \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u0438\u0437\u0430\u0446\u0438\u0438',
+    cond_llm: 'LLM (\u0418\u0418)',
+    cond_llm_hint: '\u041e\u043f\u0438\u0448\u0438\u0442\u0435 \u043f\u0440\u0430\u0432\u0438\u043b\u043e \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u0438\u0437\u0430\u0446\u0438\u0438 \u043d\u0430 \u043e\u0431\u044b\u0447\u043d\u043e\u043c \u044f\u0437\u044b\u043a\u0435',
+    llm_settings_btn: 'LLM',
   }
 };
 
@@ -1359,7 +1432,9 @@ function applyLang() {
   document.querySelector('.logo').textContent = t('command_center');
   document.querySelector('.logo-main').textContent = t('tg_control');
   document.querySelector('.theme-toggle').title = t('switch_theme');
-  document.querySelector('.section-label .btn').textContent = t('add');
+  const sectionBtns = document.querySelectorAll('.section-label .btn');
+  if (sectionBtns.length >= 2) { sectionBtns[0].textContent = t('llm_settings_btn'); sectionBtns[1].textContent = t('add'); }
+  else if (sectionBtns.length === 1) sectionBtns[0].textContent = t('add');
   document.querySelector('.section-label').childNodes[0].textContent = t('bots') + '\n    ';
   const chatsLabel = document.getElementById('chatsLabel');
   if (chatsLabel) chatsLabel.textContent = t('chats');
@@ -1479,10 +1554,11 @@ function updateModalLabels() {
   }
   // route modal select options
   const condTypeSelect = document.getElementById('routeCondType');
-  if (condTypeSelect && condTypeSelect.options.length >= 3) {
+  if (condTypeSelect && condTypeSelect.options.length >= 4) {
     condTypeSelect.options[0].textContent = t('cond_text_match');
     condTypeSelect.options[1].textContent = t('cond_from_user');
     condTypeSelect.options[2].textContent = t('cond_from_chat');
+    condTypeSelect.options[3].textContent = t('cond_llm');
   }
   const actionSelect = document.getElementById('routeAction');
   if (actionSelect && actionSelect.options.length >= 3) {
@@ -1499,6 +1575,32 @@ function updateModalLabels() {
     rmBtns[0].textContent = t('cancel');
     rmBtns[1].textContent = t('save_route');
   }
+  // llm modal labels
+  const llmModalTitle = document.getElementById('llmModalTitle');
+  if (llmModalTitle) { llmModalTitle.childNodes[llmModalTitle.childNodes.length-1].textContent = ' ' + t('llm_settings'); }
+  const llmApiUrlLbl = document.getElementById('llmApiUrlLabel');
+  if (llmApiUrlLbl) llmApiUrlLbl.textContent = t('llm_api_url');
+  const llmApiKeyLbl = document.getElementById('llmApiKeyLabel');
+  if (llmApiKeyLbl) llmApiKeyLbl.textContent = t('llm_api_key');
+  const llmModelLbl = document.getElementById('llmModelLabel');
+  if (llmModelLbl) llmModelLbl.textContent = t('llm_model');
+  const llmSysLbl = document.getElementById('llmSystemPromptLabel');
+  if (llmSysLbl) llmSysLbl.textContent = t('llm_system_prompt');
+  const llmEnabledLbl = document.getElementById('llmEnabledLabel');
+  if (llmEnabledLbl) llmEnabledLbl.textContent = t('llm_enabled');
+  const llmCancelBtn = document.getElementById('llmCancelBtn');
+  if (llmCancelBtn) llmCancelBtn.textContent = t('cancel');
+  const llmSaveBtn = document.getElementById('llmSaveBtn');
+  if (llmSaveBtn) llmSaveBtn.textContent = t('save');
+  // bot description label
+  const botDescLbl = document.getElementById('botDescriptionLabel');
+  if (botDescLbl) botDescLbl.textContent = t('bot_description');
+  const botDescHint = document.getElementById('botDescriptionHint');
+  if (botDescHint) botDescHint.textContent = t('bot_description_hint');
+  const botDescTA = document.getElementById('botFormDescription');
+  if (botDescTA) botDescTA.placeholder = t('bot_description_hint');
+  const condValueLLM = document.getElementById('routeCondValueLLM');
+  if (condValueLLM) condValueLLM.placeholder = t('cond_llm_hint');
   // tags panel labels
   updateTagsPanelLabels();
   // broadcast panel
@@ -1752,7 +1854,7 @@ function renderRoutes(routes) {
   el.innerHTML = routes.map((r, i) => {
     const targetBot = allBots.find(b => b.id === r.target_bot_id);
     const targetName = targetBot ? (targetBot.name || '@' + targetBot.bot_username) : `Bot #${r.target_bot_id}`;
-    const condLabels = {text: t('cond_text'), user_id: t('cond_user'), chat_id: t('cond_chat')};
+    const condLabels = {text: t('cond_text'), user_id: t('cond_user'), chat_id: t('cond_chat'), llm: t('cond_llm')};
     const condLabel = condLabels[r.condition_type] || r.condition_type;
     const actionBadgeClass = r.action === 'drop' ? 'route-action-drop' : r.action === 'copy' ? 'route-action-copy' : 'route-action-fwd';
     const actionLabel = r.action === 'drop' ? t('action_drop') : r.action === 'copy' ? t('action_copy') : t('action_fwd');
@@ -1783,15 +1885,28 @@ function renderRoutes(routes) {
 
 let routesCache = [];
 
+function onRouteCondTypeChange() {
+  const condType = document.getElementById('routeCondType').value;
+  const isLLM = condType === 'llm';
+  document.getElementById('routeCondValue').style.display = isLLM ? 'none' : '';
+  document.getElementById('routeCondValueLLM').style.display = isLLM ? '' : 'none';
+  const targetBotField = document.getElementById('routeTargetBotField');
+  if (targetBotField) targetBotField.style.display = isLLM ? 'none' : '';
+  updateRoutePreview();
+}
+
 function updateRoutePreview() {
   const condType = document.getElementById('routeCondType').value;
-  const condValue = document.getElementById('routeCondValue').value;
+  const isLLM = condType === 'llm';
+  const condValue = isLLM
+    ? document.getElementById('routeCondValueLLM').value
+    : document.getElementById('routeCondValue').value;
   const action = document.getElementById('routeAction').value;
   const targetSel = document.getElementById('routeTargetBot');
   const targetName = targetSel.selectedOptions[0]?.textContent || '?';
   const sourceName = currentBot ? (currentBot.name || '@' + currentBot.bot_username) : 'Source';
 
-  const condLabels = {text: t('cond_text'), user_id: t('cond_user'), chat_id: t('cond_chat')};
+  const condLabels = {text: t('cond_text'), user_id: t('cond_user'), chat_id: t('cond_chat'), llm: t('cond_llm')};
   const condLabel = condLabels[condType] || condType;
   const isDrop = action === 'drop';
   const actionBadgeClass = isDrop ? 'route-action-drop' : action === 'copy' ? 'route-action-copy' : 'route-action-fwd';
@@ -1836,6 +1951,7 @@ function showRouteModal(route) {
     document.getElementById('routeEditID').value = '';
     document.getElementById('routeCondType').value = 'text';
     document.getElementById('routeCondValue').value = '';
+    document.getElementById('routeCondValueLLM').value = '';
     document.getElementById('routeAction').value = 'forward';
     document.getElementById('routeTargetChat').value = '0';
     document.getElementById('routeDescription').value = '';
@@ -1844,13 +1960,19 @@ function showRouteModal(route) {
     titleEl.innerHTML = `<span style="color:var(--cyan);font-size:14px">&#9656;&#9656;</span> ${t('edit_routing_rule')}`;
     document.getElementById('routeEditID').value = route.id;
     document.getElementById('routeCondType').value = route.condition_type;
-    document.getElementById('routeCondValue').value = route.condition_value;
+    if (route.condition_type === 'llm') {
+      document.getElementById('routeCondValueLLM').value = route.condition_value;
+      document.getElementById('routeCondValue').value = '';
+    } else {
+      document.getElementById('routeCondValue').value = route.condition_value;
+      document.getElementById('routeCondValueLLM').value = '';
+    }
     document.getElementById('routeAction').value = route.action;
     document.getElementById('routeTargetChat').value = route.target_chat_id || '0';
     document.getElementById('routeDescription').value = route.description || '';
     document.getElementById('routeEnabled').checked = route.enabled;
   }
-  updateRoutePreview();
+  onRouteCondTypeChange();
   updateRouteToggleStatus();
 }
 
@@ -1868,18 +1990,23 @@ async function editRoute(id) {
 
 async function saveRoute() {
   const editID = document.getElementById('routeEditID').value;
+  const condType = document.getElementById('routeCondType').value;
+  const isLLM = condType === 'llm';
+  const condValue = isLLM
+    ? document.getElementById('routeCondValueLLM').value
+    : document.getElementById('routeCondValue').value;
   const data = {
     source_bot_id: currentBotID,
-    target_bot_id: parseInt(document.getElementById('routeTargetBot').value),
-    condition_type: document.getElementById('routeCondType').value,
-    condition_value: document.getElementById('routeCondValue').value,
+    target_bot_id: isLLM ? 0 : parseInt(document.getElementById('routeTargetBot').value),
+    condition_type: condType,
+    condition_value: condValue,
     action: document.getElementById('routeAction').value,
     target_chat_id: parseInt(document.getElementById('routeTargetChat').value) || 0,
     enabled: document.getElementById('routeEnabled').checked,
     description: document.getElementById('routeDescription').value,
   };
   if (!data.condition_value) { toast(t('condition_required'), 'error'); return; }
-  if (!data.target_bot_id) { toast(t('select_target_bot'), 'error'); return; }
+  if (!isLLM && !data.target_bot_id) { toast(t('select_target_bot'), 'error'); return; }
   try {
     if (editID) {
       data.id = parseInt(editID);
@@ -1900,6 +2027,78 @@ async function deleteRoute(id) {
     toast(t('route_deleted'));
     loadRoutes();
   } catch(e) { toast(e.message, 'error'); }
+}
+
+// ===== LLM CONFIG =====
+
+async function showLLMModal() {
+  try {
+    const cfg = await api('/api/llm-config');
+    document.getElementById('llmApiUrl').value = cfg.api_url || '';
+    document.getElementById('llmApiKey').value = cfg.api_key || '';
+    document.getElementById('llmModel').value = cfg.model || '';
+    document.getElementById('llmSystemPrompt').value = cfg.system_prompt || '';
+    const enabled = !!cfg.enabled;
+    document.getElementById('llmEnabled').checked = enabled;
+    const statusEl = document.getElementById('llmEnabledStatus');
+    statusEl.textContent = enabled ? t('active') : t('disabled');
+    statusEl.className = 'route-toggle-status ' + (enabled ? 'route-toggle-on' : 'route-toggle-off');
+  } catch(e) {
+    document.getElementById('llmApiUrl').value = '';
+    document.getElementById('llmApiKey').value = '';
+    document.getElementById('llmModel').value = '';
+    document.getElementById('llmSystemPrompt').value = '';
+    document.getElementById('llmEnabled').checked = false;
+    const statusEl = document.getElementById('llmEnabledStatus');
+    statusEl.textContent = t('disabled');
+    statusEl.className = 'route-toggle-status route-toggle-off';
+  }
+  updateModalLabels();
+  document.getElementById('llmModal').style.display = 'flex';
+}
+
+function closeLLMModal() {
+  document.getElementById('llmModal').style.display = 'none';
+}
+
+function updateLLMEnabledStatus() {
+  setTimeout(() => {
+    const on = document.getElementById('llmEnabled').checked;
+    const el = document.getElementById('llmEnabledStatus');
+    el.textContent = on ? t('active') : t('disabled');
+    el.className = 'route-toggle-status ' + (on ? 'route-toggle-on' : 'route-toggle-off');
+  }, 0);
+}
+
+async function saveLLMConfig() {
+  const data = {
+    api_url: document.getElementById('llmApiUrl').value,
+    api_key: document.getElementById('llmApiKey').value,
+    model: document.getElementById('llmModel').value,
+    system_prompt: document.getElementById('llmSystemPrompt').value,
+    enabled: document.getElementById('llmEnabled').checked,
+  };
+  try {
+    await api('/api/llm-config/save', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+    closeLLMModal();
+    toast(t('llm_saved'));
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+// ===== BOT DESCRIPTION =====
+
+async function loadBotDescription(botId) {
+  try {
+    const res = await api(`/api/bots/description?bot_id=${botId}`);
+    document.getElementById('botFormDescription').value = res.description || '';
+  } catch(e) {
+    document.getElementById('botFormDescription').value = '';
+  }
+}
+
+async function saveBotDescription(botId) {
+  const description = document.getElementById('botFormDescription').value;
+  await api('/api/bots/description', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({bot_id: botId, description}) });
 }
 
 // ===== CHAT LIST =====
@@ -2404,6 +2603,8 @@ function showBotModal(bot = null) {
   document.getElementById('botTokenStatus').textContent = bot?.bot_username ? '@' + bot.bot_username : '';
   document.getElementById('botTokenStatus').style.color = bot?.bot_username ? 'var(--green)' : 'var(--text3)';
   botTokenUsername = bot ? (bot.bot_username || '') : '';
+  document.getElementById('botFormDescription').value = '';
+  if (bot) loadBotDescription(bot.id);
   toggleProxyFields();
   document.getElementById('botModal').style.display = 'flex';
 }
@@ -2444,11 +2645,17 @@ async function saveBot() {
   if (!data.name || !data.token) { toast(t('name_token_required'), 'error'); return; }
   if (data.proxy_enabled && !data.backend_url) { toast(t('backend_url_required'), 'error'); return; }
   try {
+    let savedBotId;
     if (editID) {
       data.id = parseInt(editID);
       await api('/api/bots/update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+      savedBotId = parseInt(editID);
     } else {
-      await api('/api/bots/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+      const res = await api('/api/bots/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+      savedBotId = res.id || res.bot_id;
+    }
+    if (savedBotId) {
+      try { await saveBotDescription(savedBotId); } catch(e) { /* ignore description save errors */ }
     }
     closeBotModal();
     toast(editID ? t('bot_updated') : t('bot_added'));

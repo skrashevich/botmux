@@ -96,13 +96,23 @@ Custom classification system for chat members:
   - **Text match** — regex pattern matching on message text (case-insensitive)
   - **User ID** — messages from a specific Telegram user
   - **Chat ID** — all messages from a specific chat/group
-- Two routing actions:
+  - **LLM (AI)** — describe the routing rule in natural language; an LLM decides which bot should handle the message
+- Three routing actions:
   - **Forward** — sends message text as a new message via the target bot
   - **Copy** — forwards the original message (preserving author attribution) via Telegram's `forwardMessage`
+  - **Drop** — silently ignore the message
 - **Source-NAT return path** — replies to routed messages are automatically sent back through the original source bot to the original chat, maintaining conversational context
 - Bidirectional conversation tracking: each reply creates a new mapping, enabling ongoing cross-bot dialogs
 - Route rules managed per-bot from the web UI with enable/disable toggle
 - Loop protection: bot-originated messages are not reverse-routed
+
+### LLM-Based Smart Routing
+- Uses any **OpenAI-compatible API** (OpenAI, Ollama, LM Studio, etc.) for intelligent message routing
+- The LLM receives the message text, sender info, and a list of all available bots with their descriptions and chats
+- Each bot can have a **description** explaining what it does, helping the LLM make better routing decisions
+- Configurable via the web UI: API URL, API key, model name, custom system prompt
+- Works alongside rule-based routing — LLM routing runs after traditional condition-based routes
+- Reverse routing (Source-NAT) works automatically for LLM-routed messages
 
 ### Internationalization (i18n)
 - Interface available in **English** and **Russian**

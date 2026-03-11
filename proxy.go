@@ -24,6 +24,7 @@ type ProxyManager struct {
 	managedBots map[int64]*Bot // botID -> Bot instance for management processing
 	webhookBots map[int64]bool // bots receiving updates via webhook (skip polling)
 	client      *http.Client
+	llmRouter   *LLMRouter // LLM-based routing
 }
 
 type proxyRunner struct {
@@ -38,6 +39,7 @@ func NewProxyManager(store *Store) *ProxyManager {
 		managedBots: make(map[int64]*Bot),
 		webhookBots: make(map[int64]bool),
 		client:      &http.Client{Timeout: 120 * time.Second},
+		llmRouter:   NewLLMRouter(store),
 	}
 }
 
@@ -131,6 +133,9 @@ func (pm *ProxyManager) processUpdate(botID int64, rawUpdate map[string]interfac
 
 	// Routing: check rules and forward to other bots
 	pm.applyRoutes(botID, rawUpdate)
+
+	// LLM-based routing
+	pm.applyLLMRoutes(botID, rawUpdate)
 
 	pm.store.UpdateBotOffset(botID, int64(updateID)+1)
 	pm.store.UpdateBotStatus(botID, "", time.Now().Format(time.RFC3339))
@@ -417,6 +422,118 @@ func (pm *ProxyManager) processForManagement(botID int64, rawUpdate map[string]i
 		return
 	}
 	bot.processUpdate(update)
+}
+
+// applyLLMRoutes uses LLM to decide routing for an incoming update
+func (pm *ProxyManager) applyLLMRoutes(botID int64, rawUpdate map[string]interface{}) {
+	if pm.llmRouter == nil {
+		return
+	}
+
+	msg, _ := rawUpdate["message"].(map[string]interface{})
+	if msg == nil {
+		msg, _ = rawUpdate["channel_post"].(map[string]interface{})
+	}
+	if msg == nil {
+		return
+	}
+
+	var msgText string
+	if t, ok := msg["text"].(string); ok {
+		msgText = t
+	}
+	if caption, ok := msg["caption"].(string); ok && msgText == "" {
+		msgText = caption
+	}
+	if msgText == "" {
+		return
+	}
+
+	var chatID int64
+	if chat, ok := msg["chat"].(map[string]interface{}); ok {
+		if id, ok := chat["id"].(float64); ok {
+			chatID = int64(id)
+		}
+	}
+
+	var fromID int64
+	var fromUser string
+	if from, ok := msg["from"].(map[string]interface{}); ok {
+		if id, ok := from["id"].(float64); ok {
+			fromID = int64(id)
+		}
+		if uname, ok := from["username"].(string); ok {
+			fromUser = "@" + uname
+		}
+	}
+
+	result, err := pm.llmRouter.RouteMessage(context.Background(), botID, msgText, chatID, fromID, fromUser)
+	if err != nil {
+		log.Printf("[llm-routing] error: %v", err)
+		return
+	}
+	if result == nil || result.TargetBotID == 0 || result.Action == "drop" {
+		return
+	}
+
+	pm.mu.Lock()
+	targetBot := pm.managedBots[result.TargetBotID]
+	pm.mu.Unlock()
+	if targetBot == nil {
+		log.Printf("[llm-routing] target bot %d has no managed instance", result.TargetBotID)
+		return
+	}
+
+	destChatID := result.TargetChatID
+	if destChatID == 0 {
+		destChatID = chatID
+	}
+
+	var sourceMsgID int
+	if msgIDFloat, ok := msg["message_id"].(float64); ok {
+		sourceMsgID = int(msgIDFloat)
+	}
+
+	var targetMsgID int
+	switch result.Action {
+	case "forward":
+		if msgText != "" {
+			sentID, err := targetBot.SendMessageGetID(destChatID, msgText)
+			if err != nil {
+				log.Printf("[llm-routing] forward FAILED: %v", err)
+			} else {
+				targetMsgID = sentID
+				log.Printf("[llm-routing] forwarded text to bot %d chat %d (msg %d), reason: %s",
+					result.TargetBotID, destChatID, sentID, result.Reason)
+			}
+		}
+	case "copy":
+		if sourceMsgID != 0 {
+			sentID, err := targetBot.ForwardMessageGetID(destChatID, chatID, sourceMsgID)
+			if err != nil {
+				log.Printf("[llm-routing] copy FAILED: %v", err)
+			} else {
+				targetMsgID = sentID
+				log.Printf("[llm-routing] copied msg to bot %d chat %d (msg %d), reason: %s",
+					result.TargetBotID, destChatID, sentID, result.Reason)
+			}
+		}
+	default:
+		log.Printf("[llm-routing] unknown action %q, skipping", result.Action)
+	}
+
+	if targetMsgID != 0 && sourceMsgID != 0 {
+		pm.store.SaveRouteMapping(RouteMapping{
+			RouteID:      0,
+			SourceBotID:  botID,
+			SourceChatID: chatID,
+			SourceMsgID:  sourceMsgID,
+			TargetBotID:  result.TargetBotID,
+			TargetChatID: destChatID,
+			TargetMsgID:  targetMsgID,
+			CreatedAt:    time.Now().Format(time.RFC3339),
+		})
+	}
 }
 
 // applyRoutes checks routing rules for the source bot and forwards matching updates to target bots

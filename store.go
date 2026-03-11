@@ -337,6 +337,28 @@ func (s *Store) migrate() error {
 		GROUP BY chat_id, from_id
 	`)
 
+	// Create llm_config table
+	_, err = s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS llm_config (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			api_url TEXT NOT NULL DEFAULT '',
+			api_key TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT 'gpt-4o-mini',
+			system_prompt TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 0
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Add description column to bots if missing
+	var hasDescription int
+	s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('bots') WHERE name='description'`).Scan(&hasDescription)
+	if hasDescription == 0 {
+		s.db.Exec(`ALTER TABLE bots ADD COLUMN description TEXT NOT NULL DEFAULT ''`)
+	}
+
 	return nil
 }
 
@@ -858,4 +880,50 @@ func (s *Store) CleanOldRouteMappings(olderThan string) {
 
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// LLM config methods
+
+func (s *Store) GetLLMConfig() (*LLMConfig, error) {
+	var cfg LLMConfig
+	var enabled int
+	err := s.db.QueryRow(`SELECT id, api_url, api_key, model, system_prompt, enabled FROM llm_config ORDER BY id LIMIT 1`).
+		Scan(&cfg.ID, &cfg.APIURL, &cfg.APIKey, &cfg.Model, &cfg.SystemPrompt, &enabled)
+	if err != nil {
+		if err.Error() == "sql: no rows in result set" {
+			return nil, nil
+		}
+		return nil, err
+	}
+	cfg.Enabled = enabled != 0
+	return &cfg, nil
+}
+
+func (s *Store) SaveLLMConfig(cfg LLMConfig) error {
+	var existing int64
+	s.db.QueryRow(`SELECT id FROM llm_config ORDER BY id LIMIT 1`).Scan(&existing)
+	if existing == 0 {
+		_, err := s.db.Exec(`INSERT INTO llm_config (api_url, api_key, model, system_prompt, enabled) VALUES (?, ?, ?, ?, ?)`,
+			cfg.APIURL, cfg.APIKey, cfg.Model, cfg.SystemPrompt, cfg.Enabled)
+		return err
+	}
+	_, err := s.db.Exec(`UPDATE llm_config SET api_url=?, api_key=?, model=?, system_prompt=?, enabled=? WHERE id=?`,
+		cfg.APIURL, cfg.APIKey, cfg.Model, cfg.SystemPrompt, cfg.Enabled, existing)
+	return err
+}
+
+// Bot description methods (separate from BotConfig to avoid struct conflicts)
+
+func (s *Store) UpdateBotDescription(botID int64, description string) error {
+	_, err := s.db.Exec(`UPDATE bots SET description=? WHERE id=?`, description, botID)
+	return err
+}
+
+func (s *Store) GetBotDescription(botID int64) (string, error) {
+	var desc string
+	err := s.db.QueryRow(`SELECT description FROM bots WHERE id=?`, botID).Scan(&desc)
+	if err != nil {
+		return "", err
+	}
+	return desc, nil
 }

@@ -3,3 +3,4 @@ botmux
 *.db-wal
 *.db-shm
 .env
+.omc
