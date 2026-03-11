@@ -72,16 +72,16 @@
       "type": "directory"
     },
     {
+      "path": "README.md",
+      "accessCount": 12,
+      "lastAccessed": 1773261795349,
+      "type": "file"
+    },
+    {
       "path": "server.go",
       "accessCount": 10,
       "lastAccessed": 1773242219141,
       "type": "directory"
-    },
-    {
-      "path": "README.md",
-      "accessCount": 10,
-      "lastAccessed": 1773259459585,
-      "type": "file"
     },
     {
       "path": "CLAUDE.md",
@@ -96,33 +96,45 @@
       "type": "directory"
     },
     {
+      "path": "go.mod",
+      "accessCount": 2,
+      "lastAccessed": 1773261690029,
+      "type": "file"
+    },
+    {
+      "path": "Dockerfile",
+      "accessCount": 2,
+      "lastAccessed": 1773261690524,
+      "type": "file"
+    },
+    {
+      "path": "docker-compose.yml",
+      "accessCount": 2,
+      "lastAccessed": 1773261695203,
+      "type": "file"
+    },
+    {
       "path": "",
       "accessCount": 1,
       "lastAccessed": 1773240870136,
       "type": "directory"
     },
     {
-      "path": "go.mod",
-      "accessCount": 1,
-      "lastAccessed": 1773259438277,
-      "type": "file"
-    },
-    {
-      "path": "Dockerfile",
-      "accessCount": 1,
-      "lastAccessed": 1773259445925,
-      "type": "file"
-    },
-    {
-      "path": "docker-compose.yml",
-      "accessCount": 1,
-      "lastAccessed": 1773259450749,
-      "type": "file"
-    },
-    {
       "path": ".dockerignore",
       "accessCount": 1,
       "lastAccessed": 1773259501721,
+      "type": "file"
+    },
+    {
+      "path": "main.go",
+      "accessCount": 1,
+      "lastAccessed": 1773261689654,
+      "type": "file"
+    },
+    {
+      "path": "store.go",
+      "accessCount": 1,
+      "lastAccessed": 1773261694756,
       "type": "file"
     }
   ],

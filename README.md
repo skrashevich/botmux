@@ -426,6 +426,25 @@ For full functionality, the bot should be an admin with:
 
 The bot works with any subset of these permissions — features that require missing permissions will return errors when used.
 
+## Resource Requirements
+
+Botmux is a lightweight single-binary application with minimal resource needs.
+
+| Resource | Minimum | Recommended | Notes |
+|----------|---------|-------------|-------|
+| **CPU** | 1 core | 1–2 cores | Each bot runs as a lightweight goroutine |
+| **RAM** | 20–30 MB | 50–100 MB | Pure Go, no CGO. Grows with number of bots and message volume |
+| **Disk** | ~16 MB (binary) | 100+ MB | SQLite DB grows with stored messages and chats |
+| **Docker image** | ~25–30 MB | — | Alpine-based, stripped binary |
+
+**Network:**
+- Port 8080 (HTTP) for the web UI and REST API
+- Outbound HTTPS to `api.telegram.org` (long polling per bot)
+- Outbound to backend URL (if proxy mode is enabled)
+- Outbound to LLM API endpoint (if LLM routing is enabled)
+
+**Scaling reference:** A minimal VPS (1 vCPU, 512 MB RAM, 10 GB disk) comfortably handles dozens of bots and thousands of messages per day.
+
 ## Security Notes
 
 - The web UI has **no authentication**. Do not expose it to the public internet without adding auth (reverse proxy with basic auth, VPN, etc.)
