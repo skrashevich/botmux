@@ -108,6 +108,104 @@ Custom classification system for chat members:
 - Route rules managed per-bot from the web UI with enable/disable toggle
 - Loop protection: bot-originated messages are not reverse-routed
 
+### Protocol Bridges
+- Bridge external messaging protocols (Slack, Discord, Meshtastic, HTTP webhooks) to Telegram bots
+- External messages are translated into Telegram Update format and injected into the bot's processing pipeline
+- All existing features work automatically: routing rules, LLM routing, reverse routing (Source-NAT), message tracking
+- **Bidirectional**: outgoing bot messages are sent back to the source protocol automatically
+- Chat and message mappings maintained for threading and reply context
+- Bridges are managed per-bot from the web UI (admin only)
+- **Generic webhook bridge**: `POST /bridge/{id}/incoming` with `{chat_id, user_id, username, text, message_id}`. Outgoing via callback URL
+- **Native Slack bridge**: full integration with Slack Events API and Web API (see setup guide below)
+- Supports any protocol via the generic webhook bridge; native protocol support available for Slack
+
+#### Slack Bridge Setup Guide
+
+**1. Create a Slack App**
+
+Go to [api.slack.com/apps](https://api.slack.com/apps) and click **Create New App** → **From scratch**.
+
+**2. Configure Bot Token Scopes**
+
+Navigate to **OAuth & Permissions** → **Scopes** → **Bot Token Scopes** and add:
+
+| Scope | Purpose |
+|-------|---------|
+| `chat:write` | Send messages to channels |
+| `users:read` | Resolve user display names |
+| `channels:history` | Receive messages from public channels |
+| `groups:history` | Receive messages from private channels |
+| `im:history` | Receive direct messages |
+| `mpim:history` | Receive group DMs |
+
+**3. Install App to Workspace**
+
+Click **Install to Workspace** and authorize. Copy the **Bot User OAuth Token** (`xoxb-...`).
+
+**4. Get the Signing Secret**
+
+Go to **Basic Information** → **App Credentials** → copy the **Signing Secret**.
+
+**5. Create a Bridge in BotMux**
+
+In the BotMux web UI:
+1. Select a bot → **Bridges** panel → **Add Bridge**
+2. Set **Protocol** to `Slack`
+3. Set **Config** to:
+   ```json
+   {
+     "bot_token": "xoxb-your-bot-token",
+     "signing_secret": "your-signing-secret"
+   }
+   ```
+4. **Callback URL** is not needed for Slack — outgoing messages are sent directly via Slack API
+5. Enable and save
+
+**6. Configure Slack Events API**
+
+1. In Slack App settings, go to **Event Subscriptions** → toggle **Enable Events**
+2. Set **Request URL** to: `https://your-botmux-host/bridge/{id}/incoming`
+   - Replace `{id}` with the bridge ID shown in BotMux UI
+   - BotMux will automatically respond to Slack's URL verification challenge
+   - **HTTPS is required** — Slack does not accept HTTP endpoints
+3. Under **Subscribe to bot events**, add:
+   - `message.channels` — messages in public channels
+   - `message.groups` — messages in private channels
+   - `message.im` — direct messages
+   - `message.mpim` — group direct messages
+4. Save changes
+
+**7. Invite the Bot to Channels**
+
+In Slack, invite the bot to channels where you want to receive messages:
+```
+/invite @YourBotName
+```
+
+#### How it works
+
+```
+Slack channel                    BotMux                         Telegram
+    │                              │                               │
+    │  message event (POST)        │                               │
+    ├─────────────────────────────►│  verify signature             │
+    │                              │  parse event                  │
+    │                              │  resolve username             │
+    │                              │  inject as Telegram Update    │
+    │                              ├──────────────────────────────►│
+    │                              │                               │  bot processes
+    │                              │◄──────────────────────────────┤  bot replies
+    │  chat.postMessage            │                               │
+    │◄─────────────────────────────┤  send via Slack API           │
+    │                              │  (with thread support)        │
+```
+
+- **Incoming**: Slack sends message events → BotMux verifies HMAC-SHA256 signature → translates to Telegram Update format → bot processes as a normal Telegram message
+- **Outgoing**: Bot sends a reply → BotMux calls Slack `chat.postMessage` API → message appears in the Slack channel (with thread support via `thread_ts`)
+- **Threading**: Slack thread replies are mapped to Telegram reply-to; bot replies to threaded messages maintain the thread context
+- **User names**: Display names are resolved via Slack `users.info` API (falls back to user ID)
+- **Security**: Requests are verified using HMAC-SHA256 signature (`X-Slack-Signature` header) with replay attack protection (5-minute window). **Strongly recommended** to configure `signing_secret`
+
 ### LLM-Based Smart Routing
 - Uses any **OpenAI-compatible API** (OpenAI, Ollama, LM Studio, etc.) for intelligent message routing
 - The LLM receives the message text, sender info, and a list of all available bots with their descriptions and chats

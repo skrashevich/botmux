@@ -66,34 +66,52 @@
   },
   "hotPaths": [
     {
-      "path": "templates/index.html",
-      "accessCount": 33,
-      "lastAccessed": 1773241719347,
+      "path": "server.go",
+      "accessCount": 116,
+      "lastAccessed": 1773296800526,
       "type": "directory"
     },
     {
-      "path": "README.md",
-      "accessCount": 13,
-      "lastAccessed": 1773293002385,
+      "path": "templates/index.html",
+      "accessCount": 114,
+      "lastAccessed": 1773296992310,
+      "type": "directory"
+    },
+    {
+      "path": "store.go",
+      "accessCount": 31,
+      "lastAccessed": 1773296505710,
       "type": "file"
     },
     {
-      "path": "server.go",
-      "accessCount": 11,
-      "lastAccessed": 1773293361031,
-      "type": "directory"
+      "path": "README.md",
+      "accessCount": 24,
+      "lastAccessed": 1773297055550,
+      "type": "file"
     },
     {
       "path": "CLAUDE.md",
-      "accessCount": 6,
-      "lastAccessed": 1773259478821,
+      "accessCount": 16,
+      "lastAccessed": 1773297081643,
       "type": "file"
     },
     {
       "path": "bot.go",
-      "accessCount": 4,
-      "lastAccessed": 1773241706977,
+      "accessCount": 14,
+      "lastAccessed": 1773296762924,
       "type": "directory"
+    },
+    {
+      "path": "main.go",
+      "accessCount": 10,
+      "lastAccessed": 1773296773920,
+      "type": "file"
+    },
+    {
+      "path": "auth.go",
+      "accessCount": 8,
+      "lastAccessed": 1773295015180,
+      "type": "file"
     },
     {
       "path": "docker-compose.yml",
@@ -109,32 +127,38 @@
     },
     {
       "path": "go.mod",
-      "accessCount": 2,
-      "lastAccessed": 1773261690029,
+      "accessCount": 3,
+      "lastAccessed": 1773293995379,
+      "type": "file"
+    },
+    {
+      "path": "proxy.go",
+      "accessCount": 3,
+      "lastAccessed": 1773295999100,
       "type": "file"
     },
     {
       "path": "",
-      "accessCount": 1,
-      "lastAccessed": 1773240870136,
+      "accessCount": 2,
+      "lastAccessed": 1773294320565,
       "type": "directory"
+    },
+    {
+      "path": "llm.go",
+      "accessCount": 2,
+      "lastAccessed": 1773294326456,
+      "type": "file"
+    },
+    {
+      "path": "bridge.go",
+      "accessCount": 2,
+      "lastAccessed": 1773296781384,
+      "type": "file"
     },
     {
       "path": ".dockerignore",
       "accessCount": 1,
       "lastAccessed": 1773259501721,
-      "type": "file"
-    },
-    {
-      "path": "main.go",
-      "accessCount": 1,
-      "lastAccessed": 1773261689654,
-      "type": "file"
-    },
-    {
-      "path": "store.go",
-      "accessCount": 1,
-      "lastAccessed": 1773261694756,
       "type": "file"
     }
   ],

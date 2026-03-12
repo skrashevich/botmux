@@ -932,6 +932,13 @@ p, .msg-text { text-wrap: pretty; }
         </div>
         <div id="routesList"></div>
       </div>
+      <div class="panel route-panel" style="margin-top:16px;" id="bridgesPanel">
+        <div class="route-header">
+          <div class="panel-title" id="bridgesPanelTitle">Protocol Bridges</div>
+          <button class="btn btn-primary btn-sm" onclick="showBridgeModal()" id="addBridgeBtn">+ ADD BRIDGE</button>
+        </div>
+        <div id="bridgesList"></div>
+      </div>
     </div>
   </div>
 
@@ -1232,6 +1239,50 @@ p, .msg-text { text-wrap: pretty; }
     <div class="modal-actions">
       <button class="btn" onclick="closeRouteModal()">CANCEL</button>
       <button class="btn btn-primary" onclick="saveRoute()">SAVE ROUTE</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bridge Modal -->
+<div id="bridgeModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeBridgeModal()">
+  <div class="modal" style="max-width:500px">
+    <h3 id="bridgeModalTitle" style="display:flex;align-items:center;gap:8px">
+      <span style="color:var(--cyan);font-family:var(--ff-mono);font-size:12px">&#9732;</span>
+      Add Bridge
+    </h3>
+    <input type="hidden" id="bridgeEditID">
+    <div class="modal-field">
+      <label id="bridgeNameLabel">Name</label>
+      <input type="text" id="bridgeFormName" placeholder="Discord #general">
+    </div>
+    <div class="modal-field">
+      <label id="bridgeProtocolLabel">Protocol</label>
+      <select id="bridgeFormProtocol" class="route-modal-select" onchange="updateBridgeProtocolHints()">
+        <option value="webhook">Webhook (generic HTTP)</option>
+        <option value="slack">Slack</option>
+        <option value="discord">Discord</option>
+        <option value="meshtastic">Meshtastic</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label id="bridgeCallbackLabel">Callback URL</label>
+      <input type="text" id="bridgeFormCallback" placeholder="https://your-bridge/callback">
+      <div style="font-family:var(--ff-mono);font-size:10px;color:var(--text3);margin-top:4px" id="bridgeCallbackHint">Outgoing bot messages will be POSTed here as JSON</div>
+    </div>
+    <div class="modal-field">
+      <label id="bridgeConfigLabel">Config (JSON)</label>
+      <textarea id="bridgeFormConfig" style="width:100%;min-height:60px;resize:vertical;font-family:var(--ff-mono);font-size:11px" placeholder="{}"></textarea>
+      <div style="font-family:var(--ff-mono);font-size:10px;color:var(--text3);margin-top:4px" id="bridgeConfigHint"></div>
+    </div>
+    <label class="route-toggle" style="margin:14px 0">
+      <input type="checkbox" id="bridgeFormEnabled" checked>
+      <span class="route-toggle-label">Status</span>
+      <span class="route-toggle-status route-toggle-on" id="bridgeToggleStatus">ACTIVE</span>
+    </label>
+    <div id="bridgeWebhookURL" style="display:none;margin:-4px 0 12px;padding:8px;background:var(--surface2);border-radius:6px;font-family:var(--ff-mono);font-size:11px;word-break:break-all"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeBridgeModal()">CANCEL</button>
+      <button class="btn btn-primary" onclick="saveBridge()">SAVE</button>
     </div>
   </div>
 </div>
@@ -1706,6 +1757,18 @@ const i18n = {
     note: 'Note', note_placeholder: 'optional description...',
     route_status: 'Route Status', save_route: 'SAVE ROUTE',
     condition_required: 'Condition value required', select_target_bot: 'Select target bot',
+    // bridges
+    bridges_title: 'Protocol Bridges', add_bridge: 'Add Bridge', edit_bridge: 'Edit Bridge',
+    no_bridges: 'NO BRIDGES', bridge_hint: 'Bridge external protocols (Discord, Meshtastic, etc.) to this bot',
+    bridge_name: 'Name', bridge_protocol: 'Protocol', bridge_callback: 'Callback URL',
+    bridge_callback_hint: 'Outgoing bot messages will be POSTed here as JSON',
+    bridge_config: 'Config (JSON)', bridge_webhook_url: 'Incoming webhook URL',
+    bridge_saved: 'Bridge saved', bridge_deleted: 'Bridge deleted',
+    confirm_delete_bridge: 'Delete this bridge and all its mappings?',
+    bridge_name_required: 'Bridge name required',
+    protocol_webhook: 'Webhook (generic HTTP)', protocol_slack: 'Slack', protocol_discord: 'Discord', protocol_meshtastic: 'Meshtastic',
+    slack_config_hint: 'Set bot_token (required) and signing_secret (recommended) in config JSON',
+    slack_callback_hint: 'Not needed for Slack — messages are sent directly via Slack API using bot_token',
     // bot modal
     add_bot: 'Add Bot', edit_bot: 'Edit Bot',
     name: 'Name', name_placeholder: 'My Bot',
@@ -1864,6 +1927,18 @@ const i18n = {
     note: '\u0417\u0430\u043c\u0435\u0442\u043a\u0430', note_placeholder: '\u043e\u043f\u0438\u0441\u0430\u043d\u0438\u0435...',
     route_status: '\u0421\u0442\u0430\u0442\u0443\u0441 \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u0430', save_route: '\u0421\u041e\u0425\u0420\u0410\u041d\u0418\u0422\u042c',
     condition_required: '\u0422\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044f \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u0443\u0441\u043b\u043e\u0432\u0438\u044f', select_target_bot: '\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0431\u043e\u0442\u0430',
+    // bridges
+    bridges_title: '\u041f\u0440\u043e\u0442\u043e\u043a\u043e\u043b\u044c\u043d\u044b\u0435 \u043c\u043e\u0441\u0442\u044b', add_bridge: '\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u043c\u043e\u0441\u0442', edit_bridge: '\u0420\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u043c\u043e\u0441\u0442',
+    no_bridges: '\u041d\u0415\u0422 \u041c\u041e\u0421\u0422\u041e\u0412', bridge_hint: '\u0421\u0432\u044f\u0437\u044c \u0432\u043d\u0435\u0448\u043d\u0438\u0445 \u043f\u0440\u043e\u0442\u043e\u043a\u043e\u043b\u043e\u0432 (Discord, Meshtastic \u0438 \u0434\u0440.) \u0441 \u044d\u0442\u0438\u043c \u0431\u043e\u0442\u043e\u043c',
+    bridge_name: '\u0418\u043c\u044f', bridge_protocol: '\u041f\u0440\u043e\u0442\u043e\u043a\u043e\u043b', bridge_callback: 'Callback URL',
+    bridge_callback_hint: '\u0418\u0441\u0445\u043e\u0434\u044f\u0449\u0438\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f \u0431\u043e\u0442\u0430 \u0431\u0443\u0434\u0443\u0442 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u044b \u0441\u044e\u0434\u0430 \u043a\u0430\u043a JSON',
+    bridge_config: '\u041a\u043e\u043d\u0444\u0438\u0433 (JSON)', bridge_webhook_url: 'URL \u0432\u0445\u043e\u0434\u044f\u0449\u0435\u0433\u043e \u0432\u0435\u0431\u0445\u0443\u043a\u0430',
+    bridge_saved: '\u041c\u043e\u0441\u0442 \u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d', bridge_deleted: '\u041c\u043e\u0441\u0442 \u0443\u0434\u0430\u043b\u0451\u043d',
+    confirm_delete_bridge: '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043c\u043e\u0441\u0442 \u0438 \u0432\u0441\u0435 \u0435\u0433\u043e \u043c\u0430\u043f\u043f\u0438\u043d\u0433\u0438?',
+    bridge_name_required: '\u0422\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044f \u0438\u043c\u044f \u043c\u043e\u0441\u0442\u0430',
+    protocol_webhook: 'Webhook (\u0443\u043d\u0438\u0432\u0435\u0440\u0441\u0430\u043b\u044c\u043d\u044b\u0439 HTTP)', protocol_slack: 'Slack', protocol_discord: 'Discord', protocol_meshtastic: 'Meshtastic',
+    slack_config_hint: '\u0423\u043a\u0430\u0436\u0438\u0442\u0435 bot_token (\u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u043d\u043e) \u0438 signing_secret (\u0440\u0435\u043a\u043e\u043c\u0435\u043d\u0434\u0443\u0435\u0442\u0441\u044f) \u0432 JSON-\u043a\u043e\u043d\u0444\u0438\u0433\u0435',
+    slack_callback_hint: '\u041d\u0435 \u043d\u0443\u0436\u0435\u043d \u0434\u043b\u044f Slack \u2014 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u044e\u0442\u0441\u044f \u043d\u0430\u043f\u0440\u044f\u043c\u0443\u044e \u0447\u0435\u0440\u0435\u0437 Slack API',
     // bot modal
     add_bot: '\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0431\u043e\u0442\u0430', edit_bot: '\u0420\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0431\u043e\u0442\u0430',
     name: '\u0418\u043c\u044f', name_placeholder: '\u041c\u043e\u0439 \u0431\u043e\u0442',
@@ -2410,6 +2485,7 @@ function showBotDetail() {
   ).join('');
 
   loadRoutes();
+  loadBridges();
 }
 
 // ===== ROUTES =====
@@ -2606,6 +2682,142 @@ async function deleteRoute(id) {
     await api(`/api/routes/delete?id=${id}`, { method: 'POST' });
     toast(t('route_deleted'));
     loadRoutes();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+// ===== BRIDGES =====
+
+async function loadBridges() {
+  if (!currentBotID) return;
+  const panel = document.getElementById('bridgesPanel');
+  const btn = document.getElementById('addBridgeBtn');
+  if (!isAdmin()) { if (panel) panel.style.display = 'none'; return; }
+  if (panel) panel.style.display = '';
+  if (btn) btn.style.display = '';
+  try {
+    const bridges = await api(`/api/bridges?bot_id=${currentBotID}`);
+    renderBridges(bridges);
+  } catch(e) { console.error(e); }
+}
+
+function renderBridges(bridges) {
+  const el = document.getElementById('bridgesList');
+  if (!bridges || bridges.length === 0) {
+    el.innerHTML = `<div class="route-empty">
+      <div>${t('no_bridges')}</div>
+      <div class="route-empty-hint">${t('bridge_hint')}</div>
+    </div>`;
+    return;
+  }
+  el.innerHTML = bridges.map(b => {
+    const statusClass = b.enabled ? 'route-toggle-on' : 'route-toggle-off';
+    const statusText = b.enabled ? 'ON' : 'OFF';
+    const webhookURL = `${location.origin}/bridge/${b.id}/incoming`;
+    const lastAct = b.last_activity ? b.last_activity.replace('T',' ').substring(0,19) : '\u2014';
+    const errInfo = b.last_error ? `<span style="color:var(--magenta);font-size:10px;margin-left:8px">${esc(b.last_error)}</span>` : '';
+    return `<div class="route-item" style="padding:10px 14px">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span class="badge" style="background:var(--cyan-dim);color:var(--cyan);font-size:9px;padding:1px 6px">${esc(b.protocol.toUpperCase())}</span>
+          <span style="font-weight:600">${esc(b.name)}</span>
+          <span class="route-toggle-status ${statusClass}" style="font-size:9px">${statusText}</span>
+        </div>
+        <div style="font-family:var(--ff-mono);font-size:10px;color:var(--text3);word-break:break-all">
+          IN: <span style="cursor:pointer;border-bottom:1px dashed var(--cyan-dim)" onclick="navigator.clipboard.writeText('${webhookURL}');this.style.color='var(--green)';setTimeout(()=>this.style.color='',1000)" title="Click to copy">${esc(webhookURL)}</span>
+        </div>
+        ${b.callback_url ? `<div style="font-family:var(--ff-mono);font-size:10px;color:var(--text3);word-break:break-all">OUT: ${esc(b.callback_url)}</div>` : ''}
+        <div style="font-size:10px;color:var(--text3);margin-top:2px">${t('last_activity')}: ${lastAct}${errInfo}</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="btn btn-sm" onclick="showBridgeModal(${b.id})" style="padding:2px 8px;font-size:10px">${t('edit')}</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteBridge(${b.id})" style="padding:2px 8px;font-size:10px">${t('delete')}</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function showBridgeModal(bridgeId) {
+  const isEdit = !!bridgeId;
+  document.getElementById('bridgeModalTitle').innerHTML = `<span style="color:var(--cyan);font-family:var(--ff-mono);font-size:12px">&#9732;</span> ${isEdit ? t('edit_bridge') : t('add_bridge')}`;
+  document.getElementById('bridgeEditID').value = bridgeId || '';
+  document.getElementById('bridgeFormName').value = '';
+  document.getElementById('bridgeFormProtocol').value = 'webhook';
+  document.getElementById('bridgeFormCallback').value = '';
+  document.getElementById('bridgeFormConfig').value = '{}';
+  document.getElementById('bridgeFormEnabled').checked = true;
+  document.getElementById('bridgeWebhookURL').style.display = 'none';
+
+  if (isEdit) {
+    api(`/api/bridges?bot_id=${currentBotID}`).then(bridges => {
+      const b = bridges.find(x => x.id === bridgeId);
+      if (b) {
+        document.getElementById('bridgeFormName').value = b.name;
+        document.getElementById('bridgeFormProtocol').value = b.protocol;
+        document.getElementById('bridgeFormCallback').value = b.callback_url;
+        document.getElementById('bridgeFormConfig').value = b.config || '{}';
+        document.getElementById('bridgeFormEnabled').checked = b.enabled;
+        const whURL = `${location.origin}/bridge/${b.id}/incoming`;
+        const whEl = document.getElementById('bridgeWebhookURL');
+        whEl.innerHTML = `<span style="color:var(--text3)">${t('bridge_webhook_url')}:</span><br><span style="cursor:pointer" onclick="navigator.clipboard.writeText('${whURL}');this.style.color='var(--green)';setTimeout(()=>this.style.color='',1000)" title="Click to copy">${esc(whURL)}</span>`;
+        whEl.style.display = '';
+      }
+    });
+  }
+  updateBridgeProtocolHints();
+  document.getElementById('bridgeModal').style.display = 'flex';
+}
+
+function closeBridgeModal() { document.getElementById('bridgeModal').style.display = 'none'; }
+
+function updateBridgeProtocolHints() {
+  const proto = document.getElementById('bridgeFormProtocol').value;
+  const callbackHint = document.getElementById('bridgeCallbackHint');
+  const configHint = document.getElementById('bridgeConfigHint');
+  const callbackInput = document.getElementById('bridgeFormCallback');
+  const configInput = document.getElementById('bridgeFormConfig');
+  if (proto === 'slack') {
+    callbackHint.textContent = t('slack_callback_hint');
+    configHint.textContent = t('slack_config_hint');
+    callbackInput.placeholder = '(optional)';
+    if (configInput.value === '{}') configInput.value = '{"bot_token": "xoxb-...", "signing_secret": ""}';
+  } else {
+    callbackHint.textContent = t('bridge_callback_hint');
+    configHint.textContent = '';
+    callbackInput.placeholder = 'https://your-bridge/callback';
+    if (configInput.value === '{"bot_token": "xoxb-...", "signing_secret": ""}') configInput.value = '{}';
+  }
+}
+
+async function saveBridge() {
+  const editID = document.getElementById('bridgeEditID').value;
+  const data = {
+    name: document.getElementById('bridgeFormName').value.trim(),
+    protocol: document.getElementById('bridgeFormProtocol').value,
+    linked_bot_id: currentBotID,
+    callback_url: document.getElementById('bridgeFormCallback').value.trim(),
+    config: document.getElementById('bridgeFormConfig').value.trim() || '{}',
+    enabled: document.getElementById('bridgeFormEnabled').checked,
+  };
+  if (!data.name) { toast(t('bridge_name_required'), 'error'); return; }
+  try {
+    if (editID) {
+      data.id = parseInt(editID);
+      await api('/api/bridges/update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+    } else {
+      await api('/api/bridges/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+    }
+    closeBridgeModal();
+    toast(t('bridge_saved'));
+    loadBridges();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteBridge(id) {
+  if (!confirm(t('confirm_delete_bridge'))) return;
+  try {
+    await api(`/api/bridges/delete?id=${id}`, { method: 'POST' });
+    toast(t('bridge_deleted'));
+    loadBridges();
   } catch(e) { toast(e.message, 'error'); }
 }
 

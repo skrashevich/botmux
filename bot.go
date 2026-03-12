@@ -10,10 +10,14 @@ import (
 	tgbotapi "github.com/OvyFlash/telegram-bot-api"
 )
 
+// OnMessageSentFunc is called when a bot sends a message (for bridge outgoing notifications)
+type OnMessageSentFunc func(botID int64, chatID int64, text string, msgID int, replyToMsgID int)
+
 type Bot struct {
-	api   *tgbotapi.BotAPI
-	store *Store
-	botID int64 // ID in bots table
+	api           *tgbotapi.BotAPI
+	store         *Store
+	botID         int64 // ID in bots table
+	onMessageSent OnMessageSentFunc
 }
 
 func NewBot(token string, store *Store, botID int64) (*Bot, error) {
@@ -357,6 +361,9 @@ func (b *Bot) SendMessage(chatID int64, text string) error {
 		Text:     text,
 		Date:     int64(sent.Date),
 	})
+	if b.onMessageSent != nil {
+		b.onMessageSent(b.botID, chatID, text, sent.MessageID, 0)
+	}
 	return nil
 }
 
@@ -374,6 +381,9 @@ func (b *Bot) SendMessageGetID(chatID int64, text string) (int, error) {
 		FromUser: fromUser, FromID: b.api.Self.ID,
 		Text: text, Date: int64(sent.Date),
 	})
+	if b.onMessageSent != nil {
+		b.onMessageSent(b.botID, chatID, text, sent.MessageID, 0)
+	}
 	return sent.MessageID, nil
 }
 
@@ -393,6 +403,9 @@ func (b *Bot) SendMessageReply(chatID int64, text string, replyToMsgID int) (int
 		Text: text, Date: int64(sent.Date),
 		ReplyToID: replyToMsgID,
 	})
+	if b.onMessageSent != nil {
+		b.onMessageSent(b.botID, chatID, text, sent.MessageID, replyToMsgID)
+	}
 	return sent.MessageID, nil
 }
 

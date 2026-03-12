@@ -25,6 +25,7 @@ var templateFS embed.FS
 type Server struct {
 	store          *Store
 	proxy          *ProxyManager
+	bridge         *BridgeManager
 	mu             sync.RWMutex
 	bots           map[int64]*Bot // botID -> Bot (for Telegram API calls)
 	webhookPath    string
@@ -37,6 +38,10 @@ func NewServer(store *Store, proxy *ProxyManager) *Server {
 		proxy: proxy,
 		bots:  make(map[int64]*Bot),
 	}
+}
+
+func (s *Server) SetBridgeManager(bm *BridgeManager) {
+	s.bridge = bm
 }
 
 func (s *Server) RegisterBot(botID int64, bot *Bot) {
@@ -159,6 +164,13 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/routes/add", s.adminOnly(s.handleAddRoute))
 	mux.HandleFunc("/api/routes/update", s.adminOnly(s.handleUpdateRoute))
 	mux.HandleFunc("/api/routes/delete", s.adminOnly(s.handleDeleteRoute))
+
+	// Bridges — admin only for management, no auth for incoming webhook
+	mux.HandleFunc("/api/bridges", s.adminOnly(s.handleBridgeList))
+	mux.HandleFunc("/api/bridges/add", s.adminOnly(s.handleBridgeAdd))
+	mux.HandleFunc("/api/bridges/update", s.adminOnly(s.handleBridgeUpdate))
+	mux.HandleFunc("/api/bridges/delete", s.adminOnly(s.handleBridgeDelete))
+	mux.HandleFunc("/bridge/", s.handleBridgeIncoming) // no auth — external services POST here
 
 	// LLM routing config — admin only
 	mux.HandleFunc("/api/llm-config", s.authMiddleware(s.handleGetLLMConfig))
@@ -283,6 +295,9 @@ func (s *Server) handleBotAdd(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeError(w, err)
 			return
+		}
+		if s.bridge != nil {
+			s.bridge.InstallHookOnBot(managedBot)
 		}
 		s.proxy.RegisterManagedBot(id, managedBot)
 	}
@@ -1231,6 +1246,221 @@ func (s *Server) handleDeleteRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// Bridge handlers
+
+// handleBridgeList returns all bridges, optionally filtered by bot_id.
+// @Summary List bridges
+// @Description Returns all protocol bridges. Filter by bot_id query param to get bridges for a specific bot.
+// @Tags bridges
+// @Produce json
+// @Param bot_id query int false "Filter by linked bot ID"
+// @Success 200 {array} BridgeConfig
+// @Router /api/bridges [get]
+// @Security CookieAuth || BearerAuth
+func (s *Server) handleBridgeList(w http.ResponseWriter, r *http.Request) {
+	botIDStr := r.URL.Query().Get("bot_id")
+	if botIDStr != "" {
+		botID, _ := strconv.ParseInt(botIDStr, 10, 64)
+		bridges, err := s.store.GetBridgesForBot(botID)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, bridges)
+		return
+	}
+	bridges, err := s.store.GetBridges()
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, bridges)
+}
+
+// handleBridgeAdd creates a new bridge.
+// @Summary Add bridge
+// @Description Creates a new protocol bridge linked to a Telegram bot. Admin only.
+// @Tags bridges
+// @Accept json
+// @Produce json
+// @Param bridge body BridgeConfig true "Bridge configuration"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} map[string]string
+// @Failure 405 {string} string "Method not allowed"
+// @Router /api/bridges/add [post]
+// @Security CookieAuth || BearerAuth
+func (s *Server) handleBridgeAdd(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	var req BridgeConfig
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, err)
+		return
+	}
+	if req.Name == "" || req.LinkedBotID == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		w.Write([]byte(`{"error":"name and linked_bot_id required"}`))
+		return
+	}
+	if req.Protocol == "" {
+		req.Protocol = "webhook"
+	}
+	id, err := s.store.AddBridge(req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if s.bridge != nil {
+		s.bridge.Reload(id)
+	}
+	writeJSON(w, map[string]interface{}{"status": "ok", "id": id})
+}
+
+// handleBridgeUpdate updates an existing bridge.
+// @Summary Update bridge
+// @Description Updates bridge settings. Admin only.
+// @Tags bridges
+// @Accept json
+// @Produce json
+// @Param bridge body BridgeConfig true "Bridge configuration (must include id)"
+// @Success 200 {object} map[string]string
+// @Failure 405 {string} string "Method not allowed"
+// @Router /api/bridges/update [post]
+// @Security CookieAuth || BearerAuth
+func (s *Server) handleBridgeUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	var req BridgeConfig
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := s.store.UpdateBridge(req); err != nil {
+		writeError(w, err)
+		return
+	}
+	if s.bridge != nil {
+		s.bridge.Reload(req.ID)
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// handleBridgeDelete removes a bridge and its mappings.
+// @Summary Delete bridge
+// @Description Deletes a bridge and all its chat/message mappings. Admin only.
+// @Tags bridges
+// @Produce json
+// @Param id query int true "Bridge ID"
+// @Success 200 {object} map[string]string
+// @Failure 405 {string} string "Method not allowed"
+// @Router /api/bridges/delete [post]
+// @Security CookieAuth || BearerAuth
+func (s *Server) handleBridgeDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	if s.bridge != nil {
+		s.bridge.Remove(id)
+	}
+	if err := s.store.DeleteBridge(id); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// handleBridgeIncoming receives messages from external protocol bridges.
+// @Summary Bridge incoming webhook
+// @Description Receives a message from an external protocol and injects it as a Telegram update. URL format: /bridge/{id}/incoming. No authentication — bridges use the URL as a secret. For Slack bridges, handles Events API payloads (including url_verification challenge) and verifies request signatures. For webhook bridges, expects BridgeIncomingMessage JSON.
+// @Tags bridges
+// @Accept json
+// @Produce json
+// @Param id path int true "Bridge ID"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string "Invalid Slack signature"
+// @Failure 404 {object} map[string]string
+// @Router /bridge/{id}/incoming [post]
+func (s *Server) handleBridgeIncoming(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+
+	// Parse bridge ID from URL: /bridge/{id}/incoming
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) < 3 || parts[2] != "incoming" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(404)
+		w.Write([]byte(`{"error":"invalid bridge URL, use /bridge/{id}/incoming"}`))
+		return
+	}
+	bridgeID, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		w.Write([]byte(`{"error":"invalid bridge ID"}`))
+		return
+	}
+
+	if s.bridge == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(500)
+		w.Write([]byte(`{"error":"bridge manager not initialized"}`))
+		return
+	}
+
+	// Read body once (needed for Slack signature verification)
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		w.Write([]byte(`{"error":"failed to read body"}`))
+		return
+	}
+
+	// Check if this is a Slack bridge — route to Slack handler
+	cfg := s.bridge.GetBridge(bridgeID)
+	if cfg != nil && isSlackBridge(cfg) {
+		respBody, contentType, status, err := s.bridge.HandleSlackEvent(bridgeID, r.Header, body)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.WriteHeader(status)
+		w.Write(respBody)
+		return
+	}
+
+	// Generic webhook bridge — parse as BridgeIncomingMessage
+	var msg BridgeIncomingMessage
+	if err := json.Unmarshal(body, &msg); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		w.Write([]byte(`{"error":"invalid JSON"}`))
+		return
+	}
+
+	if err := s.bridge.HandleIncoming(bridgeID, msg); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
