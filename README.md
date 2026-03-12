@@ -32,6 +32,17 @@ Give it a bot token — it discovers which chats the bot is in, whether it has a
 
 ## Features
 
+### How It Works
+
+**Important:** BotMux takes over long polling for every bot it manages. Only one client can poll a bot token at a time (Telegram limitation), so:
+
+- If your bot currently **polls** (`getUpdates`) — stop it and switch the backend to accept webhook-style HTTP POST requests. BotMux will poll Telegram and forward updates to your backend.
+- If your bot already uses **webhooks** — BotMux will switch it to polling and proxy updates back to the webhook endpoint. No changes needed on the backend side.
+
+This applies to **all modes** — monitoring, admin actions, and reverse proxy all require BotMux to own the polling loop.
+
+**Capturing outgoing messages:** Telegram's `getUpdates` only returns incoming messages — it does not include messages sent by the bot itself. If your backend sends replies directly via `api.telegram.org`, BotMux won't see them. To fix this, point your backend at BotMux's built-in **API proxy** (`/tgapi/`) instead of `api.telegram.org`. The proxy forwards requests to Telegram transparently and captures outgoing messages into the database. See [Capturing Bot Replies](#capturing-bot-replies-api-proxy) for details.
+
 ### Multi-Bot Management
 - Run multiple bots in a single instance
 - Add bots via CLI flag or through the web UI — no functional difference
