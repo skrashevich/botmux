@@ -780,7 +780,7 @@ func (pm *ProxyManager) getUpdates(ctx context.Context, token string, offset int
 		"limit":   100,
 	})
 
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates", token)
+	url := fmt.Sprintf("%s/bot%s/getUpdates", telegramAPIURL, token)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, err
@@ -887,7 +887,7 @@ func (pm *ProxyManager) handleWebhookReply(token string, body []byte) {
 		return
 	}
 
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/%s", token, method)
+	apiURL := fmt.Sprintf("%s/bot%s/%s", telegramAPIURL, token, method)
 	log.Printf("[proxy] handleWebhookReply: executing method=%s (%d bytes params)", method, len(data))
 
 	resp, err := pm.client.Post(apiURL, "application/json", bytes.NewReader(data))
@@ -903,7 +903,7 @@ func (pm *ProxyManager) handleWebhookReply(token string, body []byte) {
 }
 
 func (pm *ProxyManager) ValidateToken(token string) (string, error) {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/getMe", token)
+	url := fmt.Sprintf("%s/bot%s/getMe", telegramAPIURL, token)
 	resp, err := pm.client.Get(url)
 	if err != nil {
 		return "", err
@@ -928,7 +928,7 @@ func (pm *ProxyManager) ValidateToken(token string) (string, error) {
 
 func (pm *ProxyManager) DeleteWebhook(token string) error {
 	log.Printf("[proxy] DeleteWebhook: removing webhook")
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/deleteWebhook", token)
+	url := fmt.Sprintf("%s/bot%s/deleteWebhook", telegramAPIURL, token)
 	resp, err := pm.client.Get(url)
 	if err != nil {
 		return err

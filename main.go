@@ -4,7 +4,12 @@ import (
 	"flag"
 	"log"
 	"os"
+	"strings"
 )
+
+// telegramAPIURL is the base URL for Telegram Bot API requests.
+// Override with -tg-api flag or TELEGRAM_API_URL env var for testing or local Bot API server.
+var telegramAPIURL = "https://api.telegram.org"
 
 // @title BotMux API
 // @version 1.0
@@ -25,10 +30,19 @@ func main() {
 	addr := flag.String("addr", ":8080", "HTTP listen address")
 	dbPath := flag.String("db", "botdata.db", "SQLite database path")
 	webhookURL := flag.String("webhook", "", "Set webhook URL for the CLI bot (requires -token)")
+	tgAPI := flag.String("tg-api", "", "Custom Telegram API base URL (default: https://api.telegram.org)")
 	flag.Parse()
 
 	if *token == "" {
 		*token = os.Getenv("TELEGRAM_BOT_TOKEN")
+	}
+
+	if *tgAPI == "" {
+		*tgAPI = os.Getenv("TELEGRAM_API_URL")
+	}
+	if *tgAPI != "" {
+		telegramAPIURL = strings.TrimRight(*tgAPI, "/")
+		log.Printf("Using custom Telegram API: %s", telegramAPIURL)
 	}
 
 	store, err := NewStore(*dbPath)

@@ -2184,7 +2184,7 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Forward to Telegram
-	tgURL := fmt.Sprintf("https://api.telegram.org/bot%s/%s", botToken, method)
+	tgURL := fmt.Sprintf("%s/bot%s/%s", telegramAPIURL, botToken, method)
 	tgReq, err := http.NewRequestWithContext(r.Context(), r.Method, tgURL, io.NopCloser(strings.NewReader(string(reqBody))))
 	if err != nil {
 		http.Error(w, "Failed to create request", 500)
@@ -2264,7 +2264,7 @@ func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 1: getFile to get file_path
-	getFileURL := fmt.Sprintf("https://api.telegram.org/bot%s/getFile?file_id=%s", token, fileID)
+	getFileURL := fmt.Sprintf("%s/bot%s/getFile?file_id=%s", telegramAPIURL, token, fileID)
 	resp, err := http.Get(getFileURL)
 	if err != nil {
 		http.Error(w, "getFile failed", 500)
@@ -2285,7 +2285,7 @@ func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 2: Download the file
-	downloadURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", token, fileResp.Result.FilePath)
+	downloadURL := fmt.Sprintf("%s/file/bot%s/%s", telegramAPIURL, token, fileResp.Result.FilePath)
 	fileResp2, err := http.Get(downloadURL)
 	if err != nil {
 		http.Error(w, "download failed", 500)

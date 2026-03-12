@@ -21,7 +21,13 @@ type Bot struct {
 }
 
 func NewBot(token string, store *Store, botID int64) (*Bot, error) {
-	api, err := tgbotapi.NewBotAPI(token)
+	var api *tgbotapi.BotAPI
+	var err error
+	if telegramAPIURL != "https://api.telegram.org" {
+		api, err = tgbotapi.NewBotAPIWithAPIEndpoint(token, telegramAPIURL+"/bot%s/%s")
+	} else {
+		api, err = tgbotapi.NewBotAPI(token)
+	}
 	if err != nil {
 		return nil, err
 	}
