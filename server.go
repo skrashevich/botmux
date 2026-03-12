@@ -255,6 +255,14 @@ func (s *Server) handleBotAdd(w http.ResponseWriter, r *http.Request) {
 		req.PollingTimeout = 30
 	}
 
+	// Validate token and auto-populate bot_username
+	username, err := s.proxy.ValidateToken(req.Token)
+	if err != nil {
+		writeError(w, fmt.Errorf("invalid bot token: %w", err))
+		return
+	}
+	req.BotUsername = username
+
 	// Delete webhook before starting polling
 	if req.ManageEnabled || req.ProxyEnabled {
 		if err := s.proxy.DeleteWebhook(req.Token); err != nil {
@@ -318,6 +326,16 @@ func (s *Server) handleBotUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Source = existing.Source
+
+	// Re-validate token and update bot_username if token changed
+	if req.Token != existing.Token || req.BotUsername == "" {
+		username, err := s.proxy.ValidateToken(req.Token)
+		if err != nil {
+			writeError(w, fmt.Errorf("invalid bot token: %w", err))
+			return
+		}
+		req.BotUsername = username
+	}
 
 	if err := s.store.UpdateBotConfig(req); err != nil {
 		writeError(w, err)
