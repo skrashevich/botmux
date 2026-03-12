@@ -398,6 +398,40 @@ func (s *Store) migrate() error {
 		return err
 	}
 
+	// Create bridge tables
+	_, err = s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS bridges (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			protocol TEXT NOT NULL DEFAULT 'webhook',
+			linked_bot_id INTEGER NOT NULL,
+			config TEXT NOT NULL DEFAULT '{}',
+			callback_url TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL DEFAULT '',
+			last_activity TEXT NOT NULL DEFAULT '',
+			last_error TEXT NOT NULL DEFAULT ''
+		);
+		CREATE TABLE IF NOT EXISTS bridge_chat_mappings (
+			bridge_id INTEGER NOT NULL,
+			external_chat_id TEXT NOT NULL,
+			telegram_chat_id INTEGER NOT NULL,
+			PRIMARY KEY (bridge_id, external_chat_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_bridge_chat_tg ON bridge_chat_mappings(bridge_id, telegram_chat_id);
+		CREATE TABLE IF NOT EXISTS bridge_msg_mappings (
+			bridge_id INTEGER NOT NULL,
+			external_msg_id TEXT NOT NULL,
+			telegram_msg_id INTEGER NOT NULL,
+			telegram_chat_id INTEGER NOT NULL,
+			PRIMARY KEY (bridge_id, external_msg_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_bridge_msg_tg ON bridge_msg_mappings(bridge_id, telegram_msg_id)
+	`)
+	if err != nil {
+		return err
+	}
+
 	// Create default admin if no users exist
 	var userCount int
 	s.db.QueryRow(`SELECT COUNT(*) FROM auth_users`).Scan(&userCount)
@@ -1245,4 +1279,128 @@ func (s *Store) GetBotDescription(botID int64) (string, error) {
 		return "", err
 	}
 	return desc, nil
+}
+
+// Bridge methods
+
+func (s *Store) GetBridges() ([]BridgeConfig, error) {
+	rows, err := s.db.Query(`SELECT id, name, protocol, linked_bot_id, config, callback_url, enabled, created_at, last_activity, last_error FROM bridges ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []BridgeConfig
+	for rows.Next() {
+		var b BridgeConfig
+		if err := rows.Scan(&b.ID, &b.Name, &b.Protocol, &b.LinkedBotID, &b.Config, &b.CallbackURL, &b.Enabled, &b.CreatedAt, &b.LastActivity, &b.LastError); err != nil {
+			return nil, err
+		}
+		result = append(result, b)
+	}
+	return result, nil
+}
+
+func (s *Store) GetBridge(id int64) (*BridgeConfig, error) {
+	var b BridgeConfig
+	err := s.db.QueryRow(`SELECT id, name, protocol, linked_bot_id, config, callback_url, enabled, created_at, last_activity, last_error FROM bridges WHERE id=?`, id).
+		Scan(&b.ID, &b.Name, &b.Protocol, &b.LinkedBotID, &b.Config, &b.CallbackURL, &b.Enabled, &b.CreatedAt, &b.LastActivity, &b.LastError)
+	if err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+func (s *Store) GetBridgesForBot(botID int64) ([]BridgeConfig, error) {
+	rows, err := s.db.Query(`SELECT id, name, protocol, linked_bot_id, config, callback_url, enabled, created_at, last_activity, last_error FROM bridges WHERE linked_bot_id=? ORDER BY id`, botID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []BridgeConfig
+	for rows.Next() {
+		var b BridgeConfig
+		if err := rows.Scan(&b.ID, &b.Name, &b.Protocol, &b.LinkedBotID, &b.Config, &b.CallbackURL, &b.Enabled, &b.CreatedAt, &b.LastActivity, &b.LastError); err != nil {
+			return nil, err
+		}
+		result = append(result, b)
+	}
+	return result, nil
+}
+
+func (s *Store) AddBridge(b BridgeConfig) (int64, error) {
+	res, err := s.db.Exec(`INSERT INTO bridges (name, protocol, linked_bot_id, config, callback_url, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		b.Name, b.Protocol, b.LinkedBotID, b.Config, b.CallbackURL, b.Enabled, time.Now().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (s *Store) UpdateBridge(b BridgeConfig) error {
+	_, err := s.db.Exec(`UPDATE bridges SET name=?, protocol=?, linked_bot_id=?, config=?, callback_url=?, enabled=? WHERE id=?`,
+		b.Name, b.Protocol, b.LinkedBotID, b.Config, b.CallbackURL, b.Enabled, b.ID)
+	return err
+}
+
+func (s *Store) DeleteBridge(id int64) error {
+	_, err := s.db.Exec(`DELETE FROM bridges WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	s.db.Exec(`DELETE FROM bridge_chat_mappings WHERE bridge_id=?`, id)
+	s.db.Exec(`DELETE FROM bridge_msg_mappings WHERE bridge_id=?`, id)
+	return nil
+}
+
+func (s *Store) UpdateBridgeActivity(bridgeID int64, lastError string) {
+	if lastError != "" {
+		s.db.Exec(`UPDATE bridges SET last_activity=?, last_error=? WHERE id=?`, time.Now().Format(time.RFC3339), lastError, bridgeID)
+	} else {
+		s.db.Exec(`UPDATE bridges SET last_activity=?, last_error='' WHERE id=?`, time.Now().Format(time.RFC3339), bridgeID)
+	}
+}
+
+// Bridge chat mappings
+
+func (s *Store) SaveBridgeChatMapping(bridgeID int64, externalChatID string, telegramChatID int64) {
+	s.db.Exec(`INSERT OR REPLACE INTO bridge_chat_mappings (bridge_id, external_chat_id, telegram_chat_id) VALUES (?, ?, ?)`,
+		bridgeID, externalChatID, telegramChatID)
+}
+
+func (s *Store) GetBridgeChatMapping(bridgeID int64, externalChatID string) (int64, error) {
+	var tgChatID int64
+	err := s.db.QueryRow(`SELECT telegram_chat_id FROM bridge_chat_mappings WHERE bridge_id=? AND external_chat_id=?`,
+		bridgeID, externalChatID).Scan(&tgChatID)
+	return tgChatID, err
+}
+
+func (s *Store) GetBridgeChatMappingReverse(bridgeID int64, telegramChatID int64) (string, error) {
+	var extChatID string
+	err := s.db.QueryRow(`SELECT external_chat_id FROM bridge_chat_mappings WHERE bridge_id=? AND telegram_chat_id=?`,
+		bridgeID, telegramChatID).Scan(&extChatID)
+	return extChatID, err
+}
+
+// Bridge message mappings
+
+func (s *Store) SaveBridgeMsgMapping(bridgeID int64, externalMsgID string, telegramMsgID int, telegramChatID int64) {
+	s.db.Exec(`INSERT OR REPLACE INTO bridge_msg_mappings (bridge_id, external_msg_id, telegram_msg_id, telegram_chat_id) VALUES (?, ?, ?, ?)`,
+		bridgeID, externalMsgID, telegramMsgID, telegramChatID)
+}
+
+func (s *Store) GetBridgeMsgMapping(bridgeID int64, externalMsgID string) (*BridgeMsgMapping, error) {
+	var m BridgeMsgMapping
+	err := s.db.QueryRow(`SELECT bridge_id, external_msg_id, telegram_msg_id, telegram_chat_id FROM bridge_msg_mappings WHERE bridge_id=? AND external_msg_id=?`,
+		bridgeID, externalMsgID).Scan(&m.BridgeID, &m.ExternalMsgID, &m.TelegramMsgID, &m.TelegramChatID)
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+func (s *Store) GetBridgeMsgMappingReverse(bridgeID int64, telegramMsgID int) (string, error) {
+	var extMsgID string
+	err := s.db.QueryRow(`SELECT external_msg_id FROM bridge_msg_mappings WHERE bridge_id=? AND telegram_msg_id=?`,
+		bridgeID, telegramMsgID).Scan(&extMsgID)
+	return extMsgID, err
 }

@@ -108,6 +108,17 @@ Custom classification system for chat members:
 - Route rules managed per-bot from the web UI with enable/disable toggle
 - Loop protection: bot-originated messages are not reverse-routed
 
+### Protocol Bridges
+- Bridge external messaging protocols (Discord, Meshtastic, HTTP webhooks) to Telegram bots
+- External messages are translated into Telegram Update format and injected into the bot's processing pipeline
+- All existing features work automatically: routing rules, LLM routing, reverse routing (Source-NAT), message tracking
+- **Bidirectional**: outgoing bot messages are POSTed to the bridge's callback URL for translation back to the source protocol
+- Chat and message mappings maintained for threading and reply context
+- Bridges are managed per-bot from the web UI (admin only)
+- **Incoming webhook**: `POST /bridge/{id}/incoming` with `{chat_id, user_id, username, text, message_id}`
+- **Outgoing callback**: bot responses POSTed as `{bridge_id, chat_id, text, telegram_msg_id, reply_to}`
+- Supports any protocol via the generic webhook bridge; specialized protocol support (Discord, Meshtastic) planned
+
 ### LLM-Based Smart Routing
 - Uses any **OpenAI-compatible API** (OpenAI, Ollama, LM Studio, etc.) for intelligent message routing
 - The LLM receives the message text, sender info, and a list of all available bots with their descriptions and chats

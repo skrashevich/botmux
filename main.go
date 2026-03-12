@@ -82,6 +82,14 @@ func main() {
 	proxy.Start()
 	defer proxy.StopAll()
 
+	// Start BridgeManager
+	bridgeMgr := NewBridgeManager(store, proxy)
+	bridgeMgr.Start()
+	server.SetBridgeManager(bridgeMgr)
+
+	// Set bridge notification hook on all managed bots
+	bridgeMgr.InstallHooks()
+
 	if err := server.Start(*addr); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
