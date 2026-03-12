@@ -382,7 +382,17 @@ func (s *Store) migrate() error {
 			user_id INTEGER NOT NULL,
 			bot_id INTEGER NOT NULL,
 			PRIMARY KEY (user_id, bot_id)
-		)
+		);
+		CREATE TABLE IF NOT EXISTS api_keys (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			key_hash TEXT NOT NULL,
+			name TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			last_used TEXT,
+			enabled INTEGER NOT NULL DEFAULT 1
+		);
+		CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id)
 	`)
 	if err != nil {
 		return err
@@ -1099,6 +1109,92 @@ func (s *Store) GetBotConfigsForUser(userID int64) ([]BotConfig, error) {
 		bots = append(bots, b)
 	}
 	return bots, nil
+}
+
+// API key methods
+
+type APIKey struct {
+	ID        int64  `json:"id"`
+	UserID    int64  `json:"user_id"`
+	Name      string `json:"name"`
+	CreatedAt string `json:"created_at"`
+	LastUsed  string `json:"last_used"`
+	Enabled   bool   `json:"enabled"`
+}
+
+func (s *Store) CreateAPIKey(userID int64, keyHash, name string) (int64, error) {
+	result, err := s.db.Exec(`INSERT INTO api_keys (user_id, key_hash, name, created_at, enabled) VALUES (?, ?, ?, ?, 1)`,
+		userID, keyHash, name, time.Now().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
+func (s *Store) GetAPIKeys(userID int64) ([]APIKey, error) {
+	rows, err := s.db.Query(`SELECT id, user_id, name, created_at, COALESCE(last_used,''), enabled FROM api_keys WHERE user_id=? ORDER BY created_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []APIKey
+	for rows.Next() {
+		var k APIKey
+		var enabled int
+		if err := rows.Scan(&k.ID, &k.UserID, &k.Name, &k.CreatedAt, &k.LastUsed, &enabled); err != nil {
+			return nil, err
+		}
+		k.Enabled = enabled != 0
+		keys = append(keys, k)
+	}
+	return keys, nil
+}
+
+func (s *Store) GetAllAPIKeys() ([]APIKey, error) {
+	rows, err := s.db.Query(`SELECT id, user_id, name, created_at, COALESCE(last_used,''), enabled FROM api_keys ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []APIKey
+	for rows.Next() {
+		var k APIKey
+		var enabled int
+		if err := rows.Scan(&k.ID, &k.UserID, &k.Name, &k.CreatedAt, &k.LastUsed, &enabled); err != nil {
+			return nil, err
+		}
+		k.Enabled = enabled != 0
+		keys = append(keys, k)
+	}
+	return keys, nil
+}
+
+func (s *Store) DeleteAPIKey(id int64) error {
+	_, err := s.db.Exec(`DELETE FROM api_keys WHERE id=?`, id)
+	return err
+}
+
+func (s *Store) ToggleAPIKey(id int64, enabled bool) error {
+	val := 0
+	if enabled {
+		val = 1
+	}
+	_, err := s.db.Exec(`UPDATE api_keys SET enabled=? WHERE id=?`, val, id)
+	return err
+}
+
+func (s *Store) GetUserByAPIKey(keyHash string) (*AuthUser, error) {
+	var userID int64
+	var enabled int
+	err := s.db.QueryRow(`SELECT user_id, enabled FROM api_keys WHERE key_hash=?`, keyHash).Scan(&userID, &enabled)
+	if err != nil {
+		return nil, err
+	}
+	if enabled == 0 {
+		return nil, nil
+	}
+	s.db.Exec(`UPDATE api_keys SET last_used=? WHERE key_hash=?`, time.Now().Format(time.RFC3339), keyHash)
+	return s.GetUserByID(userID)
 }
 
 func (s *Store) Close() error {

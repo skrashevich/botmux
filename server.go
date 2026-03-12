@@ -107,6 +107,12 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/auth/users/bots/assign", s.adminOnly(s.handleAssignBot))
 	mux.HandleFunc("/api/auth/users/bots/revoke", s.adminOnly(s.handleRevokeBot))
 
+	// API keys — admin only
+	mux.HandleFunc("/api/auth/api-keys", s.adminOnly(s.handleListAPIKeys))
+	mux.HandleFunc("/api/auth/api-keys/create", s.adminOnly(s.handleCreateAPIKey))
+	mux.HandleFunc("/api/auth/api-keys/delete", s.adminOnly(s.handleDeleteAPIKey))
+	mux.HandleFunc("/api/auth/api-keys/toggle", s.adminOnly(s.handleToggleAPIKey))
+
 	// SPA — no auth (SPA handles it client-side)
 	mux.HandleFunc("/", s.handleIndex)
 
@@ -192,7 +198,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} BotConfig
 // @Failure 500 {object} map[string]string
 // @Router /api/bots [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleBotList(w http.ResponseWriter, r *http.Request) {
 	user := getAuthUser(r)
 	var bots []BotConfig
@@ -234,7 +240,7 @@ func (s *Server) handleBotList(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/bots/add [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleBotAdd(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -290,7 +296,7 @@ func (s *Server) handleBotAdd(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/bots/update [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleBotUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -333,7 +339,7 @@ func (s *Server) handleBotUpdate(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/bots/delete [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleBotDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -359,7 +365,7 @@ func (s *Server) handleBotDelete(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Router /api/bots/validate [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleBotValidate(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	username, err := s.proxy.ValidateToken(token)
@@ -379,7 +385,7 @@ func (s *Server) handleBotValidate(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} map[string]interface{}
 // @Failure 500 {object} map[string]interface{}
 // @Router /api/bots/health [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleBotHealth(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
 	status, err := s.proxy.CheckAndStoreHealth(id)
@@ -401,7 +407,7 @@ func (s *Server) handleBotHealth(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} Chat
 // @Failure 500 {object} map[string]string
 // @Router /api/chats [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
 	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
 	chats, err := s.store.GetChats(botID)
@@ -425,7 +431,7 @@ func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} Chat
 // @Failure 500 {object} map[string]string
 // @Router /api/chats/refresh [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleRefreshChat(w http.ResponseWriter, r *http.Request) {
 	bot, _, err := s.getBotFromRequest(r)
 	if err != nil {
@@ -456,7 +462,7 @@ func (s *Server) handleRefreshChat(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/chats/delete [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleDeleteChat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -484,7 +490,7 @@ func (s *Server) handleDeleteChat(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} Message
 // @Failure 500 {object} map[string]string
 // @Router /api/messages [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -513,7 +519,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} Message
 // @Failure 500 {object} map[string]string
 // @Router /api/messages/search [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	query := r.URL.Query().Get("q")
@@ -539,7 +545,7 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/messages/send [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -586,7 +592,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/messages/pin [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handlePinMessage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -622,7 +628,7 @@ func (s *Server) handlePinMessage(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/messages/unpin [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleUnpinMessage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -654,7 +660,7 @@ func (s *Server) handleUnpinMessage(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/messages/delete [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -688,7 +694,7 @@ func (s *Server) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} ChatStats
 // @Failure 500 {object} map[string]string
 // @Router /api/stats [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	stats, err := s.store.GetChatStats(chatID)
@@ -711,7 +717,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} ChatUser
 // @Failure 500 {object} map[string]string
 // @Router /api/users/list [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	search := r.URL.Query().Get("q")
@@ -743,7 +749,7 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/users/ban [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleBanUser(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -779,7 +785,7 @@ func (s *Server) handleBanUser(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/users/unban [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleUnbanUser(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -815,7 +821,7 @@ func (s *Server) handleUnbanUser(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} AdminInfo
 // @Failure 500 {object} map[string]string
 // @Router /api/admins [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleGetAdmins(w http.ResponseWriter, r *http.Request) {
 	bot, _, err := s.getBotFromRequest(r)
 	if err != nil {
@@ -845,7 +851,7 @@ func (s *Server) handleGetAdmins(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/admins/promote [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handlePromoteAdmin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -889,7 +895,7 @@ func (s *Server) handlePromoteAdmin(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/admins/demote [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleDemoteAdmin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -924,7 +930,7 @@ func (s *Server) handleDemoteAdmin(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/admins/title [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleSetAdminTitle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -967,7 +973,7 @@ func (s *Server) handleSetAdminTitle(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} AdminLog
 // @Failure 500 {object} map[string]string
 // @Router /api/adminlog [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleAdminLog(w http.ResponseWriter, r *http.Request) {
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -997,7 +1003,7 @@ func (s *Server) handleAdminLog(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} UserTag
 // @Failure 500 {object} map[string]string
 // @Router /api/tags [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleGetTags(w http.ResponseWriter, r *http.Request) {
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	tags, err := s.store.GetUserTags(chatID)
@@ -1022,7 +1028,7 @@ func (s *Server) handleGetTags(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/tags/add [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleAddTag(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -1062,7 +1068,7 @@ func (s *Server) handleAddTag(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/tags/remove [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleRemoveTag(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -1086,7 +1092,7 @@ func (s *Server) handleRemoveTag(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} UserTag
 // @Failure 500 {object} map[string]string
 // @Router /api/tags/user [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleGetUserTags(w http.ResponseWriter, r *http.Request) {
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	userID, _ := strconv.ParseInt(r.URL.Query().Get("user_id"), 10, 64)
@@ -1112,7 +1118,7 @@ func (s *Server) handleGetUserTags(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} Route
 // @Failure 500 {object} map[string]string
 // @Router /api/routes [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleGetRoutes(w http.ResponseWriter, r *http.Request) {
 	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
 	routes, err := s.store.GetRoutes(botID)
@@ -1137,7 +1143,7 @@ func (s *Server) handleGetRoutes(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/routes/add [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleAddRoute(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -1168,7 +1174,7 @@ func (s *Server) handleAddRoute(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/routes/update [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleUpdateRoute(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -1196,7 +1202,7 @@ func (s *Server) handleUpdateRoute(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/routes/delete [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleDeleteRoute(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -1219,7 +1225,7 @@ func (s *Server) handleDeleteRoute(w http.ResponseWriter, r *http.Request) {
 // @Produce json
 // @Success 200 {object} LLMConfig
 // @Router /api/llm-config [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleGetLLMConfig(w http.ResponseWriter, r *http.Request) {
 	cfg, err := s.store.GetLLMConfig()
 	if err != nil {
@@ -1240,7 +1246,7 @@ func (s *Server) handleGetLLMConfig(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/llm-config/save [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleSaveLLMConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -1270,7 +1276,7 @@ func (s *Server) handleSaveLLMConfig(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {object} map[string]string
 // @Router /api/bots/description [get]
 // @Router /api/bots/description [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleBotDescription(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		var req struct {
@@ -1392,7 +1398,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} AuthUser
 // @Failure 401 {object} map[string]string
 // @Router /api/auth/me [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	user := getAuthUser(r)
 	if user == nil {
@@ -1416,7 +1422,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/auth/change-password [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -1469,7 +1475,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} object
 // @Failure 500 {object} map[string]string
 // @Router /api/auth/users [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleUserList(w http.ResponseWriter, r *http.Request) {
 	users, err := s.store.GetAllUsers()
 	if err != nil {
@@ -1510,7 +1516,7 @@ func (s *Server) handleUserList(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/auth/users/add [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleUserAdd(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -1570,7 +1576,7 @@ func (s *Server) handleUserAdd(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/auth/users/update [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -1622,7 +1628,7 @@ func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/auth/users/delete [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -1655,7 +1661,7 @@ func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/auth/users/reset-password [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleUserResetPassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -1691,7 +1697,7 @@ func (s *Server) handleUserResetPassword(w http.ResponseWriter, r *http.Request)
 // @Success 200 {array} integer
 // @Failure 500 {object} map[string]string
 // @Router /api/auth/users/bots [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleUserBots(w http.ResponseWriter, r *http.Request) {
 	userID, _ := strconv.ParseInt(r.URL.Query().Get("user_id"), 10, 64)
 	botIDs, err := s.store.GetUserBotIDs(userID)
@@ -1716,7 +1722,7 @@ func (s *Server) handleUserBots(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/auth/users/bots/assign [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleAssignBot(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -1748,7 +1754,7 @@ func (s *Server) handleAssignBot(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
 // @Router /api/auth/users/bots/revoke [post]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleRevokeBot(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", 405)
@@ -1763,6 +1769,124 @@ func (s *Server) handleRevokeBot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.RevokeBotFromUser(req.UserID, req.BotID); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// API key management handlers (admin only)
+
+// @Summary List all API keys
+// @Description Returns all API keys across all users (admin only)
+// @Tags auth
+// @Produce json
+// @Success 200 {array} APIKey
+// @Failure 403 {object} map[string]string
+// @Router /api/auth/api-keys [get]
+// @Security CookieAuth || BearerAuth
+func (s *Server) handleListAPIKeys(w http.ResponseWriter, r *http.Request) {
+	keys, err := s.store.GetAllAPIKeys()
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if keys == nil {
+		keys = []APIKey{}
+	}
+	writeJSON(w, keys)
+}
+
+// @Summary Create a new API key
+// @Description Generates a new API key for the specified user. The raw key is returned only once.
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param body body object true "user_id and name"
+// @Success 200 {object} map[string]interface{} "status, id, key"
+// @Failure 400 {object} map[string]string
+// @Failure 403 {object} map[string]string
+// @Router /api/auth/api-keys/create [post]
+// @Security CookieAuth || BearerAuth
+func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	var req struct {
+		UserID int64  `json:"user_id"`
+		Name   string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, err)
+		return
+	}
+	if req.UserID == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		w.Write([]byte(`{"error":"user_id required"}`))
+		return
+	}
+	rawKey, err := GenerateAPIKey()
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	keyHash := HashAPIKey(rawKey)
+	id, err := s.store.CreateAPIKey(req.UserID, keyHash, req.Name)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"status": "ok", "id": id, "key": rawKey})
+}
+
+// @Summary Delete an API key
+// @Description Permanently removes an API key by ID (admin only)
+// @Tags auth
+// @Produce json
+// @Param id query int true "API key ID"
+// @Success 200 {object} map[string]string
+// @Failure 403 {object} map[string]string
+// @Router /api/auth/api-keys/delete [post]
+// @Security CookieAuth || BearerAuth
+func (s *Server) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	if err := s.store.DeleteAPIKey(id); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// @Summary Toggle API key enabled/disabled
+// @Description Enable or disable an API key without deleting it (admin only)
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param body body object true "id and enabled"
+// @Success 200 {object} map[string]string
+// @Failure 403 {object} map[string]string
+// @Router /api/auth/api-keys/toggle [post]
+// @Security CookieAuth || BearerAuth
+func (s *Server) handleToggleAPIKey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	var req struct {
+		ID      int64 `json:"id"`
+		Enabled bool  `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := s.store.ToggleAPIKey(req.ID, req.Enabled); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -1857,7 +1981,7 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 // @Failure 400 {string} string "Bad request"
 // @Failure 500 {string} string "Internal error"
 // @Router /api/media [get]
-// @Security CookieAuth
+// @Security CookieAuth || BearerAuth
 func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
 	botID := r.URL.Query().Get("bot_id")
 	fileID := r.URL.Query().Get("file_id")

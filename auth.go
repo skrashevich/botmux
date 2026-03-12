@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -48,23 +50,53 @@ func GenerateSessionToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// authMiddleware checks session cookie and adds user to context
+func GenerateAPIKey() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return "bmx_" + hex.EncodeToString(b), nil
+}
+
+func HashAPIKey(key string) string {
+	h := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(h[:])
+}
+
+// authMiddleware checks Bearer API key or session cookie and adds user to context
 func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie(sessionCookieName)
-		if err != nil || cookie.Value == "" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(401)
-			w.Write([]byte(`{"error":"unauthorized"}`))
-			return
+		var user *AuthUser
+
+		// Check Bearer token first
+		if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+			token := strings.TrimPrefix(auth, "Bearer ")
+			keyHash := HashAPIKey(token)
+			u, err := s.store.GetUserByAPIKey(keyHash)
+			if err == nil && u != nil {
+				user = u
+			}
 		}
-		user, err := s.store.GetUserBySession(cookie.Value)
-		if err != nil || user == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(401)
-			w.Write([]byte(`{"error":"unauthorized"}`))
-			return
+
+		// Fall back to session cookie
+		if user == nil {
+			cookie, err := r.Cookie(sessionCookieName)
+			if err != nil || cookie.Value == "" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(401)
+				w.Write([]byte(`{"error":"unauthorized"}`))
+				return
+			}
+			u, err := s.store.GetUserBySession(cookie.Value)
+			if err != nil || u == nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(401)
+				w.Write([]byte(`{"error":"unauthorized"}`))
+				return
+			}
+			user = u
 		}
+
 		ctx := context.WithValue(r.Context(), authUserKey, user)
 		next(w, r.WithContext(ctx))
 	}

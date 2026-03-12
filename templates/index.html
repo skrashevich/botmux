@@ -890,6 +890,7 @@ p, .msg-text { text-wrap: pretty; }
       <div class="sidebar-footer-role" id="footerUserRole"></div>
     </div>
     <div class="sidebar-footer-actions">
+      <button class="btn" onclick="showAPIKeysModal()" id="apiKeysBtn" style="display:none;color:var(--amber);border-color:var(--amber);padding:4px 8px;font-size:9px">API</button>
       <button class="btn" onclick="showUsersModal()" id="usersBtn" style="display:none;color:var(--cyan);border-color:var(--cyan-dim)">USERS</button>
       <button class="btn" onclick="showChangePasswordModal(false)" id="chpwBtn">PWD</button>
       <button class="btn btn-danger" onclick="doLogout()" style="padding:4px 8px;font-size:9px">EXIT</button>
@@ -1287,6 +1288,7 @@ function updateAuthUI() {
   // Show/hide admin-only elements
   const adminOnly = isAdmin();
   document.getElementById('usersBtn').style.display = adminOnly ? '' : 'none';
+  document.getElementById('apiKeysBtn').style.display = adminOnly ? '' : 'none';
   // +ADD bot button and LLM button
   const sectionBtns = document.querySelectorAll('.section-label .btn');
   sectionBtns.forEach(btn => {
@@ -1504,6 +1506,87 @@ async function resetUserPassword(userId) {
   } catch(e) { toast(e.message, 'error'); }
 }
 
+// ===== API KEY MANAGEMENT (admin) =====
+
+async function showAPIKeysModal() {
+  if (!isAdmin()) return;
+  document.getElementById('apiKeysModal').style.display = 'flex';
+  document.getElementById('newKeyDisplay').style.display = 'none';
+  await loadAPIKeysModal();
+}
+function closeAPIKeysModal() { document.getElementById('apiKeysModal').style.display = 'none'; }
+
+async function loadAPIKeysModal() {
+  try {
+    const keys = await api('/api/auth/api-keys');
+    const users = await api('/api/auth/users');
+    const userMap = {};
+    users.forEach(u => userMap[u.id] = u.display_name || u.username);
+    const list = document.getElementById('apiKeysModalList');
+    list.innerHTML = keys.map(k => `
+      <div class="user-mgmt-item">
+        <div>
+          <div class="user-mgmt-name">${esc(k.name || t('api_key_unnamed'))}</div>
+          <div class="user-mgmt-meta">${esc(userMap[k.user_id] || 'User #'+k.user_id)} · ${k.last_used ? t('api_key_last_used')+': '+new Date(k.last_used).toLocaleDateString() : t('api_key_never_used')}</div>
+        </div>
+        <span class="user-mgmt-role ${k.enabled ? 'role-admin' : 'role-user'}">${k.enabled ? t('enabled') : t('disabled')}</span>
+        <div class="user-mgmt-actions">
+          <button class="btn" onclick="toggleAPIKey(${k.id},${!k.enabled})" style="padding:3px 8px;font-size:9px">${k.enabled ? t('api_key_disable') : t('api_key_enable')}</button>
+          <button class="btn btn-danger" onclick="deleteAPIKey(${k.id})" style="padding:3px 8px;font-size:9px">${t('delete')}</button>
+        </div>
+      </div>
+    `).join('') || '<div style="text-align:center;color:var(--text3);padding:20px">' + t('api_key_none') + '</div>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function showCreateAPIKeyForm() {
+  document.getElementById('createAPIKeyModal').style.display = 'flex';
+  document.getElementById('apiKeyName').value = '';
+  try {
+    const users = await api('/api/auth/users');
+    const sel = document.getElementById('apiKeyUser');
+    sel.innerHTML = users.map(u => `<option value="${u.id}">${esc(u.display_name || u.username)} (${u.role})</option>`).join('');
+  } catch(e) { toast(e.message, 'error'); }
+}
+function closeCreateAPIKeyModal() { document.getElementById('createAPIKeyModal').style.display = 'none'; }
+
+async function createAPIKey() {
+  const name = document.getElementById('apiKeyName').value.trim();
+  const userID = parseInt(document.getElementById('apiKeyUser').value);
+  try {
+    const data = await api('/api/auth/api-keys/create', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({user_id: userID, name: name})
+    });
+    closeCreateAPIKeyModal();
+    document.getElementById('newKeyValue').textContent = data.key;
+    document.getElementById('newKeyDisplay').style.display = 'block';
+    toast(t('api_key_created'));
+    await loadAPIKeysModal();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function toggleAPIKey(id, enabled) {
+  try {
+    await api('/api/auth/api-keys/toggle', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id, enabled})
+    });
+    await loadAPIKeysModal();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteAPIKey(id) {
+  if (!confirm(t('api_key_confirm_delete'))) return;
+  try {
+    await api(`/api/auth/api-keys/delete?id=${id}`, {method: 'POST'});
+    toast(t('api_key_deleted'));
+    await loadAPIKeysModal();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
 function toast(msg, type = 'success') {
   const el = document.createElement('div');
   el.className = `toast toast-${type}`;
@@ -1682,6 +1765,13 @@ const i18n = {
     auth_confirm_delete_user: 'Delete user {user}?', auth_enter_new_password: 'Enter new password:',
     auth_password_reset: 'Password reset', auth_username_password_required: 'Username and password required',
     bot_access: 'Bot Access', role: 'Role', display_name: 'Display Name',
+    // api keys
+    api_keys: 'API Keys', api_key_unnamed: 'Unnamed key', api_key_created: 'API key created',
+    api_key_deleted: 'API key deleted', api_key_confirm_delete: 'Delete this API key?',
+    api_key_none: 'No API keys', api_key_last_used: 'Last used', api_key_never_used: 'Never used',
+    api_key_disable: 'OFF', api_key_enable: 'ON',
+    api_key_copy_warning: 'Copy this key now — it won\'t be shown again!',
+    create_api_key: 'Create API Key',
   },
   ru: {
     command_center: 'TELEGRAM', tg_control: 'botmux',
@@ -1829,6 +1919,13 @@ const i18n = {
     auth_confirm_delete_user: 'Удалить пользователя {user}?', auth_enter_new_password: 'Введите новый пароль:',
     auth_password_reset: 'Пароль сброшен', auth_username_password_required: 'Имя пользователя и пароль обязательны',
     bot_access: 'Доступ к ботам', role: 'Роль', display_name: 'Отображаемое имя',
+    // api keys
+    api_keys: 'API-ключи', api_key_unnamed: 'Без имени', api_key_created: 'API-ключ создан',
+    api_key_deleted: 'API-ключ удалён', api_key_confirm_delete: 'Удалить этот API-ключ?',
+    api_key_none: 'Нет API-ключей', api_key_last_used: 'Последнее использование', api_key_never_used: 'Не использовался',
+    api_key_disable: 'ВЫКЛ', api_key_enable: 'ВКЛ',
+    api_key_copy_warning: 'Скопируйте ключ сейчас — он больше не будет показан!',
+    create_api_key: 'Создать API-ключ',
   }
 };
 
@@ -3261,6 +3358,41 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbo
     <div class="modal-actions">
       <button class="btn" onclick="closeUserEditModal()">CANCEL</button>
       <button class="btn btn-primary" onclick="saveUser()" id="userEditSaveBtn">SAVE</button>
+    </div>
+  </div>
+</div>
+
+<!-- API Keys Modal (admin only) -->
+<div id="apiKeysModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeAPIKeysModal()">
+  <div class="modal" style="max-width:560px">
+    <h3 style="display:flex;align-items:center;justify-content:space-between">
+      <span id="apiKeysModalTitle">API Keys</span>
+      <button class="btn btn-primary" onclick="showCreateAPIKeyForm()" style="padding:4px 10px;font-size:10px">+ ADD</button>
+    </h3>
+    <div id="apiKeysModalList" class="user-mgmt-list"></div>
+    <div id="newKeyDisplay" style="display:none;margin-top:12px;padding:12px;background:var(--bg);border:1px solid var(--amber);border-radius:var(--radius-sm)">
+      <div style="font-family:var(--ff-mono);font-size:10px;color:var(--amber);margin-bottom:6px" id="newKeyWarning">Copy this key now — it won't be shown again!</div>
+      <div style="font-family:var(--ff-mono);font-size:13px;color:var(--text);word-break:break-all;user-select:all" id="newKeyValue"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Create API Key Modal -->
+<div id="createAPIKeyModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeCreateAPIKeyModal()">
+  <div class="modal" style="max-width:400px">
+    <h3 id="createAPIKeyTitle">Create API Key</h3>
+    <div class="modal-field">
+      <label>Name</label>
+      <input type="text" id="apiKeyName" placeholder="My integration...">
+    </div>
+    <div class="modal-field">
+      <label>User</label>
+      <select id="apiKeyUser" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px;color:var(--text);font-family:var(--ff-mono);font-size:13px;outline:none">
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeCreateAPIKeyModal()">CANCEL</button>
+      <button class="btn btn-primary" onclick="createAPIKey()">CREATE</button>
     </div>
   </div>
 </div>

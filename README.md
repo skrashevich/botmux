@@ -125,7 +125,9 @@ Custom classification system for chat members:
 - **Admin delegation** — any admin can promote other users to admin role
 - **Password management** — admins can reset user passwords; users can change their own
 - **Granular UI enforcement** — non-admin users cannot see bot management, routing, or LLM configuration controls
-- Password hashing with bcrypt
+- **API key authentication** — Bearer token in `Authorization` header as alternative to cookies for programmatic access
+- **API key management** — admin can create, disable, and delete keys; keys are bound to users and inherit their permissions
+- Password hashing with bcrypt; API keys hashed with SHA-256
 
 ### Internationalization (i18n)
 - Interface available in **English** and **Russian**

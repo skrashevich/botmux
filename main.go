@@ -16,6 +16,10 @@ import (
 // @securityDefinitions.apikey CookieAuth
 // @in cookie
 // @name botmux_session
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description API key authentication. Use "Bearer bmx_..." format.
 func main() {
 	token := flag.String("token", "", "Telegram bot token (optional if bots already exist in DB)")
 	addr := flag.String("addr", ":8080", "HTTP listen address")
