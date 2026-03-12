@@ -6,25 +6,29 @@ Give it a bot token — it discovers which chats the bot is in, whether it has a
 
 ## Screenshots
 
-| Dashboard | Bot Detail |
-|-----------|------------|
-| ![Dashboard](screenshots/01-dashboard.png) | ![Bot Detail](screenshots/02-bot-detail.png) |
+| Login | Dashboard |
+|-------|-----------|
+| ![Login](screenshots/01-login.png) | ![Dashboard](screenshots/02-dashboard.png) |
 
-| Messages | Analytics |
-|----------|-----------|
-| ![Messages](screenshots/03-messages.png) | ![Analytics](screenshots/04-analytics.png) |
+| Bot Detail | Messages |
+|------------|----------|
+| ![Bot Detail](screenshots/03-bot-detail.png) | ![Messages](screenshots/04-messages.png) |
 
-| Admins | Users |
-|--------|-------|
-| ![Admins](screenshots/05-admins.png) | ![Users](screenshots/06-users.png) |
+| Analytics | Admins |
+|-----------|--------|
+| ![Analytics](screenshots/05-analytics.png) | ![Admins](screenshots/06-admins.png) |
 
-| Tags | Audit Log |
-|------|-----------|
-| ![Tags](screenshots/07-tags.png) | ![Audit Log](screenshots/08-audit-log.png) |
+| Users | Tags |
+|-------|------|
+| ![Users](screenshots/07-users.png) | ![Tags](screenshots/08-tags.png) |
 
-| Add Bot |
-|---------|
-| ![Add Bot](screenshots/09-add-bot.png) |
+| Audit Log | Add Bot |
+|-----------|---------|
+| ![Audit Log](screenshots/09-audit-log.png) | ![Add Bot](screenshots/10-add-bot.png) |
+
+| User Management | API Keys |
+|-----------------|----------|
+| ![User Management](screenshots/11-user-management.png) | ![API Keys](screenshots/12-api-keys.png) |
 
 ## Features
 
@@ -561,7 +565,8 @@ Botmux is a lightweight single-binary application with minimal resource needs.
 
 ## Security Notes
 
-- The web UI has **no authentication**. Do not expose it to the public internet without adding auth (reverse proxy with basic auth, VPN, etc.)
+- The web UI requires **authentication** — a default admin account (`admin` / `admin`) is created on first run with mandatory password change.
+- For production use, place the server behind a reverse proxy with HTTPS (nginx, caddy, etc.).
 - The SQLite database contains all collected messages. Protect the `botdata.db` file accordingly.
 - Bot tokens are sensitive. Use environment variables or secure flag passing, not shell history.
 

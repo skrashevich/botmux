@@ -14,6 +14,20 @@ const VIEWPORT = { width: 1280, height: 720 };
 
 // Mock data for all API endpoints
 const MOCK_DATA = {
+  currentUser: {
+    id: 1, username: 'admin', display_name: 'Admin',
+    role: 'admin', must_change_password: false
+  },
+  authUsers: [
+    { id: 1, username: 'admin', display_name: 'Admin', role: 'admin', bot_ids: [1, 2] },
+    { id: 2, username: 'operator', display_name: 'Alex Operator', role: 'user', bot_ids: [1] },
+    { id: 3, username: 'viewer', display_name: 'Jane Viewer', role: 'user', bot_ids: [2] },
+  ],
+  apiKeys: [
+    { id: 1, name: 'CI/CD Pipeline', user_id: 1, enabled: true, last_used: '2026-03-08T14:20:00Z', created_at: '2026-02-15T10:00:00Z' },
+    { id: 2, name: 'Monitoring', user_id: 2, enabled: true, last_used: null, created_at: '2026-03-01T08:00:00Z' },
+    { id: 3, name: 'Legacy Integration', user_id: 1, enabled: false, last_used: '2026-01-20T09:15:00Z', created_at: '2026-01-10T12:00:00Z' },
+  ],
   bots: [
     {
       id: 1, name: 'shopbot', token: '123456:FAKE',
@@ -23,7 +37,17 @@ const MOCK_DATA = {
       backend_status: 'ok:200', backend_checked_at: '2026-03-08T07:30:44Z',
       updates_forwarded: 142, offset: 100000000, polling_timeout: 30,
       last_activity: '2026-03-08T10:15:29Z', last_error: '',
-      secret_token: ''
+      secret_token: '', description: 'Handles shop orders, product queries and customer support'
+    },
+    {
+      id: 2, name: 'alertbot', token: '654321:FAKE',
+      bot_username: 'alertbot',
+      source: 'web', manage_enabled: true, proxy_enabled: false,
+      running: true, backend_url: '',
+      backend_status: '', backend_checked_at: '',
+      updates_forwarded: 0, offset: 200000000, polling_timeout: 30,
+      last_activity: '2026-03-08T09:55:12Z', last_error: '',
+      secret_token: '', description: 'Sends alerts and notifications'
     }
   ],
   chats: [
@@ -71,7 +95,8 @@ const MOCK_DATA = {
         from_user: u.name, from_id: u.id, text: texts[i],
         date: 1741356600 + i * 600,
         date_str: `2026-03-07 ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00`,
-        deleted: i === 4, media_type: '', file_id: ''
+        deleted: i === 4, media_type: '', file_id: '',
+        reply_to_message_id: i === 5 ? 39554 : 0
       });
     }
     return msgs.reverse();
@@ -158,49 +183,56 @@ const MOCK_DATA = {
       details: 'Message ID: 39545', created_at: '2026-03-06T18:10:33Z'
     },
   ],
-  routes: []
+  routes: [
+    {
+      id: 1, source_bot_id: 1, target_bot_id: 2,
+      condition_type: 'text', condition_value: '(?i)alert|urgent|down',
+      action: 'forward', target_chat_id: -1009876543210,
+      enabled: true, description: 'Forward alerts to alertbot'
+    },
+    {
+      id: 2, source_bot_id: 1, target_bot_id: 2,
+      condition_type: 'user_id', condition_value: '1003',
+      action: 'copy', target_chat_id: 0,
+      enabled: true, description: 'Copy messages from dave_pilot'
+    },
+    {
+      id: 3, source_bot_id: 1, target_bot_id: 2,
+      condition_type: 'text', condition_value: 'spam|crypto|airdrop',
+      action: 'drop', target_chat_id: 0,
+      enabled: false, description: 'Drop spam messages'
+    },
+  ],
+  llmConfig: {
+    api_url: '', api_key: '', model: '', system_prompt: '', enabled: false
+  },
+  botDescription: ''
 };
 
-function mockResponse(url) {
-  const u = new URL(url, BASE_URL);
-  const path = u.pathname;
-  const params = u.searchParams;
-
-  if (path === '/api/bots') return MOCK_DATA.bots;
-  if (path === '/api/chats') return MOCK_DATA.chats;
-  if (path === '/api/messages') return MOCK_DATA.messages;
-  if (path === '/api/messages/search') return MOCK_DATA.messages.filter(m => m.text.toLowerCase().includes((params.get('q') || '').toLowerCase()));
-  if (path === '/api/stats') return MOCK_DATA.stats;
-  if (path === '/api/admins') return MOCK_DATA.admins;
-  if (path === '/api/users/list') return MOCK_DATA.users;
-  if (path === '/api/tags') return MOCK_DATA.tags;
-  if (path === '/api/tags/user') return [];
-  if (path === '/api/adminlog') return MOCK_DATA.adminlog;
-  if (path === '/api/routes') return MOCK_DATA.routes;
-  if (path === '/api/chats/refresh') return MOCK_DATA.chats[0];
-  return null;
-}
-
-async function takeScreenshots() {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
-
-  const page = await browser.newPage();
-  await page.setViewport(VIEWPORT);
-
-  // Monkey-patch fetch before any page loads
+function setupMockFetch(page, { authEnabled }) {
   const mockDataStr = JSON.stringify(MOCK_DATA);
-  await page.evaluateOnNewDocument((mockDataJSON, baseUrl) => {
+  return page.evaluateOnNewDocument((mockDataJSON, baseUrl, withAuth) => {
     const MOCK = JSON.parse(mockDataJSON);
 
-    function mockResponse(url) {
+    function mockResponse(url, init) {
       let u;
       try { u = new URL(url, baseUrl); } catch { return null; }
       const path = u.pathname;
       const params = u.searchParams;
+
+      // Auth endpoints
+      if (path === '/api/auth/me') {
+        if (!withAuth) return '__401__';
+        return MOCK.currentUser;
+      }
+      if (path === '/api/auth/login') return { user: MOCK.currentUser };
+      if (path === '/api/auth/users') return MOCK.authUsers;
+      if (path === '/api/auth/api-keys') return MOCK.apiKeys;
+
+      // Data endpoints
       if (path === '/api/bots') return MOCK.bots;
+      if (path === '/api/bots/validate') return { ok: true, username: 'newbot', first_name: 'New Bot' };
+      if (path === '/api/bots/description') return { description: MOCK.botDescription };
       if (path === '/api/chats') return MOCK.chats;
       if (path === '/api/messages') return MOCK.messages;
       if (path === '/api/messages/search') return MOCK.messages.filter(m => m.text.toLowerCase().includes((params.get('q') || '').toLowerCase()));
@@ -212,6 +244,8 @@ async function takeScreenshots() {
       if (path === '/api/adminlog') return MOCK.adminlog;
       if (path === '/api/routes') return MOCK.routes;
       if (path === '/api/chats/refresh') return MOCK.chats[0];
+      if (path === '/api/llm-config') return MOCK.llmConfig;
+      if (path === '/api/health') return { status: 'ok' };
       return null;
     }
 
@@ -219,7 +253,13 @@ async function takeScreenshots() {
     window.fetch = function(input, init) {
       const url = typeof input === 'string' ? input : input.url;
       if (url.includes('/api/')) {
-        const data = mockResponse(url);
+        const data = mockResponse(url, init);
+        if (data === '__401__') {
+          return Promise.resolve(new Response(JSON.stringify({error: 'unauthorized'}), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' }
+          }));
+        }
         if (data !== null) {
           return Promise.resolve(new Response(JSON.stringify(data), {
             status: 200,
@@ -229,28 +269,52 @@ async function takeScreenshots() {
       }
       return origFetch.apply(this, arguments);
     };
-  }, mockDataStr, BASE_URL);
+  }, mockDataStr, BASE_URL, authEnabled);
+}
 
-  // Ensure English language and dark theme
+async function takeScreenshots() {
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  });
+
+  // ===== LOGIN SCREEN =====
+  console.log('Taking login screenshot...');
+  const loginPage = await browser.newPage();
+  await loginPage.setViewport(VIEWPORT);
+  await setupMockFetch(loginPage, { authEnabled: false });
+  await loginPage.evaluateOnNewDocument(() => {
+    localStorage.setItem('lang', 'en');
+    localStorage.removeItem('theme');
+  });
+  await loginPage.goto(BASE_URL, { waitUntil: 'networkidle0', timeout: 10000 });
+  await sleep(500);
+  await loginPage.screenshot({ path: join(SCREENSHOTS_DIR, '01-login.png') });
+  console.log('  01-login.png');
+  await loginPage.close();
+
+  // ===== MAIN APP =====
+  const page = await browser.newPage();
+  await page.setViewport(VIEWPORT);
+  await setupMockFetch(page, { authEnabled: true });
   await page.evaluateOnNewDocument(() => {
     localStorage.setItem('lang', 'en');
     localStorage.removeItem('theme');
   });
-
   await page.goto(BASE_URL, { waitUntil: 'networkidle0', timeout: 10000 });
   await sleep(500);
 
-  // 01 - Dashboard (bot list, no bot selected)
-  await page.screenshot({ path: join(SCREENSHOTS_DIR, '01-dashboard.png') });
-  console.log('01-dashboard.png');
+  // 02 - Dashboard (bot list, no bot selected)
+  await page.screenshot({ path: join(SCREENSHOTS_DIR, '02-dashboard.png') });
+  console.log('  02-dashboard.png');
 
-  // Click the bot to show detail
+  // Click the first bot to show detail
   await page.click('.bot-item');
   await sleep(500);
 
-  // 02 - Bot Detail
-  await page.screenshot({ path: join(SCREENSHOTS_DIR, '02-bot-detail.png') });
-  console.log('02-bot-detail.png');
+  // 03 - Bot Detail (with routing rules)
+  await page.screenshot({ path: join(SCREENSHOTS_DIR, '03-bot-detail.png') });
+  console.log('  03-bot-detail.png');
 
   // Click the first chat "My Group Chat"
   const chatItems = await page.$$('.chat-item');
@@ -259,57 +323,81 @@ async function takeScreenshots() {
     await sleep(500);
   }
 
-  // 03 - Messages
-  await page.screenshot({ path: join(SCREENSHOTS_DIR, '03-messages.png') });
-  console.log('03-messages.png');
+  // 04 - Messages
+  await page.screenshot({ path: join(SCREENSHOTS_DIR, '04-messages.png') });
+  console.log('  04-messages.png');
 
   // Click Analytics tab
   await page.click('.tab[data-tab="stats"]');
   await sleep(500);
 
-  // 04 - Analytics
-  await page.screenshot({ path: join(SCREENSHOTS_DIR, '04-analytics.png') });
-  console.log('04-analytics.png');
+  // 05 - Analytics
+  await page.screenshot({ path: join(SCREENSHOTS_DIR, '05-analytics.png') });
+  console.log('  05-analytics.png');
 
   // Click Admins tab
   await page.click('.tab[data-tab="admins"]');
   await sleep(500);
 
-  // 05 - Admins
-  await page.screenshot({ path: join(SCREENSHOTS_DIR, '05-admins.png') });
-  console.log('05-admins.png');
+  // 06 - Admins
+  await page.screenshot({ path: join(SCREENSHOTS_DIR, '06-admins.png') });
+  console.log('  06-admins.png');
 
   // Click Users tab
   await page.click('.tab[data-tab="users"]');
   await sleep(500);
 
-  // 06 - Users
-  await page.screenshot({ path: join(SCREENSHOTS_DIR, '06-users.png') });
-  console.log('06-users.png');
+  // 07 - Users
+  await page.screenshot({ path: join(SCREENSHOTS_DIR, '07-users.png') });
+  console.log('  07-users.png');
 
   // Click Tags tab
   await page.click('.tab[data-tab="tags"]');
   await sleep(500);
 
-  // 07 - Tags
-  await page.screenshot({ path: join(SCREENSHOTS_DIR, '07-tags.png') });
-  console.log('07-tags.png');
+  // 08 - Tags
+  await page.screenshot({ path: join(SCREENSHOTS_DIR, '08-tags.png') });
+  console.log('  08-tags.png');
 
   // Click Audit Log tab
   await page.click('.tab[data-tab="adminlog"]');
   await sleep(500);
 
-  // 08 - Audit Log
-  await page.screenshot({ path: join(SCREENSHOTS_DIR, '08-audit-log.png') });
-  console.log('08-audit-log.png');
+  // 09 - Audit Log
+  await page.screenshot({ path: join(SCREENSHOTS_DIR, '09-audit-log.png') });
+  console.log('  09-audit-log.png');
 
-  // Open Add Bot modal - button is in the sidebar section header
+  // Open Add Bot modal
   await page.evaluate(() => showBotModal());
   await sleep(400);
 
-  // 09 - Add Bot modal
-  await page.screenshot({ path: join(SCREENSHOTS_DIR, '09-add-bot.png') });
-  console.log('09-add-bot.png');
+  // 10 - Add Bot modal
+  await page.screenshot({ path: join(SCREENSHOTS_DIR, '10-add-bot.png') });
+  console.log('  10-add-bot.png');
+
+  // Close Add Bot modal
+  await page.evaluate(() => closeBotModal());
+  await sleep(200);
+
+  // Open User Management modal
+  await page.evaluate(() => showUsersModal());
+  await sleep(400);
+
+  // 11 - User Management
+  await page.screenshot({ path: join(SCREENSHOTS_DIR, '11-user-management.png') });
+  console.log('  11-user-management.png');
+
+  // Close Users modal
+  await page.evaluate(() => closeUsersModal());
+  await sleep(200);
+
+  // Open API Keys modal
+  await page.evaluate(() => showAPIKeysModal());
+  await sleep(400);
+
+  // 12 - API Keys
+  await page.screenshot({ path: join(SCREENSHOTS_DIR, '12-api-keys.png') });
+  console.log('  12-api-keys.png');
 
   await browser.close();
   console.log('\nAll screenshots generated!');
