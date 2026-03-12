@@ -67,14 +67,14 @@
   "hotPaths": [
     {
       "path": "templates/index.html",
-      "accessCount": 33,
-      "lastAccessed": 1773241719347,
+      "accessCount": 65,
+      "lastAccessed": 1773297706562,
       "type": "directory"
     },
     {
       "path": "README.md",
-      "accessCount": 13,
-      "lastAccessed": 1773293002385,
+      "accessCount": 16,
+      "lastAccessed": 1773298018595,
       "type": "file"
     },
     {
@@ -114,6 +114,18 @@
       "type": "file"
     },
     {
+      "path": "take-screenshots.mjs",
+      "accessCount": 2,
+      "lastAccessed": 1773297812419,
+      "type": "file"
+    },
+    {
+      "path": "main.go",
+      "accessCount": 2,
+      "lastAccessed": 1773297885981,
+      "type": "file"
+    },
+    {
       "path": "",
       "accessCount": 1,
       "lastAccessed": 1773240870136,
@@ -126,15 +138,45 @@
       "type": "file"
     },
     {
-      "path": "main.go",
-      "accessCount": 1,
-      "lastAccessed": 1773261689654,
-      "type": "file"
-    },
-    {
       "path": "store.go",
       "accessCount": 1,
       "lastAccessed": 1773261694756,
+      "type": "file"
+    },
+    {
+      "path": "screenshots/02-dashboard.png",
+      "accessCount": 1,
+      "lastAccessed": 1773297949466,
+      "type": "file"
+    },
+    {
+      "path": "screenshots/01-login.png",
+      "accessCount": 1,
+      "lastAccessed": 1773297949554,
+      "type": "file"
+    },
+    {
+      "path": "screenshots/03-bot-detail.png",
+      "accessCount": 1,
+      "lastAccessed": 1773297949630,
+      "type": "file"
+    },
+    {
+      "path": "screenshots/11-user-management.png",
+      "accessCount": 1,
+      "lastAccessed": 1773297957120,
+      "type": "file"
+    },
+    {
+      "path": "screenshots/12-api-keys.png",
+      "accessCount": 1,
+      "lastAccessed": 1773297957615,
+      "type": "file"
+    },
+    {
+      "path": "screenshots/04-messages.png",
+      "accessCount": 1,
+      "lastAccessed": 1773297958223,
       "type": "file"
     }
   ],
