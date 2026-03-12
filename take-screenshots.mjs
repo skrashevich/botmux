@@ -206,7 +206,15 @@ const MOCK_DATA = {
   llmConfig: {
     api_url: '', api_key: '', model: '', system_prompt: '', enabled: false
   },
-  botDescription: ''
+  botDescription: '',
+  bridges: [
+    {
+      id: 1, bot_id: 1, protocol: 'slack', name: 'Team Slack Bridge',
+      config: '{"bot_token":"xoxb-fake","channel_id":"C01EXAMPLE","signing_secret":"***"}',
+      enabled: true, created_at: '2026-03-01T10:00:00Z',
+      last_activity: '2026-03-08T09:30:00Z', last_error: ''
+    }
+  ]
 };
 
 function setupMockFetch(page, { authEnabled }) {
@@ -245,8 +253,11 @@ function setupMockFetch(page, { authEnabled }) {
       if (path === '/api/routes') return MOCK.routes;
       if (path === '/api/chats/refresh') return MOCK.chats[0];
       if (path === '/api/llm-config') return MOCK.llmConfig;
+      if (path === '/api/bridges') return MOCK.bridges;
       if (path === '/api/health') return { status: 'ok' };
-      return null;
+      if (path === '/api/bots/health') return { status: 'ok', latency_ms: 42 };
+      // Catch-all for any unhandled /api/ endpoint — prevent 401 from real server
+      return [];
     }
 
     const origFetch = window.fetch;
@@ -309,7 +320,7 @@ async function takeScreenshots() {
   console.log('  02-dashboard.png');
 
   // Click the first bot to show detail
-  await page.click('.bot-item');
+  await page.evaluate(() => document.querySelector('.bot-item')?.click());
   await sleep(500);
 
   // 03 - Bot Detail (with routing rules)
@@ -317,18 +328,18 @@ async function takeScreenshots() {
   console.log('  03-bot-detail.png');
 
   // Click the first chat "My Group Chat"
-  const chatItems = await page.$$('.chat-item');
-  if (chatItems.length > 0) {
-    await chatItems[0].click();
-    await sleep(500);
-  }
+  await page.evaluate(() => {
+    const item = document.querySelector('.chat-item');
+    if (item) item.click();
+  });
+  await sleep(500);
 
   // 04 - Messages
   await page.screenshot({ path: join(SCREENSHOTS_DIR, '04-messages.png') });
   console.log('  04-messages.png');
 
   // Click Analytics tab
-  await page.click('.tab[data-tab="stats"]');
+  await page.evaluate(() => document.querySelector('.tab[data-tab="stats"]')?.click());
   await sleep(500);
 
   // 05 - Analytics
@@ -336,7 +347,7 @@ async function takeScreenshots() {
   console.log('  05-analytics.png');
 
   // Click Admins tab
-  await page.click('.tab[data-tab="admins"]');
+  await page.evaluate(() => document.querySelector('.tab[data-tab="admins"]')?.click());
   await sleep(500);
 
   // 06 - Admins
@@ -344,7 +355,7 @@ async function takeScreenshots() {
   console.log('  06-admins.png');
 
   // Click Users tab
-  await page.click('.tab[data-tab="users"]');
+  await page.evaluate(() => document.querySelector('.tab[data-tab="users"]')?.click());
   await sleep(500);
 
   // 07 - Users
@@ -352,7 +363,7 @@ async function takeScreenshots() {
   console.log('  07-users.png');
 
   // Click Tags tab
-  await page.click('.tab[data-tab="tags"]');
+  await page.evaluate(() => document.querySelector('.tab[data-tab="tags"]')?.click());
   await sleep(500);
 
   // 08 - Tags
@@ -360,7 +371,7 @@ async function takeScreenshots() {
   console.log('  08-tags.png');
 
   // Click Audit Log tab
-  await page.click('.tab[data-tab="adminlog"]');
+  await page.evaluate(() => document.querySelector('.tab[data-tab="adminlog"]')?.click());
   await sleep(500);
 
   // 09 - Audit Log

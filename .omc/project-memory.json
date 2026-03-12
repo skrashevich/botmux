@@ -67,8 +67,8 @@
   "hotPaths": [
     {
       "path": "templates/index.html",
-      "accessCount": 129,
-      "lastAccessed": 1773297724592,
+      "accessCount": 139,
+      "lastAccessed": 1773300142809,
       "type": "directory"
     },
     {
@@ -85,8 +85,8 @@
     },
     {
       "path": "README.md",
-      "accessCount": 29,
-      "lastAccessed": 1773298244530,
+      "accessCount": 37,
+      "lastAccessed": 1773299386256,
       "type": "file"
     },
     {
@@ -115,14 +115,26 @@
     },
     {
       "path": "main.go",
-      "accessCount": 10,
-      "lastAccessed": 1773296773920,
+      "accessCount": 11,
+      "lastAccessed": 1773299086096,
       "type": "file"
     },
     {
       "path": "auth.go",
       "accessCount": 8,
       "lastAccessed": 1773295015180,
+      "type": "file"
+    },
+    {
+      "path": "take-screenshots.mjs",
+      "accessCount": 8,
+      "lastAccessed": 1773300174204,
+      "type": "file"
+    },
+    {
+      "path": "proxy.go",
+      "accessCount": 5,
+      "lastAccessed": 1773299086286,
       "type": "file"
     },
     {
@@ -135,12 +147,6 @@
       "path": "Dockerfile",
       "accessCount": 4,
       "lastAccessed": 1773293366915,
-      "type": "file"
-    },
-    {
-      "path": "proxy.go",
-      "accessCount": 4,
-      "lastAccessed": 1773297826675,
       "type": "file"
     },
     {
@@ -162,9 +168,45 @@
       "type": "file"
     },
     {
+      "path": "screenshots/03-bot-detail.png",
+      "accessCount": 2,
+      "lastAccessed": 1773300455006,
+      "type": "file"
+    },
+    {
+      "path": "screenshots/04-messages.png",
+      "accessCount": 2,
+      "lastAccessed": 1773300455534,
+      "type": "file"
+    },
+    {
+      "path": "screenshots/05-analytics.png",
+      "accessCount": 2,
+      "lastAccessed": 1773300455980,
+      "type": "file"
+    },
+    {
+      "path": "screenshots/11-user-management.png",
+      "accessCount": 2,
+      "lastAccessed": 1773300456317,
+      "type": "file"
+    },
+    {
       "path": ".dockerignore",
       "accessCount": 1,
       "lastAccessed": 1773259501721,
+      "type": "file"
+    },
+    {
+      "path": "screenshots/01-login.png",
+      "accessCount": 1,
+      "lastAccessed": 1773299705601,
+      "type": "file"
+    },
+    {
+      "path": "screenshots/02-dashboard.png",
+      "accessCount": 1,
+      "lastAccessed": 1773299706106,
       "type": "file"
     }
   ],
