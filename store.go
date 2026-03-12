@@ -359,6 +359,48 @@ func (s *Store) migrate() error {
 		s.db.Exec(`ALTER TABLE bots ADD COLUMN description TEXT NOT NULL DEFAULT ''`)
 	}
 
+	// Create auth tables
+	_, err = s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS auth_users (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			username TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL,
+			display_name TEXT NOT NULL DEFAULT '',
+			role TEXT NOT NULL DEFAULT 'user',
+			must_change_password INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL DEFAULT '',
+			last_login TEXT NOT NULL DEFAULT ''
+		);
+		CREATE TABLE IF NOT EXISTS auth_sessions (
+			token TEXT PRIMARY KEY,
+			user_id INTEGER NOT NULL,
+			created_at TEXT NOT NULL,
+			expires_at TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
+		CREATE TABLE IF NOT EXISTS user_bots (
+			user_id INTEGER NOT NULL,
+			bot_id INTEGER NOT NULL,
+			PRIMARY KEY (user_id, bot_id)
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Create default admin if no users exist
+	var userCount int
+	s.db.QueryRow(`SELECT COUNT(*) FROM auth_users`).Scan(&userCount)
+	if userCount == 0 {
+		hash, err := HashPassword("admin")
+		if err != nil {
+			return err
+		}
+		s.db.Exec(`INSERT INTO auth_users (username, password_hash, display_name, role, must_change_password, created_at)
+			VALUES ('admin', ?, 'Administrator', 'admin', 1, ?)`,
+			hash, time.Now().Format(time.RFC3339))
+	}
+
 	return nil
 }
 
@@ -876,6 +918,187 @@ func (s *Store) FindReverseMappingByReply(targetBotID, targetChatID int64, targe
 // CleanOldRouteMappings removes mappings older than the given duration
 func (s *Store) CleanOldRouteMappings(olderThan string) {
 	s.db.Exec(`DELETE FROM route_mappings WHERE created_at < ?`, olderThan)
+}
+
+// Auth user methods
+
+func (s *Store) CreateUser(username, passwordHash, displayName, role string) (int64, error) {
+	res, err := s.db.Exec(`INSERT INTO auth_users (username, password_hash, display_name, role, created_at)
+		VALUES (?, ?, ?, ?, ?)`, username, passwordHash, displayName, role, time.Now().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (s *Store) GetUserByUsername(username string) (*AuthUser, error) {
+	var u AuthUser
+	var mustChange int
+	err := s.db.QueryRow(`SELECT id, username, password_hash, display_name, role, must_change_password, created_at, last_login
+		FROM auth_users WHERE username=?`, username).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &u.Role, &mustChange, &u.CreatedAt, &u.LastLogin)
+	if err != nil {
+		return nil, err
+	}
+	u.MustChangePassword = mustChange != 0
+	return &u, nil
+}
+
+func (s *Store) GetUserByID(id int64) (*AuthUser, error) {
+	var u AuthUser
+	var mustChange int
+	err := s.db.QueryRow(`SELECT id, username, password_hash, display_name, role, must_change_password, created_at, last_login
+		FROM auth_users WHERE id=?`, id).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &u.Role, &mustChange, &u.CreatedAt, &u.LastLogin)
+	if err != nil {
+		return nil, err
+	}
+	u.MustChangePassword = mustChange != 0
+	return &u, nil
+}
+
+func (s *Store) GetAllUsers() ([]AuthUser, error) {
+	rows, err := s.db.Query(`SELECT id, username, password_hash, display_name, role, must_change_password, created_at, last_login
+		FROM auth_users ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var users []AuthUser
+	for rows.Next() {
+		var u AuthUser
+		var mustChange int
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &u.Role, &mustChange, &u.CreatedAt, &u.LastLogin); err != nil {
+			return nil, err
+		}
+		u.MustChangePassword = mustChange != 0
+		users = append(users, u)
+	}
+	return users, nil
+}
+
+func (s *Store) UpdateUser(id int64, displayName, role string) error {
+	_, err := s.db.Exec(`UPDATE auth_users SET display_name=?, role=? WHERE id=?`, displayName, role, id)
+	return err
+}
+
+func (s *Store) UpdateUserPassword(id int64, passwordHash string) error {
+	_, err := s.db.Exec(`UPDATE auth_users SET password_hash=?, must_change_password=0 WHERE id=?`, passwordHash, id)
+	return err
+}
+
+func (s *Store) DeleteUser(id int64) error {
+	s.db.Exec(`DELETE FROM auth_sessions WHERE user_id=?`, id)
+	s.db.Exec(`DELETE FROM user_bots WHERE user_id=?`, id)
+	_, err := s.db.Exec(`DELETE FROM auth_users WHERE id=?`, id)
+	return err
+}
+
+func (s *Store) UpdateUserLastLogin(id int64) {
+	s.db.Exec(`UPDATE auth_users SET last_login=? WHERE id=?`, time.Now().Format(time.RFC3339), id)
+}
+
+// Session methods
+
+func (s *Store) CreateSession(token string, userID int64, expiresAt time.Time) error {
+	_, err := s.db.Exec(`INSERT INTO auth_sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)`,
+		token, userID, time.Now().Format(time.RFC3339), expiresAt.Format(time.RFC3339))
+	return err
+}
+
+func (s *Store) GetUserBySession(token string) (*AuthUser, error) {
+	var userID int64
+	var expiresAt string
+	err := s.db.QueryRow(`SELECT user_id, expires_at FROM auth_sessions WHERE token=?`, token).Scan(&userID, &expiresAt)
+	if err != nil {
+		return nil, err
+	}
+	exp, err := time.Parse(time.RFC3339, expiresAt)
+	if err != nil || time.Now().After(exp) {
+		s.db.Exec(`DELETE FROM auth_sessions WHERE token=?`, token)
+		return nil, nil
+	}
+	return s.GetUserByID(userID)
+}
+
+func (s *Store) DeleteSession(token string) {
+	s.db.Exec(`DELETE FROM auth_sessions WHERE token=?`, token)
+}
+
+func (s *Store) DeleteUserSessions(userID int64) {
+	s.db.Exec(`DELETE FROM auth_sessions WHERE user_id=?`, userID)
+}
+
+func (s *Store) CleanExpiredSessions() {
+	s.db.Exec(`DELETE FROM auth_sessions WHERE expires_at < ?`, time.Now().Format(time.RFC3339))
+}
+
+// User-Bot access methods
+
+func (s *Store) AssignBotToUser(userID, botID int64) error {
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO user_bots (user_id, bot_id) VALUES (?, ?)`, userID, botID)
+	return err
+}
+
+func (s *Store) RevokeBotFromUser(userID, botID int64) error {
+	_, err := s.db.Exec(`DELETE FROM user_bots WHERE user_id=? AND bot_id=?`, userID, botID)
+	return err
+}
+
+func (s *Store) GetUserBotIDs(userID int64) ([]int64, error) {
+	rows, err := s.db.Query(`SELECT bot_id FROM user_bots WHERE user_id=?`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		rows.Scan(&id)
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func (s *Store) GetBotUserIDs(botID int64) ([]int64, error) {
+	rows, err := s.db.Query(`SELECT user_id FROM user_bots WHERE bot_id=?`, botID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		rows.Scan(&id)
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func (s *Store) UserHasBotAccess(userID, botID int64) bool {
+	var count int
+	s.db.QueryRow(`SELECT COUNT(*) FROM user_bots WHERE user_id=? AND bot_id=?`, userID, botID).Scan(&count)
+	return count > 0
+}
+
+func (s *Store) GetBotConfigsForUser(userID int64) ([]BotConfig, error) {
+	rows, err := s.db.Query(`
+		SELECT b.id, b.name, b.token, b.bot_username, b.manage_enabled, b.proxy_enabled, b.backend_url, b.secret_token, b.polling_timeout, b.offset_id, b.last_error, b.last_activity, b.updates_forwarded, b.source, b.backend_status, b.backend_checked_at
+		FROM bots b
+		INNER JOIN user_bots ub ON b.id = ub.bot_id
+		WHERE ub.user_id = ?
+		ORDER BY b.source DESC, b.name`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var bots []BotConfig
+	for rows.Next() {
+		var b BotConfig
+		if err := rows.Scan(&b.ID, &b.Name, &b.Token, &b.BotUsername, &b.ManageEnabled, &b.ProxyEnabled, &b.BackendURL, &b.SecretToken, &b.PollingTimeout, &b.Offset, &b.LastError, &b.LastActivity, &b.UpdatesForwarded, &b.Source, &b.BackendStatus, &b.BackendCheckedAt); err != nil {
+			return nil, err
+		}
+		bots = append(bots, b)
+	}
+	return bots, nil
 }
 
 func (s *Store) Close() error {

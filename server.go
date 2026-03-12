@@ -81,68 +81,92 @@ func (s *Server) Start(addr string) error {
 		log.Printf("Webhook endpoint registered at %s", s.webhookPath)
 	}
 
-	// Telegram API proxy — backends use this instead of api.telegram.org
+	// Telegram API proxy — no auth (backends use this)
 	mux.HandleFunc("/tgapi/", s.handleTelegramAPIProxy)
 
+	// Health check — no auth
+	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]string{"status": "ok"})
+	})
+
+	// Auth endpoints — no auth required
+	mux.HandleFunc("/api/auth/login", s.handleLogin)
+	mux.HandleFunc("/api/auth/logout", s.handleLogout)
+
+	// Auth endpoints — auth required
+	mux.HandleFunc("/api/auth/me", s.authMiddleware(s.handleMe))
+	mux.HandleFunc("/api/auth/change-password", s.authMiddleware(s.handleChangePassword))
+
+	// User management — admin only
+	mux.HandleFunc("/api/auth/users", s.adminOnly(s.handleUserList))
+	mux.HandleFunc("/api/auth/users/add", s.adminOnly(s.handleUserAdd))
+	mux.HandleFunc("/api/auth/users/update", s.adminOnly(s.handleUserUpdate))
+	mux.HandleFunc("/api/auth/users/delete", s.adminOnly(s.handleUserDelete))
+	mux.HandleFunc("/api/auth/users/reset-password", s.adminOnly(s.handleUserResetPassword))
+	mux.HandleFunc("/api/auth/users/bots", s.adminOnly(s.handleUserBots))
+	mux.HandleFunc("/api/auth/users/bots/assign", s.adminOnly(s.handleAssignBot))
+	mux.HandleFunc("/api/auth/users/bots/revoke", s.adminOnly(s.handleRevokeBot))
+
+	// SPA — no auth (SPA handles it client-side)
 	mux.HandleFunc("/", s.handleIndex)
 
-	// Bot management
-	mux.HandleFunc("/api/bots", s.handleBotList)
-	mux.HandleFunc("/api/bots/add", s.handleBotAdd)
-	mux.HandleFunc("/api/bots/update", s.handleBotUpdate)
-	mux.HandleFunc("/api/bots/delete", s.handleBotDelete)
-	mux.HandleFunc("/api/bots/validate", s.handleBotValidate)
-	mux.HandleFunc("/api/bots/health", s.handleBotHealth)
+	// Bot management — auth required
+	mux.HandleFunc("/api/bots", s.authMiddleware(s.handleBotList))
+	mux.HandleFunc("/api/bots/add", s.adminOnly(s.handleBotAdd))
+	mux.HandleFunc("/api/bots/update", s.adminOnly(s.handleBotUpdate))
+	mux.HandleFunc("/api/bots/delete", s.adminOnly(s.handleBotDelete))
+	mux.HandleFunc("/api/bots/validate", s.adminOnly(s.handleBotValidate))
+	mux.HandleFunc("/api/bots/health", s.authMiddleware(s.handleBotHealth))
 
-	// Chat management (requires bot_id)
-	mux.HandleFunc("/api/chats", s.handleChats)
-	mux.HandleFunc("/api/chats/refresh", s.handleRefreshChat)
-	mux.HandleFunc("/api/chats/delete", s.handleDeleteChat)
+	// Chat management
+	mux.HandleFunc("/api/chats", s.authMiddleware(s.handleChats))
+	mux.HandleFunc("/api/chats/refresh", s.authMiddleware(s.handleRefreshChat))
+	mux.HandleFunc("/api/chats/delete", s.authMiddleware(s.handleDeleteChat))
 
 	// Messages
-	mux.HandleFunc("/api/messages", s.handleMessages)
-	mux.HandleFunc("/api/messages/search", s.handleSearchMessages)
-	mux.HandleFunc("/api/messages/send", s.handleSendMessage)
-	mux.HandleFunc("/api/messages/pin", s.handlePinMessage)
-	mux.HandleFunc("/api/messages/unpin", s.handleUnpinMessage)
-	mux.HandleFunc("/api/messages/delete", s.handleDeleteMessage)
+	mux.HandleFunc("/api/messages", s.authMiddleware(s.handleMessages))
+	mux.HandleFunc("/api/messages/search", s.authMiddleware(s.handleSearchMessages))
+	mux.HandleFunc("/api/messages/send", s.authMiddleware(s.handleSendMessage))
+	mux.HandleFunc("/api/messages/pin", s.authMiddleware(s.handlePinMessage))
+	mux.HandleFunc("/api/messages/unpin", s.authMiddleware(s.handleUnpinMessage))
+	mux.HandleFunc("/api/messages/delete", s.authMiddleware(s.handleDeleteMessage))
 
 	// Stats
-	mux.HandleFunc("/api/stats", s.handleStats)
+	mux.HandleFunc("/api/stats", s.authMiddleware(s.handleStats))
 
-	// Users
-	mux.HandleFunc("/api/users/list", s.handleListUsers)
-	mux.HandleFunc("/api/users/ban", s.handleBanUser)
-	mux.HandleFunc("/api/users/unban", s.handleUnbanUser)
+	// Users (Telegram users in chats, not auth users)
+	mux.HandleFunc("/api/users/list", s.authMiddleware(s.handleListUsers))
+	mux.HandleFunc("/api/users/ban", s.authMiddleware(s.handleBanUser))
+	mux.HandleFunc("/api/users/unban", s.authMiddleware(s.handleUnbanUser))
 
-	// Admins
-	mux.HandleFunc("/api/admins", s.handleGetAdmins)
-	mux.HandleFunc("/api/admins/promote", s.handlePromoteAdmin)
-	mux.HandleFunc("/api/admins/demote", s.handleDemoteAdmin)
-	mux.HandleFunc("/api/admins/title", s.handleSetAdminTitle)
+	// Admins (Telegram chat admins)
+	mux.HandleFunc("/api/admins", s.authMiddleware(s.handleGetAdmins))
+	mux.HandleFunc("/api/admins/promote", s.authMiddleware(s.handlePromoteAdmin))
+	mux.HandleFunc("/api/admins/demote", s.authMiddleware(s.handleDemoteAdmin))
+	mux.HandleFunc("/api/admins/title", s.authMiddleware(s.handleSetAdminTitle))
 
 	// Admin log
-	mux.HandleFunc("/api/adminlog", s.handleAdminLog)
+	mux.HandleFunc("/api/adminlog", s.authMiddleware(s.handleAdminLog))
 
 	// Routes
-	mux.HandleFunc("/api/routes", s.handleGetRoutes)
-	mux.HandleFunc("/api/routes/add", s.handleAddRoute)
-	mux.HandleFunc("/api/routes/update", s.handleUpdateRoute)
-	mux.HandleFunc("/api/routes/delete", s.handleDeleteRoute)
+	mux.HandleFunc("/api/routes", s.authMiddleware(s.handleGetRoutes))
+	mux.HandleFunc("/api/routes/add", s.adminOnly(s.handleAddRoute))
+	mux.HandleFunc("/api/routes/update", s.adminOnly(s.handleUpdateRoute))
+	mux.HandleFunc("/api/routes/delete", s.adminOnly(s.handleDeleteRoute))
 
-	// LLM routing config
-	mux.HandleFunc("/api/llm-config", s.handleGetLLMConfig)
-	mux.HandleFunc("/api/llm-config/save", s.handleSaveLLMConfig)
-	mux.HandleFunc("/api/bots/description", s.handleBotDescription)
+	// LLM routing config — admin only
+	mux.HandleFunc("/api/llm-config", s.authMiddleware(s.handleGetLLMConfig))
+	mux.HandleFunc("/api/llm-config/save", s.adminOnly(s.handleSaveLLMConfig))
+	mux.HandleFunc("/api/bots/description", s.authMiddleware(s.handleBotDescription))
 
-	// Media proxy
-	mux.HandleFunc("/api/media", s.handleMediaProxy)
+	// Media proxy — auth required
+	mux.HandleFunc("/api/media", s.authMiddleware(s.handleMediaProxy))
 
 	// User tags
-	mux.HandleFunc("/api/tags", s.handleGetTags)
-	mux.HandleFunc("/api/tags/add", s.handleAddTag)
-	mux.HandleFunc("/api/tags/remove", s.handleRemoveTag)
-	mux.HandleFunc("/api/tags/user", s.handleGetUserTags)
+	mux.HandleFunc("/api/tags", s.authMiddleware(s.handleGetTags))
+	mux.HandleFunc("/api/tags/add", s.authMiddleware(s.handleAddTag))
+	mux.HandleFunc("/api/tags/remove", s.authMiddleware(s.handleRemoveTag))
+	mux.HandleFunc("/api/tags/user", s.authMiddleware(s.handleGetUserTags))
 
 	log.Printf("Web interface at http://%s", addr)
 	return http.ListenAndServe(addr, mux)
@@ -161,7 +185,14 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 // Bot management handlers
 
 func (s *Server) handleBotList(w http.ResponseWriter, r *http.Request) {
-	bots, err := s.store.GetBotConfigs()
+	user := getAuthUser(r)
+	var bots []BotConfig
+	var err error
+	if user.Role == "admin" {
+		bots, err = s.store.GetBotConfigs()
+	} else {
+		bots, err = s.store.GetBotConfigsForUser(user.ID)
+	}
 	if err != nil {
 		writeError(w, err)
 		return
@@ -862,6 +893,343 @@ func (s *Server) handleBotDescription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]string{"description": desc})
+}
+
+// Auth handlers
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, err)
+		return
+	}
+	user, err := s.store.GetUserByUsername(req.Username)
+	if err != nil || user == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(401)
+		w.Write([]byte(`{"error":"invalid credentials"}`))
+		return
+	}
+	if !CheckPassword(user.PasswordHash, req.Password) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(401)
+		w.Write([]byte(`{"error":"invalid credentials"}`))
+		return
+	}
+	token, err := GenerateSessionToken()
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	expiresAt := time.Now().Add(sessionDuration)
+	if err := s.store.CreateSession(token, user.ID, expiresAt); err != nil {
+		writeError(w, err)
+		return
+	}
+	s.store.UpdateUserLastLogin(user.ID)
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		Expires:  expiresAt,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	writeJSON(w, map[string]interface{}{
+		"status":               "ok",
+		"user":                 user,
+		"must_change_password": user.MustChangePassword,
+	})
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie(sessionCookieName); err == nil {
+		s.store.DeleteSession(cookie.Value)
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+	})
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
+	user := getAuthUser(r)
+	if user == nil {
+		w.WriteHeader(401)
+		w.Write([]byte(`{"error":"unauthorized"}`))
+		return
+	}
+	writeJSON(w, user)
+}
+
+func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	user := getAuthUser(r)
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, err)
+		return
+	}
+	if len(req.NewPassword) < 4 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		w.Write([]byte(`{"error":"password too short (min 4 characters)"}`))
+		return
+	}
+	// For must_change_password, skip old password check
+	if !user.MustChangePassword {
+		dbUser, _ := s.store.GetUserByID(user.ID)
+		if dbUser == nil || !CheckPassword(dbUser.PasswordHash, req.OldPassword) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(401)
+			w.Write([]byte(`{"error":"invalid old password"}`))
+			return
+		}
+	}
+	hash, err := HashPassword(req.NewPassword)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := s.store.UpdateUserPassword(user.ID, hash); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// User management handlers (admin only)
+
+func (s *Server) handleUserList(w http.ResponseWriter, r *http.Request) {
+	users, err := s.store.GetAllUsers()
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if users == nil {
+		users = []AuthUser{}
+	}
+	// Add bot IDs for each user
+	type UserWithBots struct {
+		AuthUser
+		BotIDs []int64 `json:"bot_ids"`
+	}
+	var result []UserWithBots
+	for _, u := range users {
+		botIDs, _ := s.store.GetUserBotIDs(u.ID)
+		if botIDs == nil {
+			botIDs = []int64{}
+		}
+		result = append(result, UserWithBots{AuthUser: u, BotIDs: botIDs})
+	}
+	if result == nil {
+		result = []UserWithBots{}
+	}
+	writeJSON(w, result)
+}
+
+func (s *Server) handleUserAdd(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	var req struct {
+		Username    string  `json:"username"`
+		Password    string  `json:"password"`
+		DisplayName string  `json:"display_name"`
+		Role        string  `json:"role"`
+		BotIDs      []int64 `json:"bot_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, err)
+		return
+	}
+	if req.Username == "" || req.Password == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		w.Write([]byte(`{"error":"username and password required"}`))
+		return
+	}
+	if req.Role == "" {
+		req.Role = "user"
+	}
+	if req.Role != "admin" && req.Role != "user" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		w.Write([]byte(`{"error":"role must be admin or user"}`))
+		return
+	}
+	hash, err := HashPassword(req.Password)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	id, err := s.store.CreateUser(req.Username, hash, req.DisplayName, req.Role)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	for _, botID := range req.BotIDs {
+		s.store.AssignBotToUser(id, botID)
+	}
+	writeJSON(w, map[string]interface{}{"status": "ok", "id": id})
+}
+
+func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	var req struct {
+		ID          int64   `json:"id"`
+		DisplayName string  `json:"display_name"`
+		Role        string  `json:"role"`
+		BotIDs      []int64 `json:"bot_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, err)
+		return
+	}
+	// Don't allow demoting yourself
+	currentUser := getAuthUser(r)
+	if currentUser.ID == req.ID && req.Role != "admin" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		w.Write([]byte(`{"error":"cannot demote yourself"}`))
+		return
+	}
+	if err := s.store.UpdateUser(req.ID, req.DisplayName, req.Role); err != nil {
+		writeError(w, err)
+		return
+	}
+	// Update bot assignments: remove all, then add new ones
+	if req.BotIDs != nil {
+		existingBots, _ := s.store.GetUserBotIDs(req.ID)
+		for _, botID := range existingBots {
+			s.store.RevokeBotFromUser(req.ID, botID)
+		}
+		for _, botID := range req.BotIDs {
+			s.store.AssignBotToUser(req.ID, botID)
+		}
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	// Don't allow deleting yourself
+	currentUser := getAuthUser(r)
+	if currentUser.ID == id {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		w.Write([]byte(`{"error":"cannot delete yourself"}`))
+		return
+	}
+	if err := s.store.DeleteUser(id); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleUserResetPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	var req struct {
+		ID       int64  `json:"id"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, err)
+		return
+	}
+	hash, err := HashPassword(req.Password)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := s.store.UpdateUserPassword(req.ID, hash); err != nil {
+		writeError(w, err)
+		return
+	}
+	s.store.DeleteUserSessions(req.ID)
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleUserBots(w http.ResponseWriter, r *http.Request) {
+	userID, _ := strconv.ParseInt(r.URL.Query().Get("user_id"), 10, 64)
+	botIDs, err := s.store.GetUserBotIDs(userID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if botIDs == nil {
+		botIDs = []int64{}
+	}
+	writeJSON(w, botIDs)
+}
+
+func (s *Server) handleAssignBot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	var req struct {
+		UserID int64 `json:"user_id"`
+		BotID  int64 `json:"bot_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := s.store.AssignBotToUser(req.UserID, req.BotID); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleRevokeBot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	var req struct {
+		UserID int64 `json:"user_id"`
+		BotID  int64 `json:"bot_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := s.store.RevokeBotFromUser(req.UserID, req.BotID); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
 }
 
 // resolveBot finds a Bot instance from either registered bots or proxy manager
