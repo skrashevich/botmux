@@ -1257,8 +1257,9 @@ p, .msg-text { text-wrap: pretty; }
     </div>
     <div class="modal-field">
       <label id="bridgeProtocolLabel">Protocol</label>
-      <select id="bridgeFormProtocol" class="route-modal-select">
+      <select id="bridgeFormProtocol" class="route-modal-select" onchange="updateBridgeProtocolHints()">
         <option value="webhook">Webhook (generic HTTP)</option>
+        <option value="slack">Slack</option>
         <option value="discord">Discord</option>
         <option value="meshtastic">Meshtastic</option>
       </select>
@@ -1271,6 +1272,7 @@ p, .msg-text { text-wrap: pretty; }
     <div class="modal-field">
       <label id="bridgeConfigLabel">Config (JSON)</label>
       <textarea id="bridgeFormConfig" style="width:100%;min-height:60px;resize:vertical;font-family:var(--ff-mono);font-size:11px" placeholder="{}"></textarea>
+      <div style="font-family:var(--ff-mono);font-size:10px;color:var(--text3);margin-top:4px" id="bridgeConfigHint"></div>
     </div>
     <label class="route-toggle" style="margin:14px 0">
       <input type="checkbox" id="bridgeFormEnabled" checked>
@@ -1764,7 +1766,9 @@ const i18n = {
     bridge_saved: 'Bridge saved', bridge_deleted: 'Bridge deleted',
     confirm_delete_bridge: 'Delete this bridge and all its mappings?',
     bridge_name_required: 'Bridge name required',
-    protocol_webhook: 'Webhook (generic HTTP)', protocol_discord: 'Discord', protocol_meshtastic: 'Meshtastic',
+    protocol_webhook: 'Webhook (generic HTTP)', protocol_slack: 'Slack', protocol_discord: 'Discord', protocol_meshtastic: 'Meshtastic',
+    slack_config_hint: 'Set bot_token (required) and signing_secret (recommended) in config JSON',
+    slack_callback_hint: 'Not needed for Slack — messages are sent directly via Slack API using bot_token',
     // bot modal
     add_bot: 'Add Bot', edit_bot: 'Edit Bot',
     name: 'Name', name_placeholder: 'My Bot',
@@ -1932,7 +1936,9 @@ const i18n = {
     bridge_saved: '\u041c\u043e\u0441\u0442 \u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d', bridge_deleted: '\u041c\u043e\u0441\u0442 \u0443\u0434\u0430\u043b\u0451\u043d',
     confirm_delete_bridge: '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043c\u043e\u0441\u0442 \u0438 \u0432\u0441\u0435 \u0435\u0433\u043e \u043c\u0430\u043f\u043f\u0438\u043d\u0433\u0438?',
     bridge_name_required: '\u0422\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044f \u0438\u043c\u044f \u043c\u043e\u0441\u0442\u0430',
-    protocol_webhook: 'Webhook (\u0443\u043d\u0438\u0432\u0435\u0440\u0441\u0430\u043b\u044c\u043d\u044b\u0439 HTTP)', protocol_discord: 'Discord', protocol_meshtastic: 'Meshtastic',
+    protocol_webhook: 'Webhook (\u0443\u043d\u0438\u0432\u0435\u0440\u0441\u0430\u043b\u044c\u043d\u044b\u0439 HTTP)', protocol_slack: 'Slack', protocol_discord: 'Discord', protocol_meshtastic: 'Meshtastic',
+    slack_config_hint: '\u0423\u043a\u0430\u0436\u0438\u0442\u0435 bot_token (\u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u043d\u043e) \u0438 signing_secret (\u0440\u0435\u043a\u043e\u043c\u0435\u043d\u0434\u0443\u0435\u0442\u0441\u044f) \u0432 JSON-\u043a\u043e\u043d\u0444\u0438\u0433\u0435',
+    slack_callback_hint: '\u041d\u0435 \u043d\u0443\u0436\u0435\u043d \u0434\u043b\u044f Slack \u2014 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u044e\u0442\u0441\u044f \u043d\u0430\u043f\u0440\u044f\u043c\u0443\u044e \u0447\u0435\u0440\u0435\u0437 Slack API',
     // bot modal
     add_bot: '\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0431\u043e\u0442\u0430', edit_bot: '\u0420\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0431\u043e\u0442\u0430',
     name: '\u0418\u043c\u044f', name_placeholder: '\u041c\u043e\u0439 \u0431\u043e\u0442',
@@ -2757,10 +2763,30 @@ function showBridgeModal(bridgeId) {
       }
     });
   }
+  updateBridgeProtocolHints();
   document.getElementById('bridgeModal').style.display = 'flex';
 }
 
 function closeBridgeModal() { document.getElementById('bridgeModal').style.display = 'none'; }
+
+function updateBridgeProtocolHints() {
+  const proto = document.getElementById('bridgeFormProtocol').value;
+  const callbackHint = document.getElementById('bridgeCallbackHint');
+  const configHint = document.getElementById('bridgeConfigHint');
+  const callbackInput = document.getElementById('bridgeFormCallback');
+  const configInput = document.getElementById('bridgeFormConfig');
+  if (proto === 'slack') {
+    callbackHint.textContent = t('slack_callback_hint');
+    configHint.textContent = t('slack_config_hint');
+    callbackInput.placeholder = '(optional)';
+    if (configInput.value === '{}') configInput.value = '{"bot_token": "xoxb-...", "signing_secret": ""}';
+  } else {
+    callbackHint.textContent = t('bridge_callback_hint');
+    configHint.textContent = '';
+    callbackInput.placeholder = 'https://your-bridge/callback';
+    if (configInput.value === '{"bot_token": "xoxb-...", "signing_secret": ""}') configInput.value = '{}';
+  }
+}
 
 async function saveBridge() {
   const editID = document.getElementById('bridgeEditID').value;

@@ -166,7 +166,7 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/routes/delete", s.adminOnly(s.handleDeleteRoute))
 
 	// Bridges — admin only for management, no auth for incoming webhook
-	mux.HandleFunc("/api/bridges", s.authMiddleware(s.handleBridgeList))
+	mux.HandleFunc("/api/bridges", s.adminOnly(s.handleBridgeList))
 	mux.HandleFunc("/api/bridges/add", s.adminOnly(s.handleBridgeAdd))
 	mux.HandleFunc("/api/bridges/update", s.adminOnly(s.handleBridgeUpdate))
 	mux.HandleFunc("/api/bridges/delete", s.adminOnly(s.handleBridgeDelete))
@@ -1381,14 +1381,14 @@ func (s *Server) handleBridgeDelete(w http.ResponseWriter, r *http.Request) {
 
 // handleBridgeIncoming receives messages from external protocol bridges.
 // @Summary Bridge incoming webhook
-// @Description Receives a message from an external protocol (Discord, Meshtastic, etc.) and injects it as a Telegram update. URL format: /bridge/{id}/incoming. No authentication — bridges use the URL as a secret.
+// @Description Receives a message from an external protocol and injects it as a Telegram update. URL format: /bridge/{id}/incoming. No authentication — bridges use the URL as a secret. For Slack bridges, handles Events API payloads (including url_verification challenge) and verifies request signatures. For webhook bridges, expects BridgeIncomingMessage JSON.
 // @Tags bridges
 // @Accept json
 // @Produce json
 // @Param id path int true "Bridge ID"
-// @Param message body BridgeIncomingMessage true "Incoming message"
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string "Invalid Slack signature"
 // @Failure 404 {object} map[string]string
 // @Router /bridge/{id}/incoming [post]
 func (s *Server) handleBridgeIncoming(w http.ResponseWriter, r *http.Request) {
@@ -1413,18 +1413,44 @@ func (s *Server) handleBridgeIncoming(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var msg BridgeIncomingMessage
-	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(400)
-		w.Write([]byte(`{"error":"invalid JSON"}`))
-		return
-	}
-
 	if s.bridge == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(500)
 		w.Write([]byte(`{"error":"bridge manager not initialized"}`))
+		return
+	}
+
+	// Read body once (needed for Slack signature verification)
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		w.Write([]byte(`{"error":"failed to read body"}`))
+		return
+	}
+
+	// Check if this is a Slack bridge — route to Slack handler
+	cfg := s.bridge.GetBridge(bridgeID)
+	if cfg != nil && isSlackBridge(cfg) {
+		respBody, contentType, status, err := s.bridge.HandleSlackEvent(bridgeID, r.Header, body)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.WriteHeader(status)
+		w.Write(respBody)
+		return
+	}
+
+	// Generic webhook bridge — parse as BridgeIncomingMessage
+	var msg BridgeIncomingMessage
+	if err := json.Unmarshal(body, &msg); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		w.Write([]byte(`{"error":"invalid JSON"}`))
 		return
 	}
 

@@ -16,7 +16,7 @@ import (
 type BridgeConfig struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`
-	Protocol    string `json:"protocol"`     // "webhook", "discord", "meshtastic"
+	Protocol    string `json:"protocol"`     // "webhook", "slack", "discord", "meshtastic"
 	LinkedBotID int64  `json:"linked_bot_id"` // Telegram bot that this bridge is linked to
 	Config      string `json:"config"`        // JSON protocol-specific configuration
 	CallbackURL string `json:"callback_url"`  // URL to POST outgoing messages to
@@ -192,7 +192,7 @@ func (bm *BridgeManager) HandleIncoming(bridgeID int64, msg BridgeIncomingMessag
 	bm.ensureManagedBot(cfg.LinkedBotID)
 
 	// Inject into the processing pipeline
-	log.Printf("[bridge] id=%d injecting update for bot %d: chat=%d from=%s text=%q",
+	log.Printf("[bridge] id=%d injecting update for bot %d: chat=%d from=%q text=%q",
 		bridgeID, cfg.LinkedBotID, tgChatID, msg.Username, truncate(msg.Text, 80))
 
 	bm.proxy.processUpdate(cfg.LinkedBotID, update)
@@ -208,13 +208,24 @@ func (bm *BridgeManager) NotifyOutgoing(botID int64, chatID int64, text string, 
 	defer bm.mu.RUnlock()
 
 	for _, cfg := range bm.bridges {
-		if cfg.LinkedBotID != botID || cfg.CallbackURL == "" {
+		if cfg.LinkedBotID != botID {
 			continue
 		}
 
 		// Check if this chat belongs to this bridge
 		extChatID, err := bm.store.GetBridgeChatMappingReverse(cfg.ID, chatID)
 		if err != nil || extChatID == "" {
+			continue
+		}
+
+		// Slack bridges: send directly via Slack API
+		if isSlackBridge(cfg) {
+			go bm.notifySlackOutgoing(cfg, extChatID, text, replyToMsgID)
+			continue
+		}
+
+		// Generic webhook bridges: POST to callback URL
+		if cfg.CallbackURL == "" {
 			continue
 		}
 
@@ -227,7 +238,7 @@ func (bm *BridgeManager) NotifyOutgoing(botID int64, chatID int64, text string, 
 
 		// Map reply-to back to external message ID
 		if replyToMsgID != 0 {
-			if extMsgID, err := bm.store.GetBridgeMsgMappingReverse(cfg.ID, replyToMsgID); err == nil {
+			if extMsgID, err := bm.store.GetBridgeMsgMappingReverse(cfg.ID, replyToMsgID); err == nil && extMsgID != "" {
 				outMsg.ReplyToExtID = extMsgID
 			}
 		}
@@ -315,6 +326,13 @@ func (bm *BridgeManager) InstallHooks() {
 // InstallHookOnBot sets the onMessageSent callback on a specific bot
 func (bm *BridgeManager) InstallHookOnBot(bot *Bot) {
 	bot.onMessageSent = bm.NotifyOutgoing
+}
+
+// GetBridge returns a bridge config by ID (from in-memory cache)
+func (bm *BridgeManager) GetBridge(bridgeID int64) *BridgeConfig {
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
+	return bm.bridges[bridgeID]
 }
 
 // GetBridgesForBot returns all bridges linked to a specific bot
