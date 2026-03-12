@@ -179,6 +179,9 @@ func (s *Server) BuildMux() *http.ServeMux {
 	mux.HandleFunc("/api/llm-config/save", s.adminOnly(s.handleSaveLLMConfig))
 	mux.HandleFunc("/api/bots/description", s.authMiddleware(s.handleBotDescription))
 
+	// Message stream (SSE) — auth required
+	mux.HandleFunc("/api/messages/stream", s.authMiddleware(s.handleMessageStream))
+
 	// Media proxy — auth required
 	mux.HandleFunc("/api/media", s.authMiddleware(s.handleMediaProxy))
 
@@ -560,6 +563,48 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {object} map[string]string
 // @Router /api/messages/search [get]
 // @Security CookieAuth || BearerAuth
+// handleMessageStream sends new messages via Server-Sent Events
+func (s *Server) handleMessageStream(w http.ResponseWriter, r *http.Request) {
+	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
+	if chatID == 0 {
+		http.Error(w, "chat_id required", 400)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	flusher.Flush()
+
+	ch := s.store.Subscribe()
+	defer s.store.Unsubscribe(ch)
+
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg := <-ch:
+			if msg.ChatID != chatID {
+				continue
+			}
+			data, err := json.Marshal(msg)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		}
+	}
+}
+
 func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	query := r.URL.Query().Get("q")

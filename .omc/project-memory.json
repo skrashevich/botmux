@@ -67,20 +67,20 @@
   "hotPaths": [
     {
       "path": "templates/index.html",
-      "accessCount": 156,
-      "lastAccessed": 1773311373701,
+      "accessCount": 175,
+      "lastAccessed": 1773315132839,
       "type": "directory"
     },
     {
       "path": "server.go",
-      "accessCount": 144,
-      "lastAccessed": 1773311254928,
+      "accessCount": 148,
+      "lastAccessed": 1773315089277,
       "type": "directory"
     },
     {
       "path": "store.go",
-      "accessCount": 49,
-      "lastAccessed": 1773311313729,
+      "accessCount": 56,
+      "lastAccessed": 1773315067642,
       "type": "file"
     },
     {

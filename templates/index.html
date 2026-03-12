@@ -1333,8 +1333,10 @@ async function api(url, opts) {
     showLoginScreen();
     throw new Error('Session expired');
   }
-  const data = await res.json();
-  if (!res.ok || data.error) throw new Error(data.error || 'Request failed');
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : null; } catch(e) { data = null; }
+  if (!res.ok || (data && data.error)) throw new Error((data && data.error) || 'Request failed');
   return data;
 }
 
@@ -1428,6 +1430,7 @@ async function doLogin() {
 }
 
 async function doLogout() {
+  disconnectMessageStream();
   try { await fetch('/api/auth/logout', {method: 'POST'}); } catch(e) {}
   currentUser = null;
   currentBotID = null; currentBot = null; currentChat = null; allBots = [];
@@ -2421,8 +2424,7 @@ async function init() {
       const activeTab = document.querySelector('.tab.active');
       if (!activeTab) return;
       const tab = activeTab.dataset.tab;
-      if (tab === 'messages' && !document.getElementById('searchInput')?.value.trim()) loadMessages(false, true);
-      else if (tab === 'stats') loadStats();
+      if (tab === 'stats') loadStats();
       else if (tab === 'users') loadUsers();
       else if (tab === 'adminlog') loadAdminLog();
     }, 5000);
@@ -3015,7 +3017,8 @@ function switchTab(tab) {
   const flexTabs = ['messages', 'users'];
   document.getElementById(`tab-${tab}`).style.display = flexTabs.includes(tab) ? 'flex' : 'block';
 
-  if (tab === 'messages') { messageOffset = 0; loadMessages(); }
+  if (tab === 'messages') { messageOffset = 0; loadMessages(); if (currentChat) connectMessageStream(currentChat.id); }
+  else disconnectMessageStream();
   if (tab === 'stats') loadStats();
   if (tab === 'info') renderInfo();
   if (tab === 'admins') loadAdmins();
@@ -3026,47 +3029,147 @@ function switchTab(tab) {
 
 // ===== MESSAGES =====
 
+// Set of currently rendered message IDs for incremental updates
+let renderedMsgIds = new Set();
+let messageEventSource = null;
+
+function renderMsgRow(m, msgMap) {
+  return `<div class="msg-row ${m.deleted ? 'msg-deleted' : ''}" id="msg-${m.id}">
+    ${m.reply_to_id ? `<span class="msg-reply-badge" onclick="scrollToMsg(${m.reply_to_id})">↩ ${t('replying_to')} ${msgMap[m.reply_to_id] ? esc(msgMap[m.reply_to_id].from_user) : '#' + m.reply_to_id}</span>` : ''}
+    <span class="msg-user" title="ID: ${m.from_id}">${esc(m.from_user)}</span>
+    <span class="msg-text">${renderMsgContent(m)}</span>
+    ${m.deleted ? `<span class="msg-deleted-badge">${t('deleted')}</span>` : ''}
+    <span class="msg-time">${m.date_str}</span>
+    <div class="msg-actions">
+      ${!m.deleted ? `<button class="btn btn-sm" onclick="setReply(${m.id}, '${esc(m.from_user).replace(/'/g, "\\'")}')">${t('reply')}</button>` : ''}
+      ${currentChat.is_admin && !m.deleted ? `
+        <button class="btn btn-sm" onclick="pinMsg(${m.id})">${t('pin')}</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteMsg(${m.id})">${t('del')}</button>
+        ${m.from_id ? `<button class="btn btn-danger btn-sm" onclick="banUsr(${m.from_id})">${t('ban')}</button>` : ''}
+      ` : ''}
+    </div>
+  </div>`;
+}
+
 async function loadMessages(append = false, preserveScroll = false) {
   if (!currentChat) return;
   if (!append) messageOffset = 0;
   try {
     const msgs = await api(`/api/messages?chat_id=${currentChat.id}&limit=50&offset=${messageOffset}`);
+    if (!msgs) return;
     const list = document.getElementById('messagesList');
     const content = document.getElementById('messagesContent');
-    const prevScrollTop = content.scrollTop;
-    const prevScrollHeight = content.scrollHeight;
     const reversed = [...msgs].reverse();
     const msgMap = {};
     reversed.forEach(m => { msgMap[m.id] = m; });
-    const html = reversed.map(m => `
-      <div class="msg-row ${m.deleted ? 'msg-deleted' : ''}" id="msg-${m.id}">
-        ${m.reply_to_id ? `<span class="msg-reply-badge" onclick="scrollToMsg(${m.reply_to_id})">↩ ${t('replying_to')} ${msgMap[m.reply_to_id] ? esc(msgMap[m.reply_to_id].from_user) : '#' + m.reply_to_id}</span>` : ''}
-        <span class="msg-user" title="ID: ${m.from_id}">${esc(m.from_user)}</span>
-        <span class="msg-text">${renderMsgContent(m)}</span>
-        ${m.deleted ? `<span class="msg-deleted-badge">${t('deleted')}</span>` : ''}
-        <span class="msg-time">${m.date_str}</span>
-        <div class="msg-actions">
-          ${!m.deleted ? `<button class="btn btn-sm" onclick="setReply(${m.id}, '${esc(m.from_user).replace(/'/g, "\\'")}')">${t('reply')}</button>` : ''}
-          ${currentChat.is_admin && !m.deleted ? `
-            <button class="btn btn-sm" onclick="pinMsg(${m.id})">${t('pin')}</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteMsg(${m.id})">${t('del')}</button>
-            ${m.from_id ? `<button class="btn btn-danger btn-sm" onclick="banUsr(${m.from_id})">${t('ban')}</button>` : ''}
-          ` : ''}
-        </div>
-      </div>
-    `).join('');
-    if (append) list.innerHTML = html + list.innerHTML;
-    else list.innerHTML = html || `<div style="text-align:center;color:var(--text3);padding:40px;font-family:var(--ff-mono);font-size:12px">${t('no_messages')}</div>`;
-    document.getElementById('loadMoreBtn').style.display = msgs.length >= 50 ? 'inline-flex' : 'none';
-    if (preserveScroll) {
-      content.scrollTop = prevScrollTop + (content.scrollHeight - prevScrollHeight);
-    } else if (!append) {
-      content.scrollTop = content.scrollHeight;
+
+    if (preserveScroll && !append && renderedMsgIds.size > 0) {
+      // Incremental update: only add new messages at the bottom
+      const newMsgs = reversed.filter(m => !renderedMsgIds.has(m.id));
+      if (newMsgs.length === 0) return; // nothing new
+
+      // Check if user is near the bottom (within 60px)
+      const wasAtBottom = (content.scrollHeight - content.scrollTop - content.clientHeight) < 60;
+
+      const fragment = document.createDocumentFragment();
+      const temp = document.createElement('div');
+      newMsgs.forEach(m => {
+        temp.innerHTML = renderMsgRow(m, msgMap);
+        const el = temp.firstElementChild;
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(8px)';
+        fragment.appendChild(el);
+        renderedMsgIds.add(m.id);
+      });
+      list.appendChild(fragment);
+
+      // Animate new messages in
+      requestAnimationFrame(() => {
+        list.querySelectorAll('.msg-row').forEach(el => {
+          if (el.style.opacity === '0') {
+            el.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+            el.style.opacity = '1';
+            el.style.transform = 'translateY(0)';
+          }
+        });
+      });
+
+      // Only auto-scroll if user was at bottom
+      if (wasAtBottom) {
+        requestAnimationFrame(() => { content.scrollTop = content.scrollHeight; });
+      }
+    } else {
+      // Full render: initial load, chat switch, load-more, search clear
+      const prevScrollHeight = content.scrollHeight;
+      const prevScrollTop = content.scrollTop;
+      const html = reversed.map(m => renderMsgRow(m, msgMap)).join('');
+
+      if (append) {
+        list.innerHTML = html + list.innerHTML;
+      } else {
+        renderedMsgIds = new Set();
+        list.innerHTML = html || `<div style="text-align:center;color:var(--text3);padding:40px;font-family:var(--ff-mono);font-size:12px">${t('no_messages')}</div>`;
+      }
+      reversed.forEach(m => renderedMsgIds.add(m.id));
+
+      if (append) {
+        // Keep scroll position when loading older messages
+        content.scrollTop = prevScrollTop + (content.scrollHeight - prevScrollHeight);
+      } else {
+        // Scroll to bottom on initial load / chat switch
+        content.scrollTop = content.scrollHeight;
+      }
     }
+    document.getElementById('loadMoreBtn').style.display = msgs.length >= 50 ? 'inline-flex' : 'none';
   } catch(e) { toast(e.message, 'error'); }
 }
 
 function loadMoreMessages() { messageOffset += 50; loadMessages(true); }
+
+function connectMessageStream(chatID) {
+  disconnectMessageStream();
+  messageEventSource = new EventSource(`/api/messages/stream?chat_id=${chatID}`);
+  messageEventSource.onmessage = (e) => {
+    try {
+      const m = JSON.parse(e.data);
+      if (renderedMsgIds.has(m.id)) return;
+      renderedMsgIds.add(m.id);
+
+      const list = document.getElementById('messagesList');
+      const content = document.getElementById('messagesContent');
+      const wasAtBottom = (content.scrollHeight - content.scrollTop - content.clientHeight) < 60;
+
+      const msgMap = {};
+      msgMap[m.id] = m;
+      const temp = document.createElement('div');
+      temp.innerHTML = renderMsgRow(m, msgMap);
+      const el = temp.firstElementChild;
+      el.style.opacity = '0';
+      el.style.transform = 'translateY(8px)';
+      list.appendChild(el);
+
+      requestAnimationFrame(() => {
+        el.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        el.style.opacity = '1';
+        el.style.transform = 'translateY(0)';
+      });
+
+      if (wasAtBottom) {
+        requestAnimationFrame(() => { content.scrollTop = content.scrollHeight; });
+      }
+    } catch(err) {}
+  };
+  messageEventSource.onerror = () => {
+    // Reconnect handled automatically by EventSource
+  };
+}
+
+function disconnectMessageStream() {
+  if (messageEventSource) {
+    messageEventSource.close();
+    messageEventSource = null;
+  }
+}
 
 function debounceSearch() { clearTimeout(searchTimeout); searchTimeout = setTimeout(doSearch, 300); }
 

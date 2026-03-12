@@ -2,13 +2,16 @@ package main
 
 import (
 	"database/sql"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
 
 type Store struct {
-	db *sql.DB
+	db     *sql.DB
+	subsMu sync.RWMutex
+	subs   map[chan Message]struct{}
 }
 
 // BotConfig represents a bot in the unified bots table
@@ -155,11 +158,38 @@ func NewStore(path string) (*Store, error) {
 		return nil, err
 	}
 
-	s := &Store{db: db}
+	s := &Store{db: db, subs: make(map[chan Message]struct{})}
 	if err := s.migrate(); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+// Subscribe returns a channel that receives all saved messages
+func (s *Store) Subscribe() chan Message {
+	ch := make(chan Message, 64)
+	s.subsMu.Lock()
+	s.subs[ch] = struct{}{}
+	s.subsMu.Unlock()
+	return ch
+}
+
+// Unsubscribe removes a subscriber channel
+func (s *Store) Unsubscribe(ch chan Message) {
+	s.subsMu.Lock()
+	delete(s.subs, ch)
+	s.subsMu.Unlock()
+}
+
+func (s *Store) notifySubscribers(m Message) {
+	s.subsMu.RLock()
+	defer s.subsMu.RUnlock()
+	for ch := range s.subs {
+		select {
+		case ch <- m:
+		default: // drop if subscriber is slow
+		}
+	}
 }
 
 func (s *Store) migrate() error {
@@ -599,10 +629,16 @@ func (s *Store) DeleteChat(botID int64, chatID int64) error {
 // Message methods (unchanged - keyed by chat_id which is globally unique)
 
 func (s *Store) SaveMessage(m Message) error {
-	_, err := s.db.Exec(`
+	res, err := s.db.Exec(`
 		INSERT OR IGNORE INTO messages (id, chat_id, from_user, from_id, text, date, reply_to_id, media_type, file_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, m.ID, m.ChatID, m.FromUser, m.FromID, m.Text, m.Date, m.ReplyToID, m.MediaType, m.FileID)
+	if err == nil {
+		if rows, _ := res.RowsAffected(); rows > 0 {
+			m.DateStr = time.Unix(m.Date, 0).Format("2006-01-02 15:04:05")
+			s.notifySubscribers(m)
+		}
+	}
 	return err
 }
 
