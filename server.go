@@ -80,7 +80,6 @@ func (s *Server) SetWebhookHandler(path string, handler http.HandlerFunc) {
 }
 
 // BuildMux creates the HTTP multiplexer with all routes registered.
-// Separated from Start() so demo mode can create per-session muxes.
 func (s *Server) BuildMux() *http.ServeMux {
 	mux := http.NewServeMux()
 
