@@ -67,20 +67,26 @@
   "hotPaths": [
     {
       "path": "templates/index.html",
-      "accessCount": 35,
-      "lastAccessed": 1773468072894,
-      "type": "directory"
-    },
-    {
-      "path": "server.go",
-      "accessCount": 26,
-      "lastAccessed": 1773467803813,
+      "accessCount": 38,
+      "lastAccessed": 1773468434061,
       "type": "directory"
     },
     {
       "path": "store.go",
-      "accessCount": 26,
-      "lastAccessed": 1773468074079,
+      "accessCount": 28,
+      "lastAccessed": 1773468452932,
+      "type": "file"
+    },
+    {
+      "path": "server.go",
+      "accessCount": 28,
+      "lastAccessed": 1773468458470,
+      "type": "directory"
+    },
+    {
+      "path": "proxy.go",
+      "accessCount": 9,
+      "lastAccessed": 1773468488270,
       "type": "file"
     },
     {
@@ -94,12 +100,6 @@
       "accessCount": 6,
       "lastAccessed": 1773465748438,
       "type": "directory"
-    },
-    {
-      "path": "proxy.go",
-      "accessCount": 6,
-      "lastAccessed": 1773465909876,
-      "type": "file"
     },
     {
       "path": ".dockerignore",

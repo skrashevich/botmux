@@ -653,7 +653,7 @@ func (s *Store) SaveMessage(m Message) error {
 func (s *Store) GetMessages(chatID int64, limit, offset int) ([]Message, error) {
 	rows, err := s.db.Query(`
 		SELECT id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id
-		FROM messages WHERE chat_id = ? ORDER BY date DESC, id DESC LIMIT ? OFFSET ?
+		FROM messages WHERE chat_id = ? ORDER BY id DESC LIMIT ? OFFSET ?
 	`, chatID, limit, offset)
 	if err != nil {
 		return nil, err

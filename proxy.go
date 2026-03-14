@@ -110,6 +110,12 @@ func (pm *ProxyManager) processUpdate(botID int64, rawUpdate map[string]interfac
 	updateID, _ := rawUpdate["update_id"].(float64)
 	updateSummary := summarizeUpdate(rawUpdate)
 
+	// Management: process update for chat/message tracking (before forwarding,
+	// so incoming message is saved to DB before backend's response via /tgapi/)
+	if bot.ManageEnabled {
+		pm.processForManagement(botID, rawUpdate)
+	}
+
 	// Proxy: forward to backend
 	if bot.ProxyEnabled && bot.BackendURL != "" {
 		log.Printf("[proxy] forward: botID=%d %s → %s", botID, updateSummary, bot.BackendURL)
@@ -122,11 +128,6 @@ func (pm *ProxyManager) processUpdate(botID int64, rawUpdate map[string]interfac
 		}
 	} else if bot.ProxyEnabled {
 		log.Printf("[proxy] processUpdate: botID=%d proxy enabled but no backend_url!", botID)
-	}
-
-	// Management: process update for chat/message tracking
-	if bot.ManageEnabled {
-		pm.processForManagement(botID, rawUpdate)
 	}
 
 	// Reverse routing (Source-NAT): check if this is a reply in a routed chat
