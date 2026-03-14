@@ -51,6 +51,7 @@ type Chat struct {
 
 type Message struct {
 	ID        int    `json:"id"`
+	BotID     int64  `json:"bot_id"`
 	ChatID    int64  `json:"chat_id"`
 	FromUser  string `json:"from_user"`
 	FromID    int64  `json:"from_id"`
@@ -259,13 +260,14 @@ func (s *Store) migrate() error {
 	_, err = s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS messages (
 			id INTEGER NOT NULL,
+			bot_id INTEGER NOT NULL DEFAULT 0,
 			chat_id INTEGER NOT NULL,
 			from_user TEXT NOT NULL DEFAULT '',
 			from_id INTEGER NOT NULL DEFAULT 0,
 			text TEXT NOT NULL DEFAULT '',
 			date INTEGER NOT NULL DEFAULT 0,
 			reply_to_id INTEGER NOT NULL DEFAULT 0,
-			PRIMARY KEY (chat_id, id)
+			PRIMARY KEY (bot_id, chat_id, id)
 		);
 		CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(date);
 		CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(chat_id, from_id);
@@ -407,6 +409,36 @@ func (s *Store) migrate() error {
 	s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('bots') WHERE name='description'`).Scan(&hasDescription)
 	if hasDescription == 0 {
 		s.db.Exec(`ALTER TABLE bots ADD COLUMN description TEXT NOT NULL DEFAULT ''`)
+	}
+
+	// Add bot_id column to messages if missing (migrate PK to include bot_id)
+	var hasMsgBotID int
+	s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name='bot_id'`).Scan(&hasMsgBotID)
+	if hasMsgBotID == 0 {
+		log.Println("[store] migrating messages table: adding bot_id column...")
+		s.db.Exec(`CREATE TABLE messages_new (
+			id INTEGER NOT NULL,
+			bot_id INTEGER NOT NULL DEFAULT 0,
+			chat_id INTEGER NOT NULL,
+			from_user TEXT NOT NULL DEFAULT '',
+			from_id INTEGER NOT NULL DEFAULT 0,
+			text TEXT NOT NULL DEFAULT '',
+			date INTEGER NOT NULL DEFAULT 0,
+			reply_to_id INTEGER NOT NULL DEFAULT 0,
+			deleted INTEGER NOT NULL DEFAULT 0,
+			media_type TEXT NOT NULL DEFAULT '',
+			file_id TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (bot_id, chat_id, id)
+		)`)
+		// Copy data, deriving bot_id from chats table where possible
+		s.db.Exec(`INSERT INTO messages_new (id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id)
+			SELECT m.id, COALESCE(c.bot_id, 0), m.chat_id, m.from_user, m.from_id, m.text, m.date, m.reply_to_id, m.deleted, m.media_type, m.file_id
+			FROM messages m LEFT JOIN chats c ON m.chat_id = c.id`)
+		s.db.Exec(`DROP TABLE messages`)
+		s.db.Exec(`ALTER TABLE messages_new RENAME TO messages`)
+		s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(date)`)
+		s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(chat_id, from_id)`)
+		log.Println("[store] messages table migration complete")
 	}
 
 	// Create auth tables
@@ -647,9 +679,9 @@ func (s *Store) DeleteChat(botID int64, chatID int64) error {
 
 func (s *Store) SaveMessage(m Message) error {
 	res, err := s.db.Exec(`
-		INSERT OR IGNORE INTO messages (id, chat_id, from_user, from_id, text, date, reply_to_id, media_type, file_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, m.ID, m.ChatID, m.FromUser, m.FromID, m.Text, m.Date, m.ReplyToID, m.MediaType, m.FileID)
+		INSERT OR IGNORE INTO messages (id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, media_type, file_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, m.ID, m.BotID, m.ChatID, m.FromUser, m.FromID, m.Text, m.Date, m.ReplyToID, m.MediaType, m.FileID)
 	if err == nil {
 		if rows, _ := res.RowsAffected(); rows > 0 {
 			m.DateStr = time.UnixMilli(m.Date).Format("2006-01-02 15:04:05")
@@ -659,11 +691,11 @@ func (s *Store) SaveMessage(m Message) error {
 	return err
 }
 
-func (s *Store) GetMessages(chatID int64, limit, offset int) ([]Message, error) {
+func (s *Store) GetMessages(botID, chatID int64, limit, offset int) ([]Message, error) {
 	rows, err := s.db.Query(`
-		SELECT id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id
-		FROM messages WHERE chat_id = ? ORDER BY id DESC LIMIT ? OFFSET ?
-	`, chatID, limit, offset)
+		SELECT id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id
+		FROM messages WHERE bot_id = ? AND chat_id = ? ORDER BY id DESC LIMIT ? OFFSET ?
+	`, botID, chatID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -672,7 +704,7 @@ func (s *Store) GetMessages(chatID int64, limit, offset int) ([]Message, error) 
 	var msgs []Message
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID); err != nil {
+		if err := rows.Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID); err != nil {
 			return nil, err
 		}
 		m.DateStr = time.UnixMilli(m.Date).Format("2006-01-02 15:04:05")
@@ -681,12 +713,12 @@ func (s *Store) GetMessages(chatID int64, limit, offset int) ([]Message, error) 
 	return msgs, nil
 }
 
-func (s *Store) GetMessage(chatID int64, messageID int) (*Message, error) {
+func (s *Store) GetMessage(botID, chatID int64, messageID int) (*Message, error) {
 	var m Message
 	err := s.db.QueryRow(`
-		SELECT id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id
-		FROM messages WHERE chat_id = ? AND id = ?
-	`, chatID, messageID).Scan(&m.ID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID)
+		SELECT id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id
+		FROM messages WHERE bot_id = ? AND chat_id = ? AND id = ?
+	`, botID, chatID, messageID).Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID)
 	if err != nil {
 		return nil, err
 	}
@@ -694,22 +726,22 @@ func (s *Store) GetMessage(chatID int64, messageID int) (*Message, error) {
 	return &m, nil
 }
 
-func (s *Store) GetChatStats(chatID int64) (*ChatStats, error) {
+func (s *Store) GetChatStats(botID, chatID int64) (*ChatStats, error) {
 	stats := &ChatStats{ChatID: chatID}
-	s.db.QueryRow(`SELECT title FROM chats WHERE id = ?`, chatID).Scan(&stats.Title)
-	s.db.QueryRow(`SELECT COUNT(*) FROM messages WHERE chat_id = ?`, chatID).Scan(&stats.TotalMessages)
+	s.db.QueryRow(`SELECT title FROM chats WHERE bot_id = ? AND id = ?`, botID, chatID).Scan(&stats.Title)
+	s.db.QueryRow(`SELECT COUNT(*) FROM messages WHERE bot_id = ? AND chat_id = ?`, botID, chatID).Scan(&stats.TotalMessages)
 
 	todayStart := time.Now().Truncate(24 * time.Hour).UnixMilli()
-	s.db.QueryRow(`SELECT COUNT(*) FROM messages WHERE chat_id = ? AND date >= ?`, chatID, todayStart).Scan(&stats.TodayMessages)
+	s.db.QueryRow(`SELECT COUNT(*) FROM messages WHERE bot_id = ? AND chat_id = ? AND date >= ?`, botID, chatID, todayStart).Scan(&stats.TodayMessages)
 
 	weekAgo := time.Now().Add(-7 * 24 * time.Hour).UnixMilli()
-	s.db.QueryRow(`SELECT COUNT(DISTINCT from_id) FROM messages WHERE chat_id = ? AND date >= ? AND from_id != 0`, chatID, weekAgo).Scan(&stats.ActiveUsers)
+	s.db.QueryRow(`SELECT COUNT(DISTINCT from_id) FROM messages WHERE bot_id = ? AND chat_id = ? AND date >= ? AND from_id != 0`, botID, chatID, weekAgo).Scan(&stats.ActiveUsers)
 
 	rows, err := s.db.Query(`
 		SELECT from_id, from_user, COUNT(*) as cnt
-		FROM messages WHERE chat_id = ? AND from_id != 0
+		FROM messages WHERE bot_id = ? AND chat_id = ? AND from_id != 0
 		GROUP BY from_id ORDER BY cnt DESC LIMIT 10
-	`, chatID)
+	`, botID, chatID)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -721,9 +753,9 @@ func (s *Store) GetChatStats(chatID int64) (*ChatStats, error) {
 
 	rows2, err := s.db.Query(`
 		SELECT CAST(strftime('%H', date/1000, 'unixepoch', 'localtime') AS INTEGER) as hour, COUNT(*) as cnt
-		FROM messages WHERE chat_id = ? AND date >= ?
+		FROM messages WHERE bot_id = ? AND chat_id = ? AND date >= ?
 		GROUP BY hour ORDER BY hour
-	`, chatID, weekAgo)
+	`, botID, chatID, weekAgo)
 	if err == nil {
 		defer rows2.Close()
 		hourMap := make(map[int]int)
@@ -740,12 +772,12 @@ func (s *Store) GetChatStats(chatID int64) (*ChatStats, error) {
 	return stats, nil
 }
 
-func (s *Store) SearchMessages(chatID int64, query string, limit int) ([]Message, error) {
+func (s *Store) SearchMessages(botID, chatID int64, query string, limit int) ([]Message, error) {
 	rows, err := s.db.Query(`
-		SELECT id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id
-		FROM messages WHERE chat_id = ? AND text LIKE ?
+		SELECT id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id
+		FROM messages WHERE bot_id = ? AND chat_id = ? AND text LIKE ?
 		ORDER BY id DESC LIMIT ?
-	`, chatID, "%"+query+"%", limit)
+	`, botID, chatID, "%"+query+"%", limit)
 	if err != nil {
 		return nil, err
 	}
@@ -754,15 +786,15 @@ func (s *Store) SearchMessages(chatID int64, query string, limit int) ([]Message
 	var msgs []Message
 	for rows.Next() {
 		var m Message
-		rows.Scan(&m.ID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID)
+		rows.Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID)
 		m.DateStr = time.UnixMilli(m.Date).Format("2006-01-02 15:04:05")
 		msgs = append(msgs, m)
 	}
 	return msgs, nil
 }
 
-func (s *Store) MarkMessageDeleted(chatID int64, messageID int) error {
-	_, err := s.db.Exec(`UPDATE messages SET deleted = 1 WHERE chat_id = ? AND id = ?`, chatID, messageID)
+func (s *Store) MarkMessageDeleted(botID, chatID int64, messageID int) error {
+	_, err := s.db.Exec(`UPDATE messages SET deleted = 1 WHERE bot_id = ? AND chat_id = ? AND id = ?`, botID, chatID, messageID)
 	return err
 }
 

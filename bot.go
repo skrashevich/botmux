@@ -206,6 +206,7 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 
 	m := Message{
 		ID:        msg.MessageID,
+		BotID:     b.botID,
 		ChatID:    msg.Chat.ID,
 		FromUser:  fromUser,
 		FromID:    fromID,
@@ -237,6 +238,7 @@ func (b *Bot) handleChannelPost(msg *tgbotapi.Message) {
 
 	m := Message{
 		ID:        msg.MessageID,
+		BotID:     b.botID,
 		ChatID:    msg.Chat.ID,
 		FromUser:  fromUser,
 		Text:      text,
@@ -290,10 +292,18 @@ func (b *Bot) trackChat(chat *tgbotapi.Chat) {
 		desc = fullChat.Description
 	}
 
+	title := chat.Title
+	if title == "" && chat.Type == "private" {
+		title = chat.FirstName
+		if chat.LastName != "" {
+			title += " " + chat.LastName
+		}
+	}
+
 	c := Chat{
 		ID:          chat.ID,
 		Type:        chat.Type,
-		Title:       chat.Title,
+		Title:       title,
 		Username:    chat.UserName,
 		MemberCount: memberCount,
 		Description: desc,
@@ -361,6 +371,7 @@ func (b *Bot) SendMessage(chatID int64, text string) error {
 	fromUser := "@" + b.api.Self.UserName
 	b.store.SaveMessage(Message{
 		ID:       sent.MessageID,
+		BotID:    b.botID,
 		ChatID:   sent.Chat.ID,
 		FromUser: fromUser,
 		FromID:   b.api.Self.ID,
@@ -383,7 +394,7 @@ func (b *Bot) SendMessageGetID(chatID int64, text string) (int, error) {
 	}
 	fromUser := "@" + b.api.Self.UserName
 	b.store.SaveMessage(Message{
-		ID: sent.MessageID, ChatID: sent.Chat.ID,
+		ID: sent.MessageID, BotID: b.botID, ChatID: sent.Chat.ID,
 		FromUser: fromUser, FromID: b.api.Self.ID,
 		Text: text, Date: int64(sent.Date) * 1000,
 	})
@@ -404,7 +415,7 @@ func (b *Bot) SendMessageReply(chatID int64, text string, replyToMsgID int) (int
 	}
 	fromUser := "@" + b.api.Self.UserName
 	b.store.SaveMessage(Message{
-		ID: sent.MessageID, ChatID: sent.Chat.ID,
+		ID: sent.MessageID, BotID: b.botID, ChatID: sent.Chat.ID,
 		FromUser: fromUser, FromID: b.api.Self.ID,
 		Text: text, Date: int64(sent.Date) * 1000,
 		ReplyToID: replyToMsgID,

@@ -26,16 +26,18 @@ func TestCaptureSentMessageStoresCopiedMessageUsingRequestAndSourceMessage(t *te
 	store := newTestStore(t)
 	server := NewServer(store, nil)
 
-	if _, err := store.AddBotConfig(BotConfig{
+	botID, err := store.AddBotConfig(BotConfig{
 		Name:        "Copy Bot",
 		Token:       "token",
 		BotUsername: "copybot",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("AddBotConfig() error = %v", err)
 	}
 
 	if err := store.SaveMessage(Message{
 		ID:        50,
+		BotID:     botID,
 		ChatID:    555,
 		FromUser:  "@alice",
 		FromID:    7,
@@ -55,7 +57,7 @@ func TestCaptureSentMessageStoresCopiedMessageUsingRequestAndSourceMessage(t *te
 		[]byte(`{"ok":true,"result":{"message_id":123}}`),
 	)
 
-	msgs, err := store.GetMessages(777, 10, 0)
+	msgs, err := store.GetMessages(botID, 777, 10, 0)
 	if err != nil {
 		t.Fatalf("GetMessages() error = %v", err)
 	}
@@ -77,6 +79,16 @@ func TestCaptureSentMessageStoresFullSendMessageResults(t *testing.T) {
 	store := newTestStore(t)
 	server := NewServer(store, nil)
 
+	botID, err := store.AddBotConfig(BotConfig{
+		Name:        "Send Bot",
+		Token:       "token",
+		BotUsername: "sendbot",
+	})
+	if err != nil {
+		t.Fatalf("AddBotConfig() error = %v", err)
+	}
+	_ = botID
+
 	server.captureSentMessage("token", "sendMessage", nil, "", []byte(`{
 		"ok": true,
 		"result": {
@@ -88,7 +100,7 @@ func TestCaptureSentMessageStoresFullSendMessageResults(t *testing.T) {
 		}
 	}`))
 
-	msgs, err := store.GetMessages(777, 10, 0)
+	msgs, err := store.GetMessages(botID, 777, 10, 0)
 	if err != nil {
 		t.Fatalf("GetMessages() error = %v", err)
 	}

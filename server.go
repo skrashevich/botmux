@@ -550,13 +550,14 @@ func (s *Server) handleDeleteChat(w http.ResponseWriter, r *http.Request) {
 // @Router /api/messages [get]
 // @Security CookieAuth || BearerAuth
 func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
+	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	if limit == 0 {
 		limit = 50
 	}
-	msgs, err := s.store.GetMessages(chatID, limit, offset)
+	msgs, err := s.store.GetMessages(botID, chatID, limit, offset)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -580,6 +581,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 // @Security CookieAuth || BearerAuth
 // handleMessageStream sends new messages via Server-Sent Events
 func (s *Server) handleMessageStream(w http.ResponseWriter, r *http.Request) {
+	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	if chatID == 0 {
 		http.Error(w, "chat_id required", 400)
@@ -607,7 +609,7 @@ func (s *Server) handleMessageStream(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case msg := <-ch:
-			if msg.ChatID != chatID {
+			if msg.BotID != botID || msg.ChatID != chatID {
 				continue
 			}
 			data, err := json.Marshal(msg)
@@ -621,9 +623,10 @@ func (s *Server) handleMessageStream(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
+	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	query := r.URL.Query().Get("q")
-	msgs, err := s.store.SearchMessages(chatID, query, 50)
+	msgs, err := s.store.SearchMessages(botID, chatID, query, 50)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -766,7 +769,7 @@ func (s *Server) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
-	bot, _, err := s.getBotFromRequest(r)
+	bot, botID, err := s.getBotFromRequest(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -777,7 +780,7 @@ func (s *Server) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	s.store.MarkMessageDeleted(chatID, msgID)
+	s.store.MarkMessageDeleted(botID, chatID, msgID)
 	s.store.LogAdminAction(AdminLog{
 		ChatID: chatID, Action: "delete_message", ActorName: bot.GetBotName(),
 		Details: "Message ID: " + strconv.Itoa(msgID), CreatedAt: time.Now().Format(time.RFC3339),
@@ -796,8 +799,9 @@ func (s *Server) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 // @Router /api/stats [get]
 // @Security CookieAuth || BearerAuth
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
-	stats, err := s.store.GetChatStats(chatID)
+	stats, err := s.store.GetChatStats(botID, chatID)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -2591,8 +2595,16 @@ func (s *Server) captureSentMessage(token, method string, reqBody []byte, conten
 		mediaType, fileID = "video_note", msg.VideoNote.FileID
 	}
 
+	// Find bot_id from token
+	botCfg := s.findBotByToken(token)
+	var msgBotID int64
+	if botCfg != nil {
+		msgBotID = botCfg.ID
+	}
+
 	m := Message{
 		ID:        msg.MessageID,
+		BotID:     msgBotID,
 		ChatID:    msg.Chat.ID,
 		FromUser:  fromUser,
 		FromID:    msg.From.ID,
@@ -2609,7 +2621,6 @@ func (s *Server) captureSentMessage(token, method string, reqBody []byte, conten
 	}
 
 	// Also track the chat if we have a bot for this token
-	botCfg := s.findBotByToken(token)
 	if botCfg != nil {
 		s.store.UpsertChat(botCfg.ID, Chat{
 			ID:        msg.Chat.ID,
@@ -2636,7 +2647,13 @@ func (s *Server) captureCopiedMessage(token string, reqBody []byte, contentType 
 		return
 	}
 
-	sourceMsg, err := s.store.GetMessage(params.FromChatID, params.MessageID)
+	botCfg := s.findBotByToken(token)
+	var copyBotID int64
+	if botCfg != nil {
+		copyBotID = botCfg.ID
+	}
+
+	sourceMsg, err := s.store.GetMessage(copyBotID, params.FromChatID, params.MessageID)
 	if err != nil {
 		return
 	}
@@ -2652,6 +2669,7 @@ func (s *Server) captureCopiedMessage(token string, reqBody []byte, contentType 
 	fromUser, fromID := s.findBotSenderByToken(token)
 	msg := Message{
 		ID:        resp.Result.MessageID,
+		BotID:     copyBotID,
 		ChatID:    params.ChatID,
 		FromUser:  fromUser,
 		FromID:    fromID,

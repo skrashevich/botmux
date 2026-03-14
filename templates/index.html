@@ -3167,7 +3167,7 @@ async function loadMessages(append = false, preserveScroll = false) {
   if (!currentChat) return;
   if (!append) messageOffset = 0;
   try {
-    const msgs = await api(`/api/messages?chat_id=${currentChat.id}&limit=50&offset=${messageOffset}`);
+    const msgs = await api(`/api/messages?bot_id=${currentBotID}&chat_id=${currentChat.id}&limit=50&offset=${messageOffset}`);
     if (!msgs) return;
     const list = document.getElementById('messagesList');
     const content = document.getElementById('messagesContent');
@@ -3240,7 +3240,7 @@ function loadMoreMessages() { messageOffset += 50; loadMessages(true); }
 
 function connectMessageStream(chatID) {
   disconnectMessageStream();
-  messageEventSource = new EventSource(`/api/messages/stream?chat_id=${chatID}`);
+  messageEventSource = new EventSource(`/api/messages/stream?bot_id=${currentBotID}&chat_id=${chatID}`);
   messageEventSource.onmessage = (e) => {
     try {
       const m = JSON.parse(e.data);
@@ -3289,7 +3289,7 @@ async function doSearch() {
   const q = document.getElementById('searchInput').value.trim();
   if (!q) { loadMessages(); return; }
   try {
-    const msgs = await api(`/api/messages/search?chat_id=${currentChat.id}&q=${encodeURIComponent(q)}`);
+    const msgs = await api(`/api/messages/search?bot_id=${currentBotID}&chat_id=${currentChat.id}&q=${encodeURIComponent(q)}`);
     document.getElementById('messagesList').innerHTML = msgs.map(m => `
       <div class="msg-row ${m.deleted ? 'msg-deleted' : ''}">
         <span class="msg-user">${esc(m.from_user)}</span>
@@ -3410,7 +3410,7 @@ async function removeChat() {
 async function loadStats() {
   if (!currentChat) return;
   try {
-    const s = await api(`/api/stats?chat_id=${currentChat.id}`);
+    const s = await api(`/api/stats?bot_id=${currentBotID}&chat_id=${currentChat.id}`);
     document.getElementById('statsCards').innerHTML = `
       <div class="stat-card"><div class="stat-value">${s.total_messages.toLocaleString()}</div><div class="stat-label">${t('total_messages')}</div></div>
       <div class="stat-card"><div class="stat-value">${s.today_messages.toLocaleString()}</div><div class="stat-label">${t('today')}</div></div>
