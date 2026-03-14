@@ -579,6 +579,11 @@ func (pm *ProxyManager) applyRoutes(sourceBotID int64, rawUpdate map[string]inte
 			continue
 		}
 
+		// Filter by source chat if specified
+		if route.SourceChatID != 0 && route.SourceChatID != chatID {
+			continue
+		}
+
 		matched := false
 		switch route.ConditionType {
 		case "text":

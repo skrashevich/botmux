@@ -126,16 +126,17 @@ type RouteMapping struct {
 
 // Route defines a routing rule: updates matching conditions on source bot get forwarded to target bot
 type Route struct {
-	ID           int64  `json:"id"`
-	SourceBotID  int64  `json:"source_bot_id"`
-	TargetBotID  int64  `json:"target_bot_id"`
-	ConditionType string `json:"condition_type"` // "text", "user_id", "chat_id"
-	ConditionValue string `json:"condition_value"` // regex pattern for text, ID for user/chat
-	Action       string `json:"action"`          // "forward", "copy", or "drop" (ignore message)
-	TargetChatID int64  `json:"target_chat_id"`  // chat to forward/copy to (0 = same chat)
-	Enabled      bool   `json:"enabled"`
-	Description  string `json:"description"`
-	CreatedAt    string `json:"created_at"`
+	ID             int64  `json:"id"`
+	SourceBotID    int64  `json:"source_bot_id"`
+	TargetBotID    int64  `json:"target_bot_id"`
+	SourceChatID   int64  `json:"source_chat_id"`   // filter by source chat (0 = any chat)
+	ConditionType  string `json:"condition_type"`    // "text", "user_id", "chat_id"
+	ConditionValue string `json:"condition_value"`   // regex pattern for text, ID for user/chat
+	Action         string `json:"action"`            // "forward", "copy", or "drop" (ignore message)
+	TargetChatID   int64  `json:"target_chat_id"`    // chat to forward/copy to (0 = same chat)
+	Enabled        bool   `json:"enabled"`
+	Description    string `json:"description"`
+	CreatedAt      string `json:"created_at"`
 }
 
 type AdminInfo struct {
@@ -360,6 +361,13 @@ func (s *Store) migrate() error {
 	`)
 	if err != nil {
 		return err
+	}
+
+	// Add source_chat_id column to routes if missing
+	var hasSourceChatID int
+	s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('routes') WHERE name='source_chat_id'`).Scan(&hasSourceChatID)
+	if hasSourceChatID == 0 {
+		s.db.Exec(`ALTER TABLE routes ADD COLUMN source_chat_id INTEGER NOT NULL DEFAULT 0`)
 	}
 
 	// Backfill known_users from messages
@@ -902,9 +910,9 @@ func (s *Store) GetChatUsers(chatID int64, search string, limit, offset int) ([]
 
 func (s *Store) AddRoute(r Route) (int64, error) {
 	res, err := s.db.Exec(`
-		INSERT INTO routes (source_bot_id, target_bot_id, condition_type, condition_value, action, target_chat_id, enabled, description, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, r.SourceBotID, r.TargetBotID, r.ConditionType, r.ConditionValue, r.Action, r.TargetChatID, r.Enabled, r.Description, r.CreatedAt)
+		INSERT INTO routes (source_bot_id, target_bot_id, source_chat_id, condition_type, condition_value, action, target_chat_id, enabled, description, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, r.SourceBotID, r.TargetBotID, r.SourceChatID, r.ConditionType, r.ConditionValue, r.Action, r.TargetChatID, r.Enabled, r.Description, r.CreatedAt)
 	if err != nil {
 		return 0, err
 	}
@@ -913,9 +921,9 @@ func (s *Store) AddRoute(r Route) (int64, error) {
 
 func (s *Store) UpdateRoute(r Route) error {
 	_, err := s.db.Exec(`
-		UPDATE routes SET target_bot_id=?, condition_type=?, condition_value=?, action=?, target_chat_id=?, enabled=?, description=?
+		UPDATE routes SET target_bot_id=?, source_chat_id=?, condition_type=?, condition_value=?, action=?, target_chat_id=?, enabled=?, description=?
 		WHERE id=?
-	`, r.TargetBotID, r.ConditionType, r.ConditionValue, r.Action, r.TargetChatID, r.Enabled, r.Description, r.ID)
+	`, r.TargetBotID, r.SourceChatID, r.ConditionType, r.ConditionValue, r.Action, r.TargetChatID, r.Enabled, r.Description, r.ID)
 	return err
 }
 
@@ -926,7 +934,7 @@ func (s *Store) DeleteRoute(id int64) error {
 
 func (s *Store) GetRoutes(sourceBotID int64) ([]Route, error) {
 	rows, err := s.db.Query(`
-		SELECT id, source_bot_id, target_bot_id, condition_type, condition_value, action, target_chat_id, enabled, description, created_at
+		SELECT id, source_bot_id, target_bot_id, source_chat_id, condition_type, condition_value, action, target_chat_id, enabled, description, created_at
 		FROM routes WHERE source_bot_id=? ORDER BY id
 	`, sourceBotID)
 	if err != nil {
@@ -937,7 +945,7 @@ func (s *Store) GetRoutes(sourceBotID int64) ([]Route, error) {
 	var routes []Route
 	for rows.Next() {
 		var r Route
-		if err := rows.Scan(&r.ID, &r.SourceBotID, &r.TargetBotID, &r.ConditionType, &r.ConditionValue, &r.Action, &r.TargetChatID, &r.Enabled, &r.Description, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.SourceBotID, &r.TargetBotID, &r.SourceChatID, &r.ConditionType, &r.ConditionValue, &r.Action, &r.TargetChatID, &r.Enabled, &r.Description, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		routes = append(routes, r)
@@ -947,7 +955,7 @@ func (s *Store) GetRoutes(sourceBotID int64) ([]Route, error) {
 
 func (s *Store) GetAllEnabledRoutes() ([]Route, error) {
 	rows, err := s.db.Query(`
-		SELECT id, source_bot_id, target_bot_id, condition_type, condition_value, action, target_chat_id, enabled, description, created_at
+		SELECT id, source_bot_id, target_bot_id, source_chat_id, condition_type, condition_value, action, target_chat_id, enabled, description, created_at
 		FROM routes WHERE enabled=1 ORDER BY source_bot_id, id
 	`)
 	if err != nil {
@@ -958,7 +966,7 @@ func (s *Store) GetAllEnabledRoutes() ([]Route, error) {
 	var routes []Route
 	for rows.Next() {
 		var r Route
-		if err := rows.Scan(&r.ID, &r.SourceBotID, &r.TargetBotID, &r.ConditionType, &r.ConditionValue, &r.Action, &r.TargetChatID, &r.Enabled, &r.Description, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.SourceBotID, &r.TargetBotID, &r.SourceChatID, &r.ConditionType, &r.ConditionValue, &r.Action, &r.TargetChatID, &r.Enabled, &r.Description, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		routes = append(routes, r)

@@ -67,21 +67,21 @@
   "hotPaths": [
     {
       "path": "templates/index.html",
-      "accessCount": 12,
-      "lastAccessed": 1773465509960,
-      "type": "directory"
-    },
-    {
-      "path": "server.go",
-      "accessCount": 11,
-      "lastAccessed": 1773465505016,
+      "accessCount": 31,
+      "lastAccessed": 1773465989613,
       "type": "directory"
     },
     {
       "path": "store.go",
-      "accessCount": 8,
-      "lastAccessed": 1773465457261,
+      "accessCount": 23,
+      "lastAccessed": 1773465904971,
       "type": "file"
+    },
+    {
+      "path": "server.go",
+      "accessCount": 12,
+      "lastAccessed": 1773465763178,
+      "type": "directory"
     },
     {
       "path": "bot.go",
@@ -91,14 +91,14 @@
     },
     {
       "path": "",
-      "accessCount": 3,
-      "lastAccessed": 1773465367841,
+      "accessCount": 6,
+      "lastAccessed": 1773465748438,
       "type": "directory"
     },
     {
       "path": "proxy.go",
-      "accessCount": 3,
-      "lastAccessed": 1773465493488,
+      "accessCount": 6,
+      "lastAccessed": 1773465909876,
       "type": "file"
     }
   ],
