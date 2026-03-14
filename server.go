@@ -2249,6 +2249,26 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// If method is empty, try to detect it from query param or request body
+	if method == "" {
+		if m := r.URL.Query().Get("method"); m != "" {
+			method = m
+		}
+	}
+	if method == "" {
+		var bodyObj map[string]interface{}
+		if json.Unmarshal(reqBody, &bodyObj) == nil {
+			if m, ok := bodyObj["method"].(string); ok && m != "" {
+				method = m
+				delete(bodyObj, "method")
+				reqBody, _ = json.Marshal(bodyObj)
+			}
+		}
+	}
+	if method == "" {
+		method = inferTelegramMethod(reqBody)
+	}
+
 	// Log incoming request
 	maskedToken := botToken
 	if len(maskedToken) > 8 {
@@ -2399,6 +2419,49 @@ func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	io.Copy(w, fileResp2.Body)
+}
+
+// inferTelegramMethod tries to guess the Telegram API method from request body fields.
+func inferTelegramMethod(body []byte) string {
+	var params map[string]interface{}
+	if err := json.Unmarshal(body, &params); err != nil {
+		return ""
+	}
+	switch {
+	case params["photo"] != nil:
+		return "sendPhoto"
+	case params["audio"] != nil:
+		return "sendAudio"
+	case params["document"] != nil:
+		return "sendDocument"
+	case params["video"] != nil:
+		return "sendVideo"
+	case params["animation"] != nil:
+		return "sendAnimation"
+	case params["voice"] != nil:
+		return "sendVoice"
+	case params["video_note"] != nil:
+		return "sendVideoNote"
+	case params["sticker"] != nil:
+		return "sendSticker"
+	case params["latitude"] != nil && params["title"] != nil:
+		return "sendVenue"
+	case params["latitude"] != nil:
+		return "sendLocation"
+	case params["phone_number"] != nil:
+		return "sendContact"
+	case params["question"] != nil:
+		return "sendPoll"
+	case params["emoji"] != nil && params["text"] == nil:
+		return "sendDice"
+	case params["message_id"] != nil && params["from_chat_id"] != nil:
+		return "forwardMessage"
+	case params["text"] != nil && params["message_id"] != nil:
+		return "editMessageText"
+	case params["text"] != nil:
+		return "sendMessage"
+	}
+	return ""
 }
 
 // sendMethods lists Telegram API methods that return a Message in the result

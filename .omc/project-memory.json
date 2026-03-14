@@ -72,16 +72,16 @@
       "type": "directory"
     },
     {
+      "path": "server.go",
+      "accessCount": 26,
+      "lastAccessed": 1773467803813,
+      "type": "directory"
+    },
+    {
       "path": "store.go",
       "accessCount": 23,
       "lastAccessed": 1773465904971,
       "type": "file"
-    },
-    {
-      "path": "server.go",
-      "accessCount": 18,
-      "lastAccessed": 1773467199354,
-      "type": "directory"
     },
     {
       "path": "bot.go",
