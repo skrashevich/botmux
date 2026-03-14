@@ -2249,6 +2249,17 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Log incoming request
+	maskedToken := botToken
+	if len(maskedToken) > 8 {
+		maskedToken = maskedToken[:4] + "..." + maskedToken[len(maskedToken)-4:]
+	}
+	bodyPreview := string(reqBody)
+	if len(bodyPreview) > 512 {
+		bodyPreview = bodyPreview[:512] + "..."
+	}
+	log.Printf("[tgapi-proxy] %s %s bot=%s body=%s", r.Method, method, maskedToken, bodyPreview)
+
 	// Forward to Telegram
 	tgURL := fmt.Sprintf("%s/bot%s/%s", telegramAPIURL, botToken, method)
 	tgReq, err := http.NewRequestWithContext(r.Context(), r.Method, tgURL, io.NopCloser(strings.NewReader(string(reqBody))))
