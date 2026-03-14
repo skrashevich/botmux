@@ -2431,7 +2431,7 @@ function renderMsgContent(m) {
     }
   }
   if (m.text) {
-    html += esc(m.text);
+    html += esc(m.text).replace(/\n/g, '<br>');
   }
   if (!html) {
     html = `<span style="color:var(--text3);font-style:italic">${m.media_type ? (mediaIcons[m.media_type]||'📎') + ' ' + (getMediaLabels()[m.media_type]||t('media_generic')) : t('media_empty')}</span>`;
