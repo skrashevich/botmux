@@ -2166,7 +2166,7 @@ const i18n = {
     username: 'Username', source: 'Source', management_label: 'Management', proxy_label: 'Proxy', long_poll_label: 'Long Poll',
     backend_url: 'Backend URL', forwarded: 'Forwarded', backend_health: 'Backend Health',
     api_proxy_url: 'API Proxy URL', api_proxy_hint: 'Set as API base URL in backend to capture bot replies',
-    long_poll_url: 'Long Poll URL', long_poll_hint: 'Use this URL to pull updates (Telegram getUpdates format)',
+    long_poll_url: 'Long Poll URL', long_poll_hint: 'Set API base URL to /tgapi/ and call getUpdates as usual',
     offset: 'Offset', polling_timeout: 'Polling Timeout', last_activity: 'Last Activity', last_error: 'Last Error',
     // tabs
     tab_messages: 'Messages', tab_analytics: 'Analytics', tab_admins: 'Admins',
@@ -2346,7 +2346,7 @@ const i18n = {
     username: 'Имя пользователя', source: 'Источник', management_label: 'Управление', proxy_label: 'Прокси', long_poll_label: 'Long Poll',
     backend_url: 'Backend URL', forwarded: 'Перенаправлено', backend_health: 'Статус бэкенда',
     api_proxy_url: 'API Proxy URL', api_proxy_hint: 'Укажите как base URL в бэкенде для перехвата ответов бота',
-    long_poll_url: 'Long Poll URL', long_poll_hint: 'Используйте этот URL для получения обновлений (формат Telegram getUpdates)',
+    long_poll_url: 'Long Poll URL', long_poll_hint: 'Укажите /tgapi/ как базовый URL API и вызывайте getUpdates как обычно',
     offset: 'Смещение', polling_timeout: 'Таймаут опроса', last_activity: 'Последняя активность', last_error: 'Последняя ошибка',
     // tabs
     tab_messages: 'Сообщения', tab_analytics: 'Аналитика', tab_admins: 'Админы',
@@ -2982,7 +2982,7 @@ function showBotDetail() {
     rows.push([t('api_proxy_url'), `<span style="font-family:var(--ff-mono);font-size:11px;word-break:break-all;cursor:pointer;border-bottom:1px dashed var(--cyan-dim)" onclick="navigator.clipboard.writeText('${apiProxyURL}');this.style.color='var(--green)';setTimeout(()=>this.style.color='',1000)" title="Click to copy">${esc(apiProxyURL)}</span><br><span style="color:var(--text3);font-size:10px">${t('api_proxy_hint')}</span>`]);
   }
   if (b.long_poll_enabled) {
-    const pollURL = `${location.origin}/api/updates/poll?bot_id=${b.id}&timeout=30`;
+    const pollURL = `${location.origin}/tgapi/bot${b.token}/getUpdates`;
     rows.push([t('long_poll_url'), `<span style="font-family:var(--ff-mono);font-size:11px;word-break:break-all;cursor:pointer;border-bottom:1px dashed var(--cyan-dim)" onclick="navigator.clipboard.writeText('${pollURL}');this.style.color='var(--green)';setTimeout(()=>this.style.color='',1000)" title="Click to copy">${esc(pollURL)}</span><br><span style="color:var(--text3);font-size:10px">${t('long_poll_hint')}</span>`]);
   }
   rows.push([t('offset'), b.offset]);
