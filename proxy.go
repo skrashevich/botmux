@@ -64,9 +64,22 @@ func (q *UpdateQueue) Enqueue(rawUpdate map[string]interface{}) {
 }
 
 // Get returns updates with UpdateID >= offset, up to limit.
+// Like the real Telegram API, calling Get with offset > 0 confirms (purges)
+// all updates with UpdateID < offset — they will never be returned again.
 func (q *UpdateQueue) Get(offset int64, limit int) []QueuedUpdate {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+
+	// Purge confirmed updates (UpdateID < offset), matching Telegram behavior.
+	if offset > 0 && len(q.updates) > 0 {
+		i := 0
+		for i < len(q.updates) && q.updates[i].UpdateID < offset {
+			i++
+		}
+		if i > 0 {
+			q.updates = q.updates[i:]
+		}
+	}
 
 	var result []QueuedUpdate
 	for _, u := range q.updates {

@@ -26,14 +26,23 @@ func TestUpdateQueueEnqueueAndGet(t *testing.T) {
 		t.Fatalf("unexpected update IDs: %d, %d", got[0].UpdateID, got[2].UpdateID)
 	}
 
-	// Get with offset=2 should skip first
+	// Get with offset=2 should confirm update 1 (purge it) and return 2,3
 	got = q.Get(2, 100)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 updates with offset=2, got %d", len(got))
 	}
 
+	// After purging, update 1 is gone — only 2,3 remain
+	got = q.Get(0, 100)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 updates after purge, got %d", len(got))
+	}
+	if got[0].UpdateID != 2 {
+		t.Fatalf("expected first update_id=2 after purge, got %d", got[0].UpdateID)
+	}
+
 	// Get with limit=1
-	got = q.Get(1, 1)
+	got = q.Get(2, 1)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 update with limit=1, got %d", len(got))
 	}

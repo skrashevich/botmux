@@ -3,11 +3,11 @@ module github.com/skrashevich/botmux
 go 1.26.1
 
 require (
-	github.com/OvyFlash/telegram-bot-api v0.0.0-20260219140839-20ca18a350af
-	modernc.org/sqlite v1.46.1
+	github.com/OvyFlash/telegram-bot-api v0.0.0-20260320094807-b5e5c4693899
+	modernc.org/sqlite v1.47.0
 )
 
-require golang.org/x/crypto v0.49.0 // indirect
+require golang.org/x/crypto v0.49.0
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -16,7 +16,7 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/skrashevich/go-webp v0.1.0
-	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
+	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
