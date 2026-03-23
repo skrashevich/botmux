@@ -721,6 +721,7 @@ body::before {
   font-family: var(--ff-mono); font-size: 9px; color: var(--text3);
   cursor: pointer; padding: 2px 6px; border-radius: var(--radius-sm);
   transition: var(--transition); white-space: nowrap;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis;
 }
 .sidebar-footer-version:hover { color: var(--cyan); background: rgba(34,211,238,0.08); }
 .sidebar-footer-version.checking { opacity: 0.5; pointer-events: none; }
@@ -4041,11 +4042,17 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeLight
 let _latestVersion = null;
 let _currentVersion = null;
 
+function formatVersionLabel(v) {
+  if (!v) return 'dev';
+  if (/^[0-9a-f]{12,}$/i.test(v)) return v.slice(0, 7);
+  return v;
+}
+
 function updateFooterVersion(ver, status) {
   const el = document.getElementById('footerVersion');
   if (!el) return;
-  el.textContent = ver || '';
-  el.title = t('check_for_updates');
+  el.textContent = formatVersionLabel(ver);
+  el.title = ver ? ver + ' — ' + t('check_for_updates') : t('check_for_updates');
   el.classList.remove('checking', 'up-to-date');
   if (status === 'checking') el.classList.add('checking');
   if (status === 'up-to-date') el.classList.add('up-to-date');
