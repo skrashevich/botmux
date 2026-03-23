@@ -1201,6 +1201,111 @@ body::before { display: none; }
   .chat-header h2 { font-size: 16px; }
   .stat-value { font-size: 24px; }
 }
+
+/* ===== UPDATE BANNER ===== */
+.update-banner {
+  margin: 8px 16px; padding: 10px 12px;
+  background: linear-gradient(135deg, rgba(76,214,138,0.08), rgba(76,214,138,0.03));
+  border: 1px solid rgba(76,214,138,0.2); border-radius: var(--radius-sm);
+  font-family: var(--ff-mono); font-size: 11px;
+  display: none; position: relative;
+}
+.update-banner-title {
+  font-weight: 600; color: var(--green); text-transform: uppercase;
+  font-size: 9px; letter-spacing: 0.5px; margin-bottom: 4px;
+  display: flex; align-items: center; gap: 6px;
+}
+.update-banner-title svg { width: 12px; height: 12px; }
+.update-banner-text { color: var(--text2); margin-bottom: 6px; }
+.update-banner-actions { display: flex; gap: 6px; align-items: center; }
+.update-banner-actions a {
+  color: var(--green); text-decoration: none; font-weight: 600;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;
+}
+.update-banner-actions a:hover { text-decoration: underline; }
+.update-banner-dismiss {
+  position: absolute; top: 6px; right: 8px;
+  background: none; border: none; color: var(--text3);
+  cursor: pointer; font-size: 14px; line-height: 1; padding: 2px;
+}
+.update-banner-dismiss:hover { color: var(--text); }
+.update-banner-version {
+  font-size: 9px; color: var(--text3); margin-top: 4px;
+}
+
+/* ===== USER PROFILE MODAL ===== */
+.profile-header {
+  display: flex; align-items: center; gap: 16px;
+  padding-bottom: 16px; border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.profile-avatar {
+  width: 56px; height: 56px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--cyan-dim), var(--magenta));
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--ff-display); font-size: 22px; font-weight: 700;
+  color: #fff; flex-shrink: 0; text-transform: uppercase;
+}
+.profile-identity { flex: 1; min-width: 0; }
+.profile-name {
+  font-family: var(--ff-display); font-size: 18px; font-weight: 700;
+  color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.profile-id {
+  font-family: var(--ff-mono); font-size: 11px; color: var(--text3);
+  margin-top: 2px;
+}
+.profile-admin-badge {
+  display: inline-block; font-family: var(--ff-mono); font-size: 9px;
+  font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+  padding: 2px 8px; border-radius: 3px; margin-top: 4px;
+}
+.profile-admin-badge.creator { color: var(--amber); background: rgba(232,168,64,0.1); border: 1px solid rgba(232,168,64,0.2); }
+.profile-admin-badge.administrator { color: var(--cyan); background: rgba(108,159,255,0.1); border: 1px solid rgba(108,159,255,0.2); }
+.profile-section {
+  margin-bottom: 16px;
+}
+.profile-section-title {
+  font-family: var(--ff-mono); font-size: 9px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px; color: var(--text3);
+  margin-bottom: 8px;
+}
+.profile-stats {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+}
+.profile-stat {
+  padding: 10px 12px; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.profile-stat-value {
+  font-family: var(--ff-mono); font-size: 16px; font-weight: 700; color: var(--text);
+}
+.profile-stat-label {
+  font-family: var(--ff-mono); font-size: 9px; color: var(--text3);
+  text-transform: uppercase; margin-top: 2px;
+}
+.profile-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.profile-perms { display: flex; flex-wrap: wrap; gap: 4px; }
+.profile-perm {
+  font-family: var(--ff-mono); font-size: 9px; font-weight: 600;
+  padding: 2px 6px; border-radius: 3px;
+  background: rgba(108,159,255,0.08); color: var(--cyan);
+  border: 1px solid rgba(108,159,255,0.15);
+}
+.profile-action-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 0; border-bottom: 1px solid var(--surface2);
+  font-family: var(--ff-mono); font-size: 11px;
+}
+.profile-action-item:last-child { border-bottom: none; }
+.profile-action-type {
+  font-size: 9px; font-weight: 600; text-transform: uppercase;
+  color: var(--amber); min-width: 70px;
+}
+.profile-action-detail { color: var(--text2); flex: 1; }
+.profile-action-date { color: var(--text3); font-size: 10px; white-space: nowrap; }
+.msg-user.clickable { cursor: pointer; }
+.msg-user.clickable:hover { color: var(--cyan); text-decoration: underline; }
 </style>
 <script>
 // Apply theme and language immediately to prevent flash
@@ -1275,6 +1380,19 @@ body::before { display: none; }
       <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
       <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
     </button>
+  </div>
+
+  <div class="update-banner" id="updateBanner">
+    <button class="update-banner-dismiss" onclick="dismissUpdate()" aria-label="Dismiss">&times;</button>
+    <div class="update-banner-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v10m0 0l-3-3m3 3l3-3"/><path d="M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2v-7"/></svg>
+      <span id="updateBannerTitle"></span>
+    </div>
+    <div class="update-banner-text" id="updateBannerText"></div>
+    <div class="update-banner-actions">
+      <a id="updateBannerLink" href="#" target="_blank" rel="noopener"></a>
+    </div>
+    <div class="update-banner-version" id="updateBannerCurrent"></div>
   </div>
 
   <div class="section-label">
@@ -1782,6 +1900,7 @@ function showApp() {
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appContainer').style.display = 'flex';
   updateAuthUI();
+  checkForUpdates();
 }
 
 function updateAuthUI() {
@@ -3210,7 +3329,7 @@ let messageEventSource = null;
 function renderMsgRow(m, msgMap) {
   return `<div class="msg-row ${m.deleted ? 'msg-deleted' : ''}" id="msg-${m.id}">
     ${m.reply_to_id ? `<span class="msg-reply-badge" onclick="scrollToMsg(${m.reply_to_id})">↩ ${t('replying_to')} ${msgMap[m.reply_to_id] ? esc(msgMap[m.reply_to_id].from_user) : '#' + m.reply_to_id}</span>` : ''}
-    <span class="msg-user" title="ID: ${m.from_id}">${esc(m.from_user)}</span>
+    <span class="msg-user${m.from_id ? ' clickable' : ''}" title="ID: ${m.from_id}" ${m.from_id ? `onclick="showUserProfile(${m.from_id})"` : ''}>${esc(m.from_user)}</span>
     <span class="msg-text">${renderMsgContent(m)}</span>
     ${m.deleted ? `<span class="msg-deleted-badge">${t('deleted')}</span>` : ''}
     <span class="msg-time">${m.date_str}</span>
@@ -3357,7 +3476,7 @@ async function doSearch() {
     const msgs = await api(`/api/messages/search?bot_id=${currentBotID}&chat_id=${currentChat.id}&q=${encodeURIComponent(q)}`);
     document.getElementById('messagesList').innerHTML = msgs.map(m => `
       <div class="msg-row ${m.deleted ? 'msg-deleted' : ''}">
-        <span class="msg-user">${esc(m.from_user)}</span>
+        <span class="msg-user${m.from_id ? ' clickable' : ''}" ${m.from_id ? `onclick="showUserProfile(${m.from_id})"` : ''}>${esc(m.from_user)}</span>
         <span class="msg-text">${m.media_type ? renderMsgContent(m) : highlight(esc(m.text), esc(q))}</span>
         ${m.deleted ? `<span class="msg-deleted-badge">${t('deleted')}</span>` : ''}
         <span class="msg-time">${m.date_str}</span>
@@ -3677,7 +3796,7 @@ async function loadTags() {
       <div class="tag-user-row">
         <span class="tag-user-name">${esc(u.username)} <span style="color:var(--text3);font-family:var(--ff-mono);font-size:11px">${u.user_id}</span></span>
         <div class="tag-user-tags">${u.tags.map(t => `
-          <span class="tag-chip" style="background:${t.color}15; color:${t.color}; border:1px solid ${t.color}33">${esc(t.tag)}<span class="tag-remove" onclick="removeTag(${t.id})">×</span></span>
+          <span class="tag-chip" style="background:${sanitizeColor(t.color)}15; color:${sanitizeColor(t.color)}; border:1px solid ${sanitizeColor(t.color)}33">${esc(t.tag)}<span class="tag-remove" onclick="removeTag(${t.id})">×</span></span>
         `).join('')}</div>
       </div>
     `).join('') || `<div style="text-align:center;color:var(--text3);padding:40px;font-family:var(--ff-mono);font-size:12px">${t('no_tags')}</div>`;
@@ -3718,13 +3837,13 @@ async function loadUsers(append = false) {
     const html = users.map(u => `
       <div class="user-card">
         <div class="user-card-info">
-          <div class="user-card-name">${esc(u.username)} <span class="user-id">${u.user_id}</span></div>
+          <div class="user-card-name"><span class="clickable" style="cursor:pointer" onclick="showUserProfile(${u.user_id})">${esc(u.username)}</span> <span class="user-id">${u.user_id}</span></div>
           <div class="user-card-meta">
             <span>${u.message_count} <span class="meta-val">${t('msg_count')}</span></span>
             <span>${t('last_seen')} <span class="meta-val">${u.last_seen}</span></span>
           </div>
           ${u.tags?.length ? `<div class="user-card-tags">${u.tags.map(t => `
-            <span class="tag-chip" style="background:${t.color}15; color:${t.color}; border:1px solid ${t.color}33">${esc(t.tag)}<span class="tag-remove" onclick="removeTagAndReloadUsers(${t.id})">×</span></span>
+            <span class="tag-chip" style="background:${sanitizeColor(t.color)}15; color:${sanitizeColor(t.color)}; border:1px solid ${sanitizeColor(t.color)}33">${esc(t.tag)}<span class="tag-remove" onclick="removeTagAndReloadUsers(${t.id})">×</span></span>
           `).join('')}</div>` : ''}
         </div>
         <div class="user-card-actions">
@@ -3902,7 +4021,158 @@ function closeLightbox() {
   lb.classList.remove('active');
   lb.querySelector('img').src = '';
 }
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeLightbox(); closeUserProfile(); } });
+
+// ===== VERSION CHECK & UPDATE BANNER =====
+
+let _latestVersion = null;
+
+async function checkForUpdates() {
+  if (!isAdmin()) return;
+  try {
+    const res = await fetch('/api/version');
+    const data = await res.json();
+    const update = data.update;
+    if (!update || !update.update_available) return;
+
+    _latestVersion = update.latest_version;
+
+    // Check if user dismissed this version
+    const dismissed = localStorage.getItem('update_dismissed_version');
+    if (dismissed === update.latest_version) return;
+
+    const banner = document.getElementById('updateBanner');
+    document.getElementById('updateBannerTitle').textContent = t('update_available');
+    document.getElementById('updateBannerText').textContent = t('update_banner_text').replace('{version}', update.latest_version);
+    document.getElementById('updateBannerLink').textContent = t('update_link');
+    document.getElementById('updateBannerLink').href = update.release_url || 'https://github.com/skrashevich/botmux/releases';
+    document.getElementById('updateBannerCurrent').textContent = t('current_version') + ': ' + update.current_version;
+    banner.style.display = '';
+  } catch(e) { /* silent */ }
+}
+
+function dismissUpdate() {
+  document.getElementById('updateBanner').style.display = 'none';
+  if (_latestVersion) {
+    localStorage.setItem('update_dismissed_version', _latestVersion);
+  }
+}
+
+function sanitizeColor(c) {
+  return /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : '#888';
+}
+
+// ===== USER PROFILE CARD =====
+
+async function showUserProfile(userID) {
+  if (!currentChat || !currentBotID) return;
+  const modal = document.getElementById('userProfileModal');
+  const content = document.getElementById('userProfileContent');
+  document.getElementById('userProfileTitle').textContent = t('user_profile');
+  content.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text3)">...</div>';
+  modal.style.display = '';
+
+  try {
+    const profile = await api(`/api/users/profile?bot_id=${currentBotID}&chat_id=${currentChat.id}&user_id=${userID}`);
+    renderUserProfile(profile);
+  } catch(e) {
+    content.innerHTML = `<div style="color:var(--magenta)">${esc(e.message)}</div>`;
+  }
+}
+
+function renderUserProfile(p) {
+  const content = document.getElementById('userProfileContent');
+  const name = p.username || 'User ' + p.user_id;
+  const initials = name.replace(/^@/, '').substring(0, 2);
+  const adminInfo = p.admin_info;
+  const tags = p.tags || [];
+  const actions = p.admin_actions || [];
+
+  let adminBadge = '';
+  if (adminInfo) {
+    const status = adminInfo.status;
+    const statusLabel = t(status) || status;
+    adminBadge = `<span class="profile-admin-badge ${status}">${statusLabel}</span>`;
+    if (adminInfo.custom_title) {
+      adminBadge += ` <span style="font-family:var(--ff-mono);font-size:10px;color:var(--text2)">${esc(adminInfo.custom_title)}</span>`;
+    }
+  }
+
+  let permsHtml = '';
+  if (adminInfo && (adminInfo.can_delete_messages || adminInfo.can_restrict_members || adminInfo.can_promote_members || adminInfo.can_change_info || adminInfo.can_invite_users || adminInfo.can_pin_messages || adminInfo.can_manage_chat)) {
+    const perms = [];
+    if (adminInfo.can_manage_chat) perms.push(t('perm_manage'));
+    if (adminInfo.can_delete_messages) perms.push(t('perm_delete'));
+    if (adminInfo.can_restrict_members) perms.push(t('perm_restrict'));
+    if (adminInfo.can_invite_users) perms.push(t('perm_invite'));
+    if (adminInfo.can_pin_messages) perms.push(t('perm_pin'));
+    if (adminInfo.can_change_info) perms.push(t('perm_info'));
+    if (adminInfo.can_promote_members) perms.push(t('perm_promote'));
+    permsHtml = `
+      <div class="profile-section">
+        <div class="profile-section-title">${t('admin_permissions')}</div>
+        <div class="profile-perms">${perms.map(p => `<span class="profile-perm">${p}</span>`).join('')}</div>
+      </div>`;
+  }
+
+  let tagsHtml = '';
+  if (tags.length) {
+    tagsHtml = `
+      <div class="profile-section">
+        <div class="profile-section-title">${t('profile_tags')}</div>
+        <div class="profile-tags">${tags.map(tg => `<span class="tag-chip" style="background:${sanitizeColor(tg.color)}15;color:${sanitizeColor(tg.color)};border:1px solid ${sanitizeColor(tg.color)}33">${esc(tg.tag)}</span>`).join('')}</div>
+      </div>`;
+  }
+
+  let actionsHtml = '';
+  if (actions.length) {
+    actionsHtml = `
+      <div class="profile-section">
+        <div class="profile-section-title">${t('recent_actions')}</div>
+        ${actions.map(a => `
+          <div class="profile-action-item">
+            <span class="profile-action-type">${esc(a.action)}</span>
+            <span class="profile-action-detail">${esc(a.details || '')}</span>
+            <span class="profile-action-date">${esc(a.created_at || '')}</span>
+          </div>
+        `).join('')}
+      </div>`;
+  }
+
+  content.innerHTML = `
+    <div class="profile-header">
+      <div class="profile-avatar">${esc(initials)}</div>
+      <div class="profile-identity">
+        <div class="profile-name">${esc(name)}</div>
+        <div class="profile-id">ID: ${p.user_id}</div>
+        ${adminBadge}
+      </div>
+    </div>
+    <div class="profile-section">
+      <div class="profile-stats">
+        <div class="profile-stat">
+          <div class="profile-stat-value">${p.message_count ?? '—'}</div>
+          <div class="profile-stat-label">${t('messages_total')}</div>
+        </div>
+        <div class="profile-stat">
+          <div class="profile-stat-value">${p.first_seen ? p.first_seen.split('T')[0] : '—'}</div>
+          <div class="profile-stat-label">${t('first_seen')}</div>
+        </div>
+        <div class="profile-stat">
+          <div class="profile-stat-value">${p.last_seen || '—'}</div>
+          <div class="profile-stat-label">${t('last_seen')}</div>
+        </div>
+      </div>
+    </div>
+    ${tagsHtml}
+    ${permsHtml}
+    ${actionsHtml}
+  `;
+}
+
+function closeUserProfile() {
+  document.getElementById('userProfileModal').style.display = 'none';
+}
 
 </script>
 <!-- User Management Modal (admin only) -->
@@ -4080,6 +4350,17 @@ function clearLogsView() {
   document.getElementById('logsContainer').innerHTML = '';
 }
 </script>
+
+<!-- User Profile Modal -->
+<div id="userProfileModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeUserProfile()">
+  <div class="modal" style="max-width:480px">
+    <h3 id="userProfileTitle" style="margin-bottom:16px"></h3>
+    <div id="userProfileContent"></div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="btn" onclick="closeUserProfile()">CLOSE</button>
+    </div>
+  </div>
+</div>
 
 </div><!-- /appContainer -->
 

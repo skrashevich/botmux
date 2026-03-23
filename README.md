@@ -343,6 +343,7 @@ export TELEGRAM_BOT_TOKEN="123456:ABC-DEF..."
 | `-webhook` | `""` | Set webhook URL for receiving updates (instead of polling) |
 | `-tg-api` | `""` | Custom Telegram API base URL (or `TELEGRAM_API_URL` env var) |
 | `-demo` | `false` | Enable demo mode (or `DEMO_MODE=true` env var) |
+| `-version` | `false` | Print version information and exit |
 
 ### Webhook mode
 
@@ -538,6 +539,13 @@ The database file is created automatically on first run. Schema migrations run a
 
 All endpoints return JSON. Errors return `{"error": "message"}` with HTTP 500. Most endpoints require a `bot_id` query parameter.
 
+### System (no auth)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/health` | Health check with version info |
+| GET | `/api/version` | Current version + update availability check (cached 6h) |
+
 ### Bots
 
 | Method | Endpoint | Description |
@@ -573,6 +581,7 @@ All endpoints return JSON. Errors return `{"error": "message"}` with HTTP 500. M
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/users/list?chat_id=&q=&limit=&offset=` | List users in a chat |
+| GET | `/api/users/profile?bot_id=&chat_id=&user_id=` | User profile with stats, tags, admin info |
 | POST | `/api/users/ban?bot_id=&chat_id=&user_id=` | Ban user |
 | POST | `/api/users/unban?bot_id=&chat_id=&user_id=` | Unban user |
 

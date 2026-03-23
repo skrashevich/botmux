@@ -37,10 +37,12 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
+          VERSION: ${{ github.ref_name }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
           ext=""
           if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
-          go build -ldflags="-s -w" -o "botmux-${GOOS}-${GOARCH}${ext}" .
+          go build -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT_SHA} -X main.buildDate=$(date -u +%Y-%m-%d)" -o "botmux-${GOOS}-${GOARCH}${ext}" .
 
       - uses: actions/upload-artifact@v4
         with:

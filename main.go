@@ -2,10 +2,18 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"os"
 	"strings"
+)
+
+// Build-time variables injected via ldflags
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
 )
 
 // telegramAPIURL is the base URL for Telegram Bot API requests.
@@ -33,7 +41,13 @@ func main() {
 	webhookURL := flag.String("webhook", "", "Set webhook URL for the CLI bot (requires -token)")
 	tgAPI := flag.String("tg-api", "", "Custom Telegram API base URL (default: https://api.telegram.org)")
 	demoMode := flag.Bool("demo", false, "Enable demo mode with separate database and seeded data")
+	showVersion := flag.Bool("version", false, "Print version information and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("botmux %s (commit: %s, built: %s)\n", version, commit, buildDate)
+		os.Exit(0)
+	}
 
 	if *token == "" {
 		*token = os.Getenv("TELEGRAM_BOT_TOKEN")

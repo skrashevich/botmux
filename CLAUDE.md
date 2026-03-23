@@ -15,7 +15,7 @@ go build -o botmux .
 ./botmux
 
 # Env var also works: TELEGRAM_BOT_TOKEN="..." ./botmux
-# Flags: -addr :8080, -db botdata.db, -webhook URL, -tg-api URL, -demo
+# Flags: -addr :8080, -db botdata.db, -webhook URL, -tg-api URL, -demo, -version
 ```
 
 No linter configured. Single `go build` produces the binary.
@@ -35,7 +35,7 @@ go test -v ./...
 
 ## Architecture
 
-Monolithic Go app (all `package main`), 10 source files + 1 test file + 1 embedded SPA template:
+Monolithic Go app (all `package main`), 11 source files + 1 test file + 1 embedded SPA template:
 
 - **main.go** — Entry point. Token is optional — if provided, registers CLI bot; otherwise uses bots from DB. Starts ProxyManager for all bots, BridgeManager for protocol bridges, launches HTTP server. Supports `-demo` flag for demo mode and `-tg-api` for custom Telegram API URL.
 - **demo.go** — `seedDemoData()` for demo mode. Populates a fresh `demo.db` with a `demo:demo` admin user and 3 demo bots on first launch. Skips seeding if bots already exist.
@@ -47,6 +47,7 @@ Monolithic Go app (all `package main`), 10 source files + 1 test file + 1 embedd
 - **server.go** — HTTP server with `embed.FS` for SPA. REST API for all bot/chat/message/admin/bridge operations. Telegram API proxy at `/tgapi/` captures outgoing bot messages. Multi-bot: resolves bot instances via `getBotFromRequest()` / `resolveBot()`. Auth endpoints at `/api/auth/*` for login/logout/user management. Bridge endpoints at `/api/bridges/*` for CRUD and `/bridge/{id}/incoming` for external webhook. Long polling endpoint at `/api/updates/poll` returns raw Telegram updates in getUpdates-compatible format.
 - **llm.go** — `LLMRouter` for AI-based message routing via OpenAI-compatible API. `LLMConfig` (api_url, api_key, model, system_prompt, enabled). `RouteMessage()` builds context from all bots+descriptions+chats, calls LLM Chat Completions, parses JSON routing decision. Works with any OpenAI-compatible endpoint (OpenAI, Ollama, LM Studio, etc.).
 - **store.go** — SQLite with WAL mode. All data models and DB operations. Auto-migrates schema on startup. Includes `llm_config` table, bot `description` column, auth tables (`auth_users`, `auth_sessions`, `user_bots`, `api_keys`), and bridge tables (`bridges`, `bridge_chat_mappings`, `bridge_msg_mappings`). Auto-creates default admin on first run.
+- **version.go** — Build-time version variables (`version`, `commit`, `buildDate`) injected via ldflags. `VersionChecker` fetches latest release from GitHub API with 6-hour cache. `compareSemver()` for version comparison. Endpoints: `/api/health` (extended with version fields), `/api/version` (version + update check).
 - **server_capture_test.go** — Tests for `captureSentMessage` (copyMessage and sendMessage scenarios). Uses temp DB via `t.TempDir()`.
 - **templates/index.html** — Complete SPA (vanilla JS, no framework). Dark/light theme (Sora + JetBrains Mono, auto-switches via `prefers-color-scheme`). i18n with EN/RU support via `i18n` object and `t(key)` function. Compiled into binary via `//go:embed`.
 
@@ -86,6 +87,10 @@ Monolithic Go app (all `package main`), 10 source files + 1 test file + 1 embedd
 ## Language
 
 Frontend supports English and Russian via i18n system in `templates/index.html`. Translations are in the `i18n` object (keys `en`/`ru`). `t(key)` returns the current language string. `applyLang()` re-renders all static and dynamic content. Language preference stored in localStorage. Comments may be in English or Russian. README is English.
+
+**Version checking**: Build-time variables (`version`, `commit`, `buildDate`) injected via `-ldflags "-X main.version=..."`. CI workflows (release.yml, docker.yml) and Dockerfile pass these automatically. `VersionChecker` queries GitHub Releases API (`/repos/skrashevich/botmux/releases/latest`) with 6-hour in-memory cache. Dev builds (`version=dev`) skip the check. Admin-only update banner in sidebar, dismissible per version (persisted in localStorage). `-version` CLI flag prints build info and exits.
+
+**User profile card**: Click on any username in chat messages to open a modal with aggregated user data: identity (name, ID, admin status/title), message count, first/last seen, tags, admin permissions, and recent admin actions history. Data fetched from `/api/users/profile` endpoint which aggregates from `known_users`, `messages`, admin list, `user_tags`, and `admin_log` tables.
 
 ## Screenshots
 

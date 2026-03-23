@@ -33,13 +33,15 @@ type Server struct {
 	webhookHandler http.HandlerFunc
 	demoMode       bool
 	logBuf         *LogBuffer
+	versionChecker *VersionChecker
 }
 
 func NewServer(store *Store, proxy *ProxyManager) *Server {
 	return &Server{
-		store: store,
-		proxy: proxy,
-		bots:  make(map[int64]*Bot),
+		store:          store,
+		proxy:          proxy,
+		bots:           make(map[int64]*Bot),
+		versionChecker: NewVersionChecker(),
 	}
 }
 
@@ -93,7 +95,7 @@ func (s *Server) BuildMux() *http.ServeMux {
 	// Telegram API proxy — no auth (backends use this)
 	mux.HandleFunc("/tgapi/", s.handleTelegramAPIProxy)
 
-	// Health check — no auth
+	// Health check — no auth (no sensitive info)
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]string{"status": "ok"}
 		if s.demoMode {
@@ -101,6 +103,16 @@ func (s *Server) BuildMux() *http.ServeMux {
 		}
 		writeJSON(w, resp)
 	})
+
+	// Version check — auth required (exposes version/commit info)
+	mux.HandleFunc("/api/version", s.authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		info := s.versionChecker.GetVersionInfo()
+		update := s.versionChecker.CheckForUpdate()
+		writeJSON(w, map[string]any{
+			"version": info,
+			"update":  update,
+		})
+	}))
 
 	// Auth endpoints — no auth required
 	mux.HandleFunc("/api/auth/login", s.handleLogin)
@@ -158,6 +170,7 @@ func (s *Server) BuildMux() *http.ServeMux {
 
 	// Users (Telegram users in chats, not auth users)
 	mux.HandleFunc("/api/users/list", s.authMiddleware(s.handleListUsers))
+	mux.HandleFunc("/api/users/profile", s.authMiddleware(s.handleUserProfile))
 	mux.HandleFunc("/api/users/ban", s.authMiddleware(s.handleBanUser))
 	mux.HandleFunc("/api/users/unban", s.authMiddleware(s.handleUnbanUser))
 
@@ -994,6 +1007,88 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, users)
 }
 
+// handleUserProfile returns aggregated profile data for a user in a chat.
+func (s *Server) handleUserProfile(w http.ResponseWriter, r *http.Request) {
+	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
+	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
+	userID, _ := strconv.ParseInt(r.URL.Query().Get("user_id"), 10, 64)
+
+	if !s.checkBotAccess(r, botID) {
+		w.WriteHeader(403)
+		writeJSON(w, map[string]string{"error": "forbidden"})
+		return
+	}
+	if chatID == 0 || userID == 0 {
+		w.WriteHeader(400)
+		writeJSON(w, map[string]string{"error": "chat_id and user_id are required"})
+		return
+	}
+
+	profile := map[string]any{
+		"user_id": userID,
+		"chat_id": chatID,
+	}
+
+	// Get user info from known_users
+	var username, lastSeen string
+	var msgCount int
+	err := s.store.db.QueryRow(`
+		SELECT ku.username, ku.first_seen,
+			(SELECT COUNT(*) FROM messages WHERE chat_id = ? AND from_id = ?) as msg_count,
+			(SELECT MAX(date) FROM messages WHERE chat_id = ? AND from_id = ?) as last_msg
+		FROM known_users ku WHERE ku.chat_id = ? AND ku.user_id = ?
+	`, chatID, userID, chatID, userID, chatID, userID).Scan(&username, &lastSeen, &msgCount, &lastSeen)
+	if err == nil {
+		profile["username"] = username
+		profile["message_count"] = msgCount
+		profile["last_seen"] = lastSeen
+	}
+
+	// Get tags for this user
+	tags, _ := s.store.GetUserTagsByUser(chatID, userID)
+	if tags != nil {
+		profile["tags"] = tags
+	}
+
+	// Get first seen
+	var firstSeen string
+	s.store.db.QueryRow(`SELECT first_seen FROM known_users WHERE chat_id = ? AND user_id = ?`, chatID, userID).Scan(&firstSeen)
+	if firstSeen != "" {
+		profile["first_seen"] = firstSeen
+	}
+
+	// Check admin status
+	bot, _, _ := s.getBotFromRequest(r)
+	if bot != nil {
+		admins, err := bot.GetAdmins(chatID)
+		if err == nil {
+			for _, a := range admins {
+				if a.UserID == userID {
+					profile["admin_info"] = a
+					break
+				}
+			}
+		}
+	}
+
+	// Get admin actions related to this user
+	logs, err := s.store.GetAdminLog(chatID, 50, 0)
+	if err == nil {
+		var userLogs []AdminLog
+		for _, l := range logs {
+			if l.TargetID == userID {
+				userLogs = append(userLogs, l)
+			}
+		}
+		if len(userLogs) > 10 {
+			userLogs = userLogs[:10]
+		}
+		profile["admin_actions"] = userLogs
+	}
+
+	writeJSON(w, profile)
+}
+
 // handleBanUser bans a user from a Telegram chat.
 // @Summary Ban user
 // @Description Bans the specified user from the chat via Telegram API and logs the action.
@@ -1298,6 +1393,9 @@ func (s *Server) handleAddTag(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, err)
 		return
+	}
+	if !isValidHexColor(req.Color) {
+		req.Color = "#888888"
 	}
 	if err := s.store.AddUserTag(req.UserTag); err != nil {
 		writeError(w, err)
@@ -2383,6 +2481,22 @@ func writeError(w http.ResponseWriter, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 	json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+}
+
+func isValidHexColor(s string) bool {
+	if len(s) == 0 || s[0] != '#' {
+		return false
+	}
+	s = s[1:]
+	if len(s) != 3 && len(s) != 4 && len(s) != 6 && len(s) != 8 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // handleTelegramAPIProxy proxies requests to api.telegram.org and captures sent messages.
