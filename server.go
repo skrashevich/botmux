@@ -713,32 +713,37 @@ func longPollResponse(updates []QueuedUpdate) map[string]interface{} {
 // handleLongPollGetUpdates serves updates from UpdateQueue for /tgapi/bot{TOKEN}/getUpdates.
 // No auth required — the bot token in the URL is the authorization (same as Telegram API).
 func (s *Server) handleLongPollGetUpdates(w http.ResponseWriter, r *http.Request, botCfg *BotConfig) {
-	// Parse params from query string (GET) or form body (POST) — Telegram supports both
+	// Parse params from query string (GET) or form/JSON body (POST) — Telegram supports all
 	var offset int64
 	var limit, timeout int
 	if r.Method == http.MethodPost {
-		// Try JSON body first, then form values
-		if r.Header.Get("Content-Type") == "application/json" {
-			var body struct {
+		// Read body once, then try JSON → form fallback
+		bodyBytes, _ := io.ReadAll(r.Body)
+		var parsed bool
+		if len(bodyBytes) > 0 {
+			var jsonBody struct {
 				Offset  json.Number `json:"offset"`
 				Limit   json.Number `json:"limit"`
 				Timeout json.Number `json:"timeout"`
 			}
-			if json.NewDecoder(r.Body).Decode(&body) == nil {
-				if body.Offset != "" {
-					offset, _ = body.Offset.Int64()
+			if json.Unmarshal(bodyBytes, &jsonBody) == nil && (jsonBody.Offset != "" || jsonBody.Limit != "" || jsonBody.Timeout != "") {
+				parsed = true
+				if jsonBody.Offset != "" {
+					offset, _ = jsonBody.Offset.Int64()
 				}
-				if body.Limit != "" {
-					v, _ := body.Limit.Int64()
+				if jsonBody.Limit != "" {
+					v, _ := jsonBody.Limit.Int64()
 					limit = int(v)
 				}
-				if body.Timeout != "" {
-					v, _ := body.Timeout.Int64()
+				if jsonBody.Timeout != "" {
+					v, _ := jsonBody.Timeout.Int64()
 					timeout = int(v)
 				}
 			}
-		} else {
-			r.ParseForm()
+		}
+		if !parsed {
+			// Restore body for form/multipart parsing
+			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 			offset, _ = strconv.ParseInt(r.FormValue("offset"), 10, 64)
 			limit, _ = strconv.Atoi(r.FormValue("limit"))
 			timeout, _ = strconv.Atoi(r.FormValue("timeout"))

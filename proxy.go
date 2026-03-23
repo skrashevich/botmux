@@ -19,10 +19,11 @@ import (
 
 // UpdateQueue is an in-memory ring buffer of raw Telegram updates for long-poll consumers.
 type UpdateQueue struct {
-	mu      sync.Mutex
-	updates []QueuedUpdate
-	maxSize int
-	waiters []chan struct{}
+	mu              sync.Mutex
+	updates         []QueuedUpdate
+	maxSize         int
+	waiters         []chan struct{}
+	confirmedOffset int64 // highest offset ever confirmed via Get(); prevents re-delivery
 }
 
 // QueuedUpdate holds a single raw Telegram update with its update_id.
@@ -40,13 +41,28 @@ func NewUpdateQueue(maxSize int) *UpdateQueue {
 }
 
 // Enqueue adds a raw update to the queue, evicting the oldest if full, and wakes all waiters.
+// Updates already confirmed (UpdateID < confirmedOffset) are silently dropped.
 func (q *UpdateQueue) Enqueue(rawUpdate map[string]interface{}) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	updateID, _ := rawUpdate["update_id"].(float64)
+	id := int64(updateID)
+
+	// Drop updates that have already been confirmed by a consumer
+	if id > 0 && id < q.confirmedOffset {
+		return
+	}
+
+	// Deduplicate: don't add if already in queue
+	for _, u := range q.updates {
+		if u.UpdateID == id {
+			return
+		}
+	}
+
 	q.updates = append(q.updates, QueuedUpdate{
-		UpdateID: int64(updateID),
+		UpdateID: id,
 		Data:     rawUpdate,
 	})
 	if len(q.updates) > q.maxSize {
@@ -69,6 +85,11 @@ func (q *UpdateQueue) Enqueue(rawUpdate map[string]interface{}) {
 func (q *UpdateQueue) Get(offset int64, limit int) []QueuedUpdate {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+
+	// Advance the high watermark so future Enqueue calls drop confirmed updates
+	if offset > q.confirmedOffset {
+		q.confirmedOffset = offset
+	}
 
 	// Purge confirmed updates (UpdateID < offset), matching Telegram behavior.
 	if offset > 0 && len(q.updates) > 0 {
