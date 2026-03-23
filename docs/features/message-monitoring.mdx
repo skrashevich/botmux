@@ -1,0 +1,30 @@
+---
+title: "Message Monitoring"
+description: "Real-time message collection and search"
+---
+
+BotMux collects all messages and channel posts visible to the bot in real time.
+
+## Features
+
+- **Real-time collection** of all messages the bot can see
+- **Full-text search** across message history
+- **Paginated feed** with sender, timestamp, and content
+- **Reply to messages** — click the reply button to send a reply in-context
+- **Reply chain visualization** — messages show "Replying to @user" badge with click-to-scroll
+- **Automatic chat discovery** — the bot detects groups it's added to
+- **Soft-deleted tracking** — deleted messages are visually marked in the UI
+
+## Media Support
+
+Messages with media are rendered inline:
+
+| Type | Rendering |
+|------|-----------|
+| Photos | Inline image with lightbox (click to zoom) |
+| Videos | Embedded video player |
+| Animations (GIF) | Inline animation |
+| Stickers | WebP→PNG conversion for browser compatibility |
+| Voice/Audio | Embedded audio player |
+| Documents | Download link |
+| Video notes | Embedded player |

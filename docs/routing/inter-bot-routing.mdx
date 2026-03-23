@@ -1,0 +1,35 @@
+---
+title: "Inter-Bot Routing"
+description: "Route messages between bots based on configurable conditions"
+---
+
+BotMux can route messages between bots based on configurable rules.
+
+## Condition Types
+
+| Type | Description |
+|------|-------------|
+| **Text match** | Regex pattern matching on message text (case-insensitive) |
+| **User ID** | Messages from a specific Telegram user |
+| **Chat ID** | All messages from a specific chat/group |
+| **LLM** | AI-based routing — describe the rule in natural language |
+
+## Actions
+
+| Action | Description |
+|--------|-------------|
+| **Forward** | Send message text as a new message via the target bot |
+| **Copy** | Forward the original message preserving author attribution via `forwardMessage` |
+| **Drop** | Silently ignore the message |
+
+## Source-NAT Return Path
+
+Replies to routed messages are automatically sent back through the original source bot to the original chat, maintaining conversational context. Each reply creates a new mapping, enabling ongoing cross-bot dialogs.
+
+## Loop Protection
+
+Bot-originated messages are not reverse-routed, preventing infinite routing loops.
+
+## Management
+
+Route rules are managed per-bot from the web UI with enable/disable toggle.

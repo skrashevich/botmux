@@ -1,0 +1,35 @@
+---
+title: "User Tags"
+description: "Custom classification system for chat members"
+---
+
+Tags provide a flexible way to classify and label chat members.
+
+## Features
+
+- Assign arbitrary tags to users (VIP, Moderator, Spammer, Trusted, etc.)
+- **Color-coded** for visual distinction
+- **Multiple tags** per user
+- **Per-chat** — the same user can have different tags in different chats
+
+## API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/tags?chat_id=` | Get all tags for a chat |
+| GET | `/api/tags/user?chat_id=&user_id=` | Get tags for a user |
+| POST | `/api/tags/add` | Add tag (JSON body) |
+| POST | `/api/tags/remove?id=` | Remove tag by ID |
+
+### Add Tag Request Body
+
+```json
+{
+  "bot_id": 1,
+  "chat_id": -1001234567890,
+  "user_id": 123456789,
+  "username": "johndoe",
+  "tag": "VIP",
+  "color": "#4CAF50"
+}
+```

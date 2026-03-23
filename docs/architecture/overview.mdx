@@ -1,0 +1,38 @@
+---
+title: "Architecture"
+description: "BotMux system architecture and code organization"
+---
+
+BotMux is a monolithic Go application compiled into a single binary with an embedded SPA.
+
+## Source Files
+
+| File | Description |
+|------|-------------|
+| `main.go` | Entry point, flag parsing, bot registration |
+| `bot.go` | Telegram Bot API wrapper |
+| `proxy.go` | ProxyManager: polling, forwarding, health checks |
+| `server.go` | HTTP server, REST API endpoints |
+| `store.go` | SQLite storage layer |
+| `bridge.go` | BridgeManager for multi-protocol bridges |
+| `slack.go` | Native Slack protocol bridge |
+| `auth.go` | Authentication and authorization |
+| `llm.go` | LLM-based message routing |
+| `demo.go` | Demo mode data seeding |
+| `templates/index.html` | SPA (vanilla JS, embedded at compile time) |
+
+## Dependencies
+
+| Package | Purpose |
+|---------|---------|
+| `github.com/OvyFlash/telegram-bot-api` | Telegram Bot API client |
+| `modernc.org/sqlite` | Pure Go SQLite driver (no CGO) |
+| `github.com/skrashevich/go-webp` | WebP→PNG sticker conversion |
+| `golang.org/x/crypto/bcrypt` | Password hashing |
+
+## Key Design Decisions
+
+- **No CLI vs web bot distinction** — all bots are functionally identical
+- **Single binary** — web UI embedded via `go:embed`
+- **No CGO** — pure Go dependencies for easy cross-compilation
+- **SQLite with WAL mode** — simple, reliable storage

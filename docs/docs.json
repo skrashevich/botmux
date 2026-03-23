@@ -216,5 +216,5 @@
       "name": "Authorization"
     }
   },
-  "openapi": "openapi.yaml"
+  "openapi": ["openapi.yaml"]
 }

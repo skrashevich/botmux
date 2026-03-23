@@ -1,0 +1,52 @@
+---
+title: "Installation"
+description: "Build and install BotMux from source"
+---
+
+## Prerequisites
+
+- Go 1.21+
+- A Telegram bot token (create via [@BotFather](https://t.me/BotFather))
+
+## Build from Source
+
+```bash
+git clone https://github.com/skrashevich/botmux.git
+cd botmux
+go build -o botmux .
+```
+
+No CGO required — all dependencies are pure Go.
+
+## Install via `go install`
+
+```bash
+go install github.com/skrashevich/botmux@latest
+```
+
+## Run
+
+```bash
+# With token flag
+./botmux -token "123456:ABC-DEF..."
+
+# With environment variable
+export TELEGRAM_BOT_TOKEN="123456:ABC-DEF..."
+./botmux
+
+# Custom address
+./botmux -token "TOKEN" -addr :9090
+```
+
+The token is optional — if not provided, BotMux starts without a CLI bot and uses bots from the database only.
+
+## Command-Line Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-token` | `""` | Telegram bot token (or `TELEGRAM_BOT_TOKEN` env var) |
+| `-addr` | `:8080` | HTTP server listen address |
+| `-db` | `botdata.db` | Path to SQLite database file |
+| `-webhook` | `""` | Set webhook URL for receiving updates |
+| `-tg-api` | `""` | Custom Telegram API base URL (or `TELEGRAM_API_URL` env var) |
+| `-demo` | `false` | Enable demo mode (or `DEMO_MODE=true` env var) |

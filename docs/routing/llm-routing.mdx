@@ -1,0 +1,41 @@
+---
+title: "LLM Routing"
+description: "AI-based smart routing via any OpenAI-compatible API"
+---
+
+BotMux can use an LLM to make intelligent routing decisions based on message content.
+
+## How It Works
+
+1. A message arrives at a bot
+2. Rule-based routes are checked first
+3. If no rule matches, the LLM receives the message text, sender info, and a list of all bots with their descriptions
+4. The LLM returns a routing decision: `{target_bot_id, target_chat_id, action, reason}`
+
+## Supported APIs
+
+Any **OpenAI-compatible** endpoint works:
+- OpenAI
+- Ollama
+- LM Studio
+- Any compatible API
+
+## Configuration
+
+Configure via the web UI at **LLM Config**:
+
+| Field | Description |
+|-------|-------------|
+| API URL | OpenAI-compatible endpoint URL |
+| API Key | Authentication key |
+| Model | Model name (e.g., `gpt-4o`, `llama3`) |
+| System Prompt | Custom system prompt for routing decisions |
+| Enabled | Toggle on/off |
+
+## Bot Descriptions
+
+Each bot can have a **description** explaining what it does. These descriptions are sent to the LLM to help it make better routing decisions. Set descriptions via the web UI or API (`/api/bots/description`).
+
+## Reverse Routing
+
+Source-NAT return path works automatically for LLM-routed messages, just like rule-based routes.

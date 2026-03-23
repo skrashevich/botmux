@@ -1,0 +1,20 @@
+---
+title: "Environment Variables"
+description: "Configure BotMux via environment variables"
+---
+
+| Variable | Equivalent Flag | Description |
+|----------|----------------|-------------|
+| `TELEGRAM_BOT_TOKEN` | `-token` | Telegram bot token |
+| `TELEGRAM_API_URL` | `-tg-api` | Custom Telegram API base URL |
+| `DEMO_MODE` | `-demo` | Set to `true` for demo mode |
+
+## Usage
+
+```bash
+export TELEGRAM_BOT_TOKEN="123456:ABC-DEF..."
+export TELEGRAM_API_URL="http://localhost:8081"
+./botmux
+```
+
+Environment variables and CLI flags can be combined. CLI flags take precedence.

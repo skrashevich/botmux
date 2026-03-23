@@ -1,0 +1,44 @@
+---
+title: "Bot Setup"
+description: "Creating and configuring a Telegram bot for BotMux"
+---
+
+## Create a Bot
+
+1. Open [@BotFather](https://t.me/BotFather) in Telegram
+2. Send `/newbot` and follow the prompts
+3. Copy the bot token
+
+## Configure Privacy Mode
+
+By default, bots only see messages that mention them or start with `/`. To see all group messages:
+
+1. Open [@BotFather](https://t.me/BotFather)
+2. Send `/setprivacy`
+3. Select your bot
+4. Choose **Disable**
+
+<Warning>
+Privacy mode changes only apply to groups the bot joins **after** the change. Remove and re-add the bot to existing groups.
+</Warning>
+
+## Required Permissions
+
+For full functionality, make the bot an administrator with these permissions:
+
+| Permission | Required For |
+|------------|-------------|
+| Delete messages | Deleting messages from the UI |
+| Ban users | Ban/unban actions |
+| Pin messages | Pin/unpin messages |
+| Invite users | Invite link management |
+| Add new admins | Promote/demote administrators |
+| Change group info | Modify chat settings |
+
+The bot works with any subset — features requiring missing permissions will return errors.
+
+## Add to Chat
+
+1. Add the bot to your Telegram group or channel
+2. Promote it to administrator with the permissions above
+3. The chat appears in BotMux sidebar automatically

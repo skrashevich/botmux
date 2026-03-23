@@ -1,0 +1,24 @@
+---
+title: "Custom Telegram API"
+description: "Use a self-hosted Telegram Bot API server"
+---
+
+BotMux supports pointing at a custom Telegram Bot API server (e.g., [tdlib/telegram-bot-api](https://github.com/tdlib/telegram-bot-api)).
+
+## Setup
+
+```bash
+# Via flag
+./botmux -token "TOKEN" -tg-api "http://localhost:8081"
+
+# Via environment variable
+TELEGRAM_API_URL="http://localhost:8081" ./botmux
+```
+
+## What It Affects
+
+All Telegram API calls are routed through the custom URL:
+- Bot polling (`getUpdates`)
+- Bot API methods (send, ban, pin, etc.)
+- API proxy (`/tgapi/` forwards to custom URL instead of `api.telegram.org`)
+- Media file downloads

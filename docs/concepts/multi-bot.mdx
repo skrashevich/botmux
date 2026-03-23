@@ -1,0 +1,44 @@
+---
+title: "Multi-Bot Management"
+description: "Managing multiple Telegram bots from a single BotMux instance"
+---
+
+BotMux manages multiple bots in a single instance. All bots are functionally identical — there is no difference between a bot added via CLI and one added through the web UI.
+
+## Adding Bots
+
+### Via CLI
+
+```bash
+./botmux -token "123456:ABC-DEF..."
+```
+
+The token is registered as a bot automatically and can be configured through the web UI.
+
+### Via Web UI
+
+1. Click **+ ADD** in the sidebar
+2. Enter the bot token and click **CHECK** to validate
+3. Give it a name
+4. Enable **Management** and/or **Proxy** mode
+5. If proxy is enabled, enter the backend webhook URL
+6. Click **SAVE**
+
+The bot starts polling immediately — no restart needed.
+
+## Bot Modes
+
+Each bot can operate in one or both modes:
+
+| Mode | Description |
+|------|-------------|
+| **Management** | Chat tracking, message monitoring, admin actions, analytics |
+| **Proxy** | Reverse proxy — forwards updates to a backend URL |
+
+## Bot Resolution
+
+API endpoints accept a `bot_id` parameter. The server checks registered bots first, then falls back to ProxyManager's managed bots.
+
+## Chat Isolation
+
+Chats use a compound primary key `(bot_id, chat_id)`. Each bot has its own independent view of chats, even if multiple bots are in the same group.

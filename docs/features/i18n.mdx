@@ -1,0 +1,14 @@
+---
+title: "Internationalization"
+description: "Multi-language interface support"
+---
+
+BotMux supports English and Russian in the web interface.
+
+## Usage
+
+Toggle the language using the **EN/RU** button in the sidebar header. The preference is saved in `localStorage` and applied instantly without page reload.
+
+## Implementation
+
+Translations are defined in the `i18n` object in `templates/index.html` with keys for `en` and `ru`. The `t(key)` function returns the string for the current language. `applyLang()` re-renders all static and dynamic content.

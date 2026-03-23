@@ -1,0 +1,41 @@
+---
+title: "Quick Start"
+description: "Get BotMux running in under 5 minutes"
+---
+
+## 1. Get a Bot Token
+
+Create a bot via [@BotFather](https://t.me/BotFather) and copy the token.
+
+<Tip>
+Disable [privacy mode](https://core.telegram.org/bots/features#privacy-mode) if you want the bot to see all group messages: BotFather → `/setprivacy` → Disable.
+</Tip>
+
+## 2. Run BotMux
+
+<CodeGroup>
+```bash Binary
+go install github.com/skrashevich/botmux@latest
+botmux -token "YOUR_TOKEN"
+```
+
+```bash Docker
+TELEGRAM_BOT_TOKEN="YOUR_TOKEN" docker compose up -d
+```
+</CodeGroup>
+
+## 3. Open the Dashboard
+
+Navigate to [http://localhost:8080](http://localhost:8080). Log in with `admin` / `admin` (you'll be asked to change the password).
+
+## 4. Add the Bot to a Chat
+
+Add your bot to a Telegram group or channel and make it an administrator. The chat will appear in the BotMux sidebar automatically.
+
+## Next Steps
+
+- [Installation](/installation) — detailed build and install instructions
+- [Docker](/docker) — Docker and Docker Compose setup
+- [Bot Setup](/concepts/bot-setup) — required bot permissions
+- [Reverse Proxy](/features/reverse-proxy) — proxy updates to legacy backends
+- [Long Polling](/features/long-polling) — pull-based integration

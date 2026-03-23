@@ -1,0 +1,28 @@
+---
+title: "Demo Mode"
+description: "Isolated demo environments for public demonstrations"
+---
+
+Demo mode creates isolated environments for public demonstrations.
+
+## Enable
+
+```bash
+# Via flag
+./botmux -demo
+
+# Via environment variable
+DEMO_MODE=true ./botmux
+
+# Docker
+docker run -e DEMO_MODE=true -p 8080:8080 botmux
+```
+
+## Behavior
+
+- Uses a separate `demo.db` database
+- Login: `demo` / `demo` (no password change required)
+- 3 pre-configured demo bots
+- Uses a fake Telegram API (`telegram-bot-api.exe.xyz`)
+- Sessions expire after 30 minutes of inactivity
+- `/api/health` returns `{"mode": "demo"}` so frontend auto-fills credentials

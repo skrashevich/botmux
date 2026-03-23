@@ -1,0 +1,1990 @@
+openapi: 3.1.0
+info:
+  title: BotMux API
+  description: |
+    REST API for BotMux — a multi-bot Telegram management and proxy platform.
+
+    All endpoints return JSON. Errors return `{"error": "message"}` with HTTP 500 (or 400/401/403/404 where applicable).
+
+    **Authentication**: Use a Bearer API key (`Authorization: Bearer bmx_...`) or a session cookie obtained via `/api/auth/login`.
+  version: 1.0.0
+  contact:
+    name: BotMux
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+security:
+  - BearerAuth: []
+  - CookieAuth: []
+
+tags:
+  - name: Bots
+    description: Bot registration, configuration, and health management
+  - name: Chats
+    description: Tracked chat management
+  - name: Messages
+    description: Message retrieval, search, and actions
+  - name: Users
+    description: Chat member management
+  - name: Admins
+    description: Chat administrator management
+  - name: Tags
+    description: User tagging and labels
+  - name: Routes
+    description: Message routing rules between bots
+  - name: Analytics
+    description: Chat statistics and metrics
+  - name: Audit Log
+    description: Administrative action history
+  - name: Long Polling
+    description: Pull-based update delivery (Telegram-compatible)
+  - name: Telegram Proxy
+    description: Transparent proxy to api.telegram.org with message capture
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: API key with `bmx_` prefix. Obtain via `/api/auth/api-keys`.
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: session
+      description: Session cookie obtained after login via `/api/auth/login`.
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+      required:
+        - error
+      example:
+        error: "bot not found"
+
+    Bot:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Unique bot ID
+        token:
+          type: string
+          description: Telegram bot token
+        name:
+          type: string
+          description: Display name
+        source:
+          type: string
+          enum: [cli, web]
+          description: Registration source (informational only — both types are functionally identical)
+        manage_enabled:
+          type: boolean
+          description: Whether chat management features are active for this bot
+        proxy_enabled:
+          type: boolean
+          description: Whether this bot forwards updates to a backend URL
+        backend_url:
+          type: string
+          description: Backend URL to forward updates to (when proxy_enabled)
+        secret_token:
+          type: string
+          description: Secret token for validating backend webhook requests
+        long_poll_enabled:
+          type: boolean
+          description: Whether the long-poll endpoint buffers updates for this bot
+        description:
+          type: string
+          description: Natural-language description used by the LLM router
+        running:
+          type: boolean
+          description: Whether the bot is currently active (polling or webhook-registered)
+        webhook_mode:
+          type: boolean
+          description: Whether the bot is in webhook mode (not polled by BotMux)
+
+    BotAddRequest:
+      type: object
+      required:
+        - token
+      properties:
+        token:
+          type: string
+          description: Telegram bot token
+        name:
+          type: string
+          description: Display name for the bot
+        manage_enabled:
+          type: boolean
+          default: false
+          description: Enable chat management features
+        proxy_enabled:
+          type: boolean
+          default: false
+          description: Enable proxy forwarding to backend_url
+        backend_url:
+          type: string
+          description: Backend URL to receive forwarded updates
+        secret_token:
+          type: string
+          description: Secret token for webhook validation
+
+    BotUpdateRequest:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: integer
+          description: Bot ID to update
+        name:
+          type: string
+          description: New display name
+        manage_enabled:
+          type: boolean
+          description: Enable/disable management features
+        proxy_enabled:
+          type: boolean
+          description: Enable/disable proxy forwarding
+        backend_url:
+          type: string
+          description: New backend URL
+        secret_token:
+          type: string
+          description: New secret token
+        long_poll_enabled:
+          type: boolean
+          description: Enable/disable long-poll buffering
+
+    Chat:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Telegram chat ID
+        bot_id:
+          type: integer
+          description: ID of the bot tracking this chat
+        title:
+          type: string
+          description: Chat title or name
+        type:
+          type: string
+          description: Chat type (private, group, supergroup, channel)
+        username:
+          type: string
+          description: Chat username if public
+        first_name:
+          type: string
+          description: First name (for private chats)
+        last_name:
+          type: string
+          description: Last name (for private chats)
+        message_count:
+          type: integer
+          description: Number of tracked messages
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Telegram message ID
+        chat_id:
+          type: integer
+          description: Chat ID
+        bot_id:
+          type: integer
+          description: Bot ID that received/sent this message
+        user_id:
+          type: integer
+          description: Sender user ID
+        username:
+          type: string
+          description: Sender username
+        first_name:
+          type: string
+          description: Sender first name
+        last_name:
+          type: string
+          description: Sender last name
+        text:
+          type: string
+          description: Message text content
+        date:
+          type: integer
+          description: Unix timestamp of the message
+        media_type:
+          type: string
+          description: Media type if the message contains media (photo, video, animation, sticker, voice, audio, document, video_note)
+        file_id:
+          type: string
+          description: Telegram file ID for media messages
+        reply_to_message_id:
+          type: integer
+          description: ID of the message this is a reply to
+
+    SendMessageRequest:
+      type: object
+      required:
+        - bot_id
+        - chat_id
+        - text
+      properties:
+        bot_id:
+          type: integer
+          description: Bot to send from
+        chat_id:
+          type: integer
+          description: Target chat
+        text:
+          type: string
+          description: Message text
+        reply_to_message_id:
+          type: integer
+          description: Optional message ID to reply to
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Telegram user ID
+        username:
+          type: string
+          description: Telegram username (without @)
+        first_name:
+          type: string
+          description: First name
+        last_name:
+          type: string
+          description: Last name
+        is_bot:
+          type: boolean
+          description: Whether this user is a bot
+
+    Tag:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Tag record ID
+        chat_id:
+          type: integer
+          description: Chat this tag belongs to
+        user_id:
+          type: integer
+          description: User this tag is assigned to
+        username:
+          type: string
+          description: Username at time of tagging
+        tag:
+          type: string
+          description: Tag label text
+        color:
+          type: string
+          description: Tag color (hex or CSS color name)
+        created_at:
+          type: string
+          format: date-time
+          description: When the tag was created
+
+    TagAddRequest:
+      type: object
+      required:
+        - chat_id
+        - user_id
+        - tag
+      properties:
+        bot_id:
+          type: integer
+          description: Bot ID (for permission check)
+        chat_id:
+          type: integer
+          description: Chat to tag user in
+        user_id:
+          type: integer
+          description: User to tag
+        username:
+          type: string
+          description: Username at time of tagging
+        tag:
+          type: string
+          description: Tag label
+        color:
+          type: string
+          description: Tag color
+
+    Route:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Route ID
+        source_bot_id:
+          type: integer
+          description: Source bot that receives messages
+        target_bot_id:
+          type: integer
+          description: Target bot that forwards messages
+        condition_type:
+          type: string
+          description: Condition to match (e.g., chat_id, user_id, keyword, all)
+        condition_value:
+          type: string
+          description: Value to match for the condition
+        action:
+          type: string
+          description: Action to take (forward, copy, etc.)
+        target_chat_id:
+          type: integer
+          description: Target chat to route messages to
+        enabled:
+          type: boolean
+          description: Whether this route is active
+        description:
+          type: string
+          description: Human-readable description of this route
+
+    RouteAddRequest:
+      type: object
+      required:
+        - source_bot_id
+        - target_bot_id
+        - action
+      properties:
+        source_bot_id:
+          type: integer
+          description: Source bot ID
+        target_bot_id:
+          type: integer
+          description: Target bot ID
+        condition_type:
+          type: string
+          description: Condition type (chat_id, user_id, keyword, all)
+        condition_value:
+          type: string
+          description: Value for the condition
+        action:
+          type: string
+          description: Routing action
+        target_chat_id:
+          type: integer
+          description: Target chat ID
+        enabled:
+          type: boolean
+          default: true
+          description: Start enabled
+        description:
+          type: string
+          description: Human-readable description
+
+    RouteUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/RouteAddRequest'
+        - type: object
+          required:
+            - id
+          properties:
+            id:
+              type: integer
+              description: Route ID to update
+
+    AdminPermissions:
+      type: object
+      properties:
+        can_change_info:
+          type: boolean
+        can_post_messages:
+          type: boolean
+        can_edit_messages:
+          type: boolean
+        can_delete_messages:
+          type: boolean
+        can_invite_users:
+          type: boolean
+        can_restrict_members:
+          type: boolean
+        can_pin_messages:
+          type: boolean
+        can_promote_members:
+          type: boolean
+        can_manage_video_chats:
+          type: boolean
+        can_manage_chat:
+          type: boolean
+
+    PromoteRequest:
+      type: object
+      required:
+        - bot_id
+        - chat_id
+        - user_id
+      properties:
+        bot_id:
+          type: integer
+          description: Bot ID (must be admin in chat)
+        chat_id:
+          type: integer
+          description: Chat ID
+        user_id:
+          type: integer
+          description: User ID to promote
+        perms:
+          $ref: '#/components/schemas/AdminPermissions'
+
+    AdminTitleRequest:
+      type: object
+      required:
+        - bot_id
+        - chat_id
+        - user_id
+        - title
+      properties:
+        bot_id:
+          type: integer
+        chat_id:
+          type: integer
+        user_id:
+          type: integer
+        title:
+          type: string
+          description: Custom admin title (max 16 characters)
+
+    ChatStats:
+      type: object
+      properties:
+        chat_id:
+          type: integer
+          description: Chat ID
+        total_messages:
+          type: integer
+          description: Total tracked messages
+        total_users:
+          type: integer
+          description: Unique users who have sent messages
+        messages_today:
+          type: integer
+          description: Messages sent today
+        top_users:
+          type: array
+          description: Most active users
+          items:
+            type: object
+            properties:
+              user_id:
+                type: integer
+              username:
+                type: string
+              message_count:
+                type: integer
+
+    AuditLogEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        chat_id:
+          type: integer
+        bot_id:
+          type: integer
+        action:
+          type: string
+          description: Action performed (e.g., ban, unban, promote, demote, pin, delete)
+        actor_id:
+          type: integer
+          description: User who performed the action
+        actor_username:
+          type: string
+        target_id:
+          type: integer
+          description: User/message that was acted upon
+        target_username:
+          type: string
+        details:
+          type: string
+          description: Additional action details
+        date:
+          type: integer
+          description: Unix timestamp
+
+    TelegramUpdate:
+      type: object
+      description: Raw Telegram Update object as defined in the Telegram Bot API
+      properties:
+        update_id:
+          type: integer
+        message:
+          type: object
+          description: Telegram Message object
+        edited_message:
+          type: object
+        channel_post:
+          type: object
+        callback_query:
+          type: object
+
+    GetUpdatesResponse:
+      type: object
+      description: Telegram-compatible getUpdates response
+      properties:
+        ok:
+          type: boolean
+          example: true
+        result:
+          type: array
+          items:
+            $ref: '#/components/schemas/TelegramUpdate'
+
+paths:
+  # ── Bots ──────────────────────────────────────────────────────────────────
+
+  /api/bots:
+    get:
+      tags: [Bots]
+      summary: List all bots
+      description: Returns all registered bots with their current running status and configuration.
+      operationId: listBots
+      responses:
+        '200':
+          description: Array of bots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Bot'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/bots/add:
+    post:
+      tags: [Bots]
+      summary: Add a new bot
+      description: Registers a new Telegram bot. The token is validated with Telegram before saving. Admin only.
+      operationId: addBot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BotAddRequest'
+            example:
+              token: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+              name: "My Bot"
+              manage_enabled: true
+              proxy_enabled: false
+      responses:
+        '200':
+          description: Bot created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bot'
+        '400':
+          description: Invalid request or token validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Admin role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/bots/update:
+    post:
+      tags: [Bots]
+      summary: Update bot configuration
+      description: Updates settings for an existing bot. Admin only.
+      operationId: updateBot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BotUpdateRequest'
+            example:
+              id: 1
+              name: "Updated Bot Name"
+              proxy_enabled: true
+              backend_url: "https://my-backend.example.com/webhook"
+              long_poll_enabled: false
+      responses:
+        '200':
+          description: Bot updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bot'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Admin role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/bots/delete:
+    post:
+      tags: [Bots]
+      summary: Delete a bot
+      description: Removes a bot and all associated data. Admin only.
+      operationId: deleteBot
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Bot ID to delete
+      responses:
+        '200':
+          description: Bot deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '400':
+          description: Missing or invalid ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Admin role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/bots/validate:
+    get:
+      tags: [Bots]
+      summary: Validate a bot token
+      description: Calls `getMe` on Telegram to verify the token is valid and returns bot info.
+      operationId: validateBotToken
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Telegram bot token to validate
+      responses:
+        '200':
+          description: Token is valid
+          content:
+            application/json:
+              schema:
+                type: object
+                description: Telegram User object for the bot
+                properties:
+                  id:
+                    type: integer
+                  is_bot:
+                    type: boolean
+                    example: true
+                  first_name:
+                    type: string
+                  username:
+                    type: string
+        '400':
+          description: Invalid or inactive token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/bots/health:
+    get:
+      tags: [Bots]
+      summary: Check backend health
+      description: Pings the configured backend URL for the specified bot and returns its health status.
+      operationId: checkBotHealth
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Bot ID to check
+      responses:
+        '200':
+          description: Health check result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  healthy:
+                    type: boolean
+                  status_code:
+                    type: integer
+                  latency_ms:
+                    type: integer
+        '400':
+          description: Invalid bot ID or no backend URL configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Chats ─────────────────────────────────────────────────────────────────
+
+  /api/chats:
+    get:
+      tags: [Chats]
+      summary: List tracked chats
+      description: Returns all chats tracked by a specific bot.
+      operationId: listChats
+      parameters:
+        - name: bot_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Bot ID whose chats to list
+      responses:
+        '200':
+          description: Array of chats
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Chat'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/chats/refresh:
+    get:
+      tags: [Chats]
+      summary: Refresh chat info
+      description: Fetches fresh chat metadata from Telegram and updates the database.
+      operationId: refreshChat
+      parameters:
+        - name: bot_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Bot ID
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Chat ID to refresh
+      responses:
+        '200':
+          description: Updated chat info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Chat'
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/chats/delete:
+    post:
+      tags: [Chats]
+      summary: Delete chat from tracking
+      description: Removes a chat and all its messages from BotMux tracking. Does not affect the actual Telegram chat.
+      operationId: deleteChat
+      parameters:
+        - name: bot_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Bot ID
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Chat ID to remove
+      responses:
+        '200':
+          description: Chat removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Messages ──────────────────────────────────────────────────────────────
+
+  /api/messages:
+    get:
+      tags: [Messages]
+      summary: List messages
+      description: Returns paginated messages for a chat.
+      operationId: listMessages
+      parameters:
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Chat ID
+        - name: bot_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Bot ID
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+          description: Number of messages to return
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+          description: Pagination offset
+      responses:
+        '200':
+          description: Array of messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Message'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/messages/search:
+    get:
+      tags: [Messages]
+      summary: Search messages
+      description: Full-text search within a chat's message history.
+      operationId: searchMessages
+      parameters:
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Chat ID to search in
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Search query
+      responses:
+        '200':
+          description: Matching messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Message'
+        '400':
+          description: Missing query parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/messages/send:
+    post:
+      tags: [Messages]
+      summary: Send a message
+      description: Sends a message via the specified bot to the specified chat. Optionally replies to an existing message.
+      operationId: sendMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+            example:
+              bot_id: 1
+              chat_id: -100123456789
+              text: "Hello from BotMux!"
+      responses:
+        '200':
+          description: Message sent and saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/messages/pin:
+    post:
+      tags: [Messages]
+      summary: Pin a message
+      description: Pins a message in a chat. The bot must have pin permission.
+      operationId: pinMessage
+      parameters:
+        - name: bot_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: message_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Message pinned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '400':
+          description: Invalid parameters or Telegram API error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/messages/unpin:
+    post:
+      tags: [Messages]
+      summary: Unpin a message
+      description: Unpins a specific message in a chat.
+      operationId: unpinMessage
+      parameters:
+        - name: bot_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: message_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Message unpinned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '400':
+          description: Invalid parameters or Telegram API error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/messages/delete:
+    post:
+      tags: [Messages]
+      summary: Delete a message
+      description: Deletes a message from Telegram. The bot must have delete permission.
+      operationId: deleteMessage
+      parameters:
+        - name: bot_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: message_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Message deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '400':
+          description: Invalid parameters or Telegram API error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Users ─────────────────────────────────────────────────────────────────
+
+  /api/users/list:
+    get:
+      tags: [Users]
+      summary: List users
+      description: Lists users who have sent messages in a chat, with optional search.
+      operationId: listUsers
+      parameters:
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Chat ID
+        - name: q
+          in: query
+          schema:
+            type: string
+          description: Search query (matches username or name)
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Array of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/users/ban:
+    post:
+      tags: [Users]
+      summary: Ban a user
+      description: Bans a user from the specified chat. The bot must have ban permission.
+      operationId: banUser
+      parameters:
+        - name: bot_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: user_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User banned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '400':
+          description: Invalid parameters or Telegram API error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/users/unban:
+    post:
+      tags: [Users]
+      summary: Unban a user
+      description: Lifts a ban on a user in the specified chat.
+      operationId: unbanUser
+      parameters:
+        - name: bot_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: user_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User unbanned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '400':
+          description: Invalid parameters or Telegram API error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Admins ────────────────────────────────────────────────────────────────
+
+  /api/admins:
+    get:
+      tags: [Admins]
+      summary: List chat admins
+      description: Returns the current administrator list for a chat as reported by Telegram.
+      operationId: listAdmins
+      parameters:
+        - name: bot_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Array of admin users with permissions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  allOf:
+                    - $ref: '#/components/schemas/User'
+                    - type: object
+                      properties:
+                        custom_title:
+                          type: string
+                        can_be_edited:
+                          type: boolean
+                        permissions:
+                          $ref: '#/components/schemas/AdminPermissions'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/admins/promote:
+    post:
+      tags: [Admins]
+      summary: Promote a user to admin
+      description: Grants admin rights with specified permissions to a user. The bot must be admin with promote permission.
+      operationId: promoteAdmin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromoteRequest'
+            example:
+              bot_id: 1
+              chat_id: -100123456789
+              user_id: 987654321
+              perms:
+                can_delete_messages: true
+                can_pin_messages: true
+                can_invite_users: true
+      responses:
+        '200':
+          description: User promoted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '400':
+          description: Invalid request or Telegram API error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/admins/demote:
+    post:
+      tags: [Admins]
+      summary: Demote an admin
+      description: Removes all admin rights from a user.
+      operationId: demoteAdmin
+      parameters:
+        - name: bot_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: user_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Admin demoted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '400':
+          description: Invalid parameters or Telegram API error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/admins/title:
+    post:
+      tags: [Admins]
+      summary: Set admin title
+      description: Sets a custom title (badge) for an admin user in a chat.
+      operationId: setAdminTitle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminTitleRequest'
+            example:
+              bot_id: 1
+              chat_id: -100123456789
+              user_id: 987654321
+              title: "Moderator"
+      responses:
+        '200':
+          description: Title set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '400':
+          description: Invalid request or Telegram API error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Tags ──────────────────────────────────────────────────────────────────
+
+  /api/tags:
+    get:
+      tags: [Tags]
+      summary: List tags for a chat
+      description: Returns all tags applied to users in the specified chat.
+      operationId: listTags
+      parameters:
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Array of tags
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tag'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/tags/user:
+    get:
+      tags: [Tags]
+      summary: Get tags for a user
+      description: Returns all tags assigned to a specific user in a chat.
+      operationId: getUserTags
+      parameters:
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: user_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Array of tags for the user
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tag'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/tags/add:
+    post:
+      tags: [Tags]
+      summary: Add a tag
+      description: Assigns a tag to a user in a chat.
+      operationId: addTag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagAddRequest'
+            example:
+              bot_id: 1
+              chat_id: -100123456789
+              user_id: 987654321
+              username: "alice"
+              tag: "VIP"
+              color: "#FFD700"
+      responses:
+        '200':
+          description: Tag created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tag'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/tags/remove:
+    post:
+      tags: [Tags]
+      summary: Remove a tag
+      description: Deletes a tag by its record ID.
+      operationId: removeTag
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Tag ID to remove
+      responses:
+        '200':
+          description: Tag removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '400':
+          description: Invalid ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Routes ────────────────────────────────────────────────────────────────
+
+  /api/routes:
+    get:
+      tags: [Routes]
+      summary: List routes
+      description: Returns all message routing rules for a bot.
+      operationId: listRoutes
+      parameters:
+        - name: bot_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Source bot ID
+      responses:
+        '200':
+          description: Array of routes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Route'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/routes/add:
+    post:
+      tags: [Routes]
+      summary: Add a route
+      description: Creates a new message routing rule. Admin only.
+      operationId: addRoute
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RouteAddRequest'
+            example:
+              source_bot_id: 1
+              target_bot_id: 2
+              condition_type: "chat_id"
+              condition_value: "-100123456789"
+              action: "forward"
+              target_chat_id: -100987654321
+              enabled: true
+              description: "Forward support chat to ops bot"
+      responses:
+        '200':
+          description: Route created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Route'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Admin role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/routes/update:
+    post:
+      tags: [Routes]
+      summary: Update a route
+      description: Modifies an existing routing rule. Admin only.
+      operationId: updateRoute
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RouteUpdateRequest'
+      responses:
+        '200':
+          description: Route updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Route'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Admin role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/routes/delete:
+    post:
+      tags: [Routes]
+      summary: Delete a route
+      description: Removes a routing rule. Admin only.
+      operationId: deleteRoute
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Route ID to delete
+      responses:
+        '200':
+          description: Route deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '400':
+          description: Invalid ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Admin role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Analytics ─────────────────────────────────────────────────────────────
+
+  /api/stats:
+    get:
+      tags: [Analytics]
+      summary: Chat statistics
+      description: Returns message counts, active user stats, and activity metrics for a chat.
+      operationId: getChatStats
+      parameters:
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Chat ID
+      responses:
+        '200':
+          description: Chat statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatStats'
+        '400':
+          description: Invalid chat ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Audit Log ─────────────────────────────────────────────────────────────
+
+  /api/adminlog:
+    get:
+      tags: [Audit Log]
+      summary: Get audit log
+      description: Returns a paginated list of administrative actions performed in a chat.
+      operationId: getAuditLog
+      parameters:
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Chat ID
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditLogEntry'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Long Polling ──────────────────────────────────────────────────────────
+
+  /api/updates/poll:
+    get:
+      tags: [Long Polling]
+      summary: Poll for updates
+      description: |
+        Long-polling endpoint that returns buffered Telegram updates in `getUpdates`-compatible format.
+
+        Requires `long_poll_enabled` to be set on the bot. Blocks until new updates are available or `timeout` seconds elapse.
+
+        Multiple clients can poll simultaneously. Use `offset` to acknowledge processed updates (same semantics as Telegram's `getUpdates`).
+      operationId: pollUpdates
+      parameters:
+        - name: bot_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Bot ID to poll updates for
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+          description: Acknowledge updates with update_id < offset (Telegram getUpdates semantics)
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 100
+          description: Maximum number of updates to return
+        - name: timeout
+          in: query
+          schema:
+            type: integer
+            default: 30
+            maximum: 60
+          description: Seconds to wait for updates before returning empty result
+      responses:
+        '200':
+          description: Telegram-compatible getUpdates response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetUpdatesResponse'
+              example:
+                ok: true
+                result:
+                  - update_id: 100000001
+                    message:
+                      message_id: 42
+                      text: "Hello"
+        '400':
+          description: Invalid parameters or long_poll_enabled not set for bot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Telegram Proxy ────────────────────────────────────────────────────────
+
+  /tgapi/bot{token}/{method}:
+    x-internal: true
+    get:
+      tags: [Telegram Proxy]
+      summary: Telegram API proxy (GET)
+      description: |
+        Transparently proxies requests to `api.telegram.org`. No BotMux authentication required — the bot token in the URL is the authorization.
+
+        For `getUpdates`, when `long_poll_enabled` is set on the matching bot, requests are intercepted and served from BotMux's internal `UpdateQueue` instead of forwarding to Telegram.
+      operationId: telegramProxyGet
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Telegram bot token
+        - name: method
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Telegram Bot API method name (e.g., getMe, getUpdates)
+      responses:
+        '200':
+          description: Telegram API response (pass-through)
+          content:
+            application/json:
+              schema:
+                type: object
+                description: Raw Telegram API response
+    post:
+      tags: [Telegram Proxy]
+      summary: Telegram API proxy (POST)
+      description: |
+        Transparently proxies POST requests to `api.telegram.org`.
+
+        For send methods (`sendMessage`, `sendPhoto`, `sendVideo`, etc.), BotMux parses the Telegram response to extract the sent message and saves it to the database, capturing outgoing messages that would not appear in `getUpdates`.
+      operationId: telegramProxyPost
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Telegram bot token
+        - name: method
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Telegram Bot API method name (e.g., sendMessage, sendPhoto)
+      requestBody:
+        description: Telegram API method parameters (passed through as-is)
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Telegram API response (pass-through)
+          content:
+            application/json:
+              schema:
+                type: object
+                description: Raw Telegram API response

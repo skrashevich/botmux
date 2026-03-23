@@ -1,0 +1,69 @@
+---
+title: "Slack Bridge"
+description: "Native Slack integration with Events API and Web API"
+---
+
+BotMux provides native Slack bridge support with full Events API and Web API integration.
+
+## Setup
+
+### 1. Create a Slack App
+
+Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**.
+
+### 2. Configure Bot Token Scopes
+
+Navigate to **OAuth & Permissions** → **Scopes** → **Bot Token Scopes**:
+
+| Scope | Purpose |
+|-------|---------|
+| `chat:write` | Send messages to channels |
+| `users:read` | Resolve user display names |
+| `channels:history` | Receive messages from public channels |
+| `groups:history` | Receive messages from private channels |
+| `im:history` | Receive direct messages |
+| `mpim:history` | Receive group DMs |
+
+### 3. Install App to Workspace
+
+Click **Install to Workspace** and authorize. Copy the **Bot User OAuth Token** (`xoxb-...`).
+
+### 4. Get the Signing Secret
+
+Go to **Basic Information** → **App Credentials** → copy the **Signing Secret**.
+
+### 5. Create a Bridge in BotMux
+
+1. Select a bot → **Bridges** → **Add Bridge**
+2. Set **Protocol** to `Slack`
+3. Set **Config**:
+
+```json
+{
+  "bot_token": "xoxb-your-bot-token",
+  "signing_secret": "your-signing-secret"
+}
+```
+
+4. Enable and save
+
+### 6. Configure Slack Events API
+
+1. In Slack App settings → **Event Subscriptions** → Enable Events
+2. Set **Request URL**: `https://your-botmux-host/bridge/{id}/incoming`
+3. Subscribe to bot events: `message.channels`, `message.groups`, `message.im`, `message.mpim`
+4. Save
+
+<Warning>
+HTTPS is required — Slack does not accept HTTP endpoints.
+</Warning>
+
+### 7. Invite the Bot
+
+```
+/invite @YourBotName
+```
+
+## Security
+
+Requests are verified using HMAC-SHA256 signature (`X-Slack-Signature` header) with 5-minute replay attack protection.

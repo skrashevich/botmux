@@ -1,0 +1,34 @@
+---
+title: "API Keys"
+description: "Programmatic access with Bearer token authentication"
+---
+
+API keys provide programmatic access to BotMux without session cookies.
+
+## Format
+
+Keys use the `bmx_` prefix: `bmx_a1b2c3d4e5f6...`
+
+## Usage
+
+```bash
+curl -H "Authorization: Bearer bmx_your_key_here" \
+  http://localhost:8080/api/bots
+```
+
+## Management
+
+Admin-only via the web UI or API:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/auth/api-keys` | List all API keys |
+| POST | `/api/auth/api-keys/create` | Create a new key |
+| POST | `/api/auth/api-keys/disable` | Disable a key |
+| POST | `/api/auth/api-keys/delete` | Delete a key |
+
+## Security
+
+- Keys are bound to users and inherit their role and permissions
+- Stored as SHA-256 hash in the database
+- The actual key is only shown once at creation time

@@ -1,0 +1,39 @@
+---
+title: "Protocol Bridges"
+description: "Bridge external messaging protocols to Telegram bots"
+---
+
+BotMux bridges external messaging protocols (Slack, webhooks) to Telegram bots. External messages are translated into Telegram Update format and injected into the bot's processing pipeline.
+
+## How It Works
+
+```
+External Protocol              BotMux                         Telegram
+    │                              │                               │
+    │  incoming message            │                               │
+    ├─────────────────────────────►│  translate to Telegram Update  │
+    │                              │  inject into processUpdate()   │
+    │                              ├──────────────────────────────►│
+    │                              │                               │  bot processes
+    │                              │◄──────────────────────────────┤  bot replies
+    │  outgoing message            │                               │
+    │◄─────────────────────────────┤  send via protocol API        │
+```
+
+## Key Features
+
+- All existing features work automatically: routing rules, LLM routing, Source-NAT, message tracking
+- **Bidirectional** — outgoing bot messages are sent back to the source protocol
+- Chat and message mappings maintained for threading and reply context
+- Synthetic chat/user IDs avoid collision with real Telegram IDs
+
+## Supported Protocols
+
+| Protocol | Type | Description |
+|----------|------|-------------|
+| [Slack](/bridges/slack) | Native | Full Slack Events API and Web API integration |
+| [Webhook](/bridges/webhook) | Generic | HTTP webhook for any protocol |
+
+## Management
+
+Bridges are managed per-bot from the web UI (admin only).

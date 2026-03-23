@@ -7,3 +7,4 @@ botmux
 .DS_Store
 .claude
 .omc
+docs/node_modules

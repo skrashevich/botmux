@@ -1,0 +1,17 @@
+---
+title: "Resource Requirements"
+description: "CPU, RAM, and disk requirements"
+---
+
+BotMux is a lightweight single-binary application.
+
+| Resource | Minimum | Recommended | Notes |
+|----------|---------|-------------|-------|
+| **CPU** | 1 core | 1–2 cores | Each bot runs as a lightweight goroutine |
+| **RAM** | 20–30 MB | 50–100 MB | Pure Go, no CGO |
+| **Disk** | ~16 MB (binary) | 100+ MB | SQLite DB grows with messages |
+| **Docker image** | ~25–30 MB | — | Alpine-based, stripped binary |
+
+## Scaling
+
+A minimal VPS (1 vCPU, 512 MB RAM, 10 GB disk) comfortably handles dozens of bots and thousands of messages per day.

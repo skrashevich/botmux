@@ -1,0 +1,48 @@
+---
+title: "Introduction"
+description: "BotMux — web-based command center for managing Telegram bots"
+---
+
+# BotMux
+
+Web-based command center for managing Telegram groups and channels via Bot API, with built-in reverse proxy for legacy webhook bots.
+
+Give it a bot token — it discovers which chats the bot is in, whether it has admin privileges, and provides a full-featured web dashboard for monitoring, analytics, and administration. Manage multiple bots from a single instance.
+
+## Key Features
+
+- **Multi-Bot Management** — run multiple bots in a single instance with per-bot configuration
+- **Reverse Proxy** — poll Telegram and forward updates as webhook POST requests to legacy backends
+- **Long Polling** — Telegram-compatible `getUpdates` endpoint for pull-based integrations
+- **API Proxy** — transparent proxy to `api.telegram.org` that captures outgoing bot messages
+- **Message Monitoring** — real-time collection with full-text search and reply support
+- **Inter-Bot Routing** — route messages between bots with Source-NAT return path
+- **LLM Routing** — AI-based smart routing via any OpenAI-compatible API
+- **Protocol Bridges** — bridge Slack, webhooks, and other protocols to Telegram
+- **Analytics** — message stats, hourly activity, top contributors
+- **Admin Actions** — send, pin, delete messages; ban/unban users; manage admins
+- **Authentication** — session-based auth with roles, API keys, and bot access control
+- **i18n** — English and Russian interface
+
+## How It Works
+
+BotMux takes over long polling for every bot it manages. Only one client can poll a bot token at a time (Telegram limitation), so:
+
+- If your bot currently **polls** (`getUpdates`) — you have two options:
+  1. **Long Polling mode** (recommended, zero code changes) — enable "Long Poll" in bot settings, then point your backend's API base URL to BotMux (`http://botmux:8080/tgapi/`). Your bot keeps calling `getUpdates` as before, but gets updates from BotMux instead of Telegram.
+  2. **Push mode** — switch the backend to accept webhook-style HTTP POST requests. BotMux will poll Telegram and forward updates to your backend URL.
+- If your bot already uses **webhooks** — BotMux will switch it to polling and proxy updates back to the webhook endpoint. No changes needed.
+
+## Architecture
+
+Single Go binary, no external dependencies except SQLite (pure Go driver). Embeds the web UI at compile time.
+
+```
+Telegram ──getUpdates──> BotMux (polling loop per bot)
+                            │
+                            ├── Management: tracks chats/messages in DB
+                            ├── Proxy (push): POST update → Backend URL
+                            ├── Long Poll: buffer in UpdateQueue → clients poll
+                            ├── Routing: match rules → send via Target Bot
+                            └── Bridges: translate external protocols → Telegram
+```

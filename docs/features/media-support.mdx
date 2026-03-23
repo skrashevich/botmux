@@ -1,0 +1,33 @@
+---
+title: "Media Support"
+description: "Inline rendering of photos, videos, stickers, and more"
+---
+
+BotMux renders media content inline in the message feed.
+
+## Supported Types
+
+| Type | Rendering | Notes |
+|------|-----------|-------|
+| Photos | Inline image with lightbox | Click to view full-size |
+| Videos | Embedded video player | |
+| Animations | Inline GIF | |
+| Stickers | Inline image | WebP→PNG auto-conversion |
+| Voice messages | Audio player | |
+| Audio | Audio player | |
+| Documents | Download link | |
+| Video notes | Video player | Round video messages |
+
+## Sticker Conversion
+
+Telegram stickers use WebP format, which may not be supported in all browsers. BotMux automatically converts stickers from WebP to PNG using a pure Go WebP codec.
+
+For animated stickers (TGS format), BotMux uses the sticker thumbnail (static preview) instead of the main file.
+
+## Image Lightbox
+
+Click any photo to view it full-size in an overlay. Close with click or Escape key.
+
+## Media Proxy
+
+Media files are served via `/api/media?file_id=&bot_id=`, which proxies downloads from Telegram with automatic format conversion.

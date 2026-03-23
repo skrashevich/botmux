@@ -1,0 +1,50 @@
+---
+title: "Data Flow"
+description: "How updates flow through BotMux"
+---
+
+```
+Telegram ──getUpdates──> ProxyManager (polling loop per bot)
+                            │
+                            ├── Management: trackChat() / saveMessage() ──> SQLite
+                            ├── Proxy (push): POST update ──> Backend URL
+                            │                    │
+                            │                    └── webhook reply ──> Telegram API
+                            │
+                            ├── Long Poll: enqueue ──> UpdateQueue (ring buffer)
+                            │                              │
+                            │            Backend ──getUpdates──> /tgapi/ ──> dequeue
+                            │
+                            ├── Routing: match rules ──> send via Target Bot ──> Telegram
+                            │                │
+                            │                └── save mapping ──> route_mappings (SQLite)
+                            │
+                            └── Reverse Route: check mappings ──> reply via Source Bot
+                                                                       (Source-NAT return)
+
+Backend ──sendMessage──> /tgapi/ (API proxy) ──> Telegram API
+                            │
+                            └── capture response ──> saveMessage() ──> SQLite
+
+Browser ──HTTP──> Server ──API──> Bot ──Bot API──> Telegram
+                    │
+                    └──queries──> SQLite (read)
+```
+
+## ProxyManager
+
+Each bot runs an independent `pollLoop` goroutine. Dual-mode per bot:
+- **Proxy mode**: forwards raw updates to backend URL
+- **Management mode**: processes updates for chat/message tracking
+
+Both can be active simultaneously.
+
+## UpdateQueue
+
+In-memory ring buffer (1000 updates per bot) with waiter notification pattern. Multiple consumers can poll simultaneously.
+
+## Bot Resolution
+
+API endpoints resolve bots through a fallback chain:
+1. Check registered bots map
+2. Check ProxyManager's managed bots

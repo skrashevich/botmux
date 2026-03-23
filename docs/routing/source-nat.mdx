@@ -1,0 +1,27 @@
+---
+title: "Source-NAT"
+description: "Bidirectional return path for routed messages"
+---
+
+Source-NAT (Source Network Address Translation) enables bidirectional conversations across bots. When a message is routed from Bot A to Bot B, any reply to that message via Bot B is automatically sent back through Bot A to the original chat.
+
+## How It Works
+
+1. User sends message in Chat X → Bot A
+2. Routing rule matches → message forwarded via Bot B to Chat Y
+3. BotMux saves a mapping: `(source_bot, source_chat, source_msg) ↔ (target_bot, target_chat, target_msg)`
+4. User in Chat Y replies to the forwarded message
+5. BotMux checks `route_mappings` → finds the original source
+6. Reply is sent via Bot A back to Chat X
+
+## Bidirectional Tracking
+
+Each reply creates a new mapping entry, enabling ongoing cross-bot dialogs without losing context.
+
+## Loop Protection
+
+Messages originating from bots (not users) are not reverse-routed, preventing infinite loops.
+
+## Storage
+
+Route mappings are stored in the `route_mappings` SQLite table with `RouteID=0` for LLM-generated routes.

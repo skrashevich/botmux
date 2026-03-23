@@ -1,0 +1,41 @@
+---
+title: "Authentication"
+description: "Session-based authentication with roles and API keys"
+---
+
+BotMux provides dual authentication: cookie-based sessions and Bearer API keys.
+
+## Authentication Methods
+
+### Session Cookies
+
+- 30-day expiry
+- HttpOnly, SameSite=Strict
+- Created on login via `/api/auth/login`
+
+### API Keys
+
+- Bearer token in `Authorization` header (`Authorization: Bearer bmx_...`)
+- Keys are bound to users and inherit their role/permissions
+- SHA-256 hashed in the database
+
+## Auth Flow
+
+1. `authMiddleware` checks Bearer token first
+2. Falls back to session cookie
+3. 401 response if neither is valid
+
+## Unauthenticated Endpoints
+
+| Endpoint | Reason |
+|----------|--------|
+| `/` | SPA handles client-side auth |
+| `/api/health` | Health checks |
+| `/tgapi/*` | Backend API proxy (token is the auth) |
+
+## Default Admin
+
+On first run, a default admin account is created:
+- Username: `admin`
+- Password: `admin`
+- `must_change_password` flag is set — the user must change the password on first login

@@ -1,0 +1,29 @@
+---
+title: "CLI Flags"
+description: "Command-line flags for configuring BotMux"
+---
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-token` | `""` | Telegram bot token |
+| `-addr` | `:8080` | HTTP server listen address |
+| `-db` | `botdata.db` | Path to SQLite database file |
+| `-webhook` | `""` | Set webhook URL for receiving updates |
+| `-tg-api` | `""` | Custom Telegram API base URL |
+| `-demo` | `false` | Enable demo mode |
+
+## Examples
+
+```bash
+# Basic
+./botmux -token "TOKEN"
+
+# Custom port and database
+./botmux -token "TOKEN" -addr :9090 -db /data/bots.db
+
+# Webhook mode
+./botmux -token "TOKEN" -webhook "https://myserver.com/tghook"
+
+# Custom Telegram API
+./botmux -token "TOKEN" -tg-api "http://localhost:8081"
+```

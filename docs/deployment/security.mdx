@@ -1,0 +1,30 @@
+---
+title: "Security"
+description: "Security considerations for production deployment"
+---
+
+## Authentication
+
+- Default admin account (`admin`/`admin`) is created on first run with **mandatory password change**
+- Passwords hashed with bcrypt
+- API keys hashed with SHA-256
+
+## Production Recommendations
+
+- Place the server behind a **reverse proxy with HTTPS** (nginx, caddy, etc.)
+- Protect the `botdata.db` file — it contains all collected messages
+- Use environment variables for bot tokens — avoid shell history exposure
+- Restrict network access to the BotMux port
+
+## API Security
+
+- All API endpoints (except health, SPA, and `/tgapi/`) require authentication
+- `/tgapi/` uses the bot token as authorization (same as Telegram API)
+- Session cookies: HttpOnly, SameSite=Strict, 30-day expiry
+- API keys: Bearer token in Authorization header
+
+## Slack Bridge Security
+
+- HMAC-SHA256 signature verification on all incoming events
+- 5-minute replay attack protection
+- Always configure the `signing_secret`

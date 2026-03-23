@@ -1,0 +1,55 @@
+---
+title: "Long Polling"
+description: "Telegram-compatible getUpdates endpoint for pull-based integrations"
+---
+
+Long polling provides a pull-based alternative to push proxy. External bots/backends can call `getUpdates` via BotMux instead of Telegram — no code changes needed, just change the API base URL.
+
+## Setup
+
+1. Enable the **Long Poll** toggle in bot settings
+2. In your backend, change the Telegram API base URL:
+
+```
+# Before (direct to Telegram)
+https://api.telegram.org/bot{TOKEN}/getUpdates
+
+# After (via BotMux)
+http://localhost:8080/tgapi/bot{TOKEN}/getUpdates
+```
+
+That's it — no other code changes needed.
+
+## How It Works
+
+```
+Telegram ──getUpdates──> BotMux (polls Telegram)
+                            │
+                            ├── saves to UpdateQueue (ring buffer, 1000 updates)
+                            ├── Management: tracks chats/messages in DB
+                            │
+Backend ──getUpdates──> /tgapi/ (long poll) ──> returns from UpdateQueue
+Backend ──sendMessage──> /tgapi/ (proxy) ──> Telegram API
+```
+
+## Parameters
+
+Response format is identical to Telegram: `{"ok": true, "result": [...]}`.
+
+| Parameter | Description |
+|-----------|-------------|
+| `offset` | Identifier of the first update to return |
+| `limit` | Maximum number of updates (max 100) |
+| `timeout` | Long polling timeout in seconds (max 60) |
+
+## Features
+
+- **Telegram-compatible** — same request/response format as Telegram API
+- **Multiple clients** can poll the same bot simultaneously
+- **Works alongside push proxy** — both can be active for the same bot
+- **In-memory ring buffer** — 1000 updates per bot with waiter notification
+- **Authenticated API** also available: `GET /api/updates/poll?bot_id=X` (Bearer or session)
+
+<Tip>
+If your backend also sends messages, point those at `/tgapi/` too to capture outgoing messages in BotMux.
+</Tip>

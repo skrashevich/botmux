@@ -1,0 +1,30 @@
+---
+title: "Reverse Proxy"
+description: "Forward Telegram updates to legacy webhook backends"
+---
+
+BotMux can poll Telegram for updates and forward them as webhook POST requests to legacy bot backends (push mode).
+
+## Setup
+
+1. Add or edit a bot in the web UI
+2. Enable **Proxy** mode
+3. Set **Backend URL** to the webhook endpoint (e.g., `https://legacy-bot.example.com/webhook`)
+4. Optionally set **Secret Token** (sent as `X-Telegram-Bot-Api-Secret-Token` header)
+5. Save
+
+BotMux will poll Telegram and forward each update as a POST request to the backend URL.
+
+## Webhook Responses
+
+The backend can respond with a [webhook-style reply](https://core.telegram.org/bots/api#making-requests-when-getting-updates) — JSON with a `method` field — and BotMux will proxy it back to the Telegram API.
+
+## Health Monitoring
+
+- Automatic health checks every 60 seconds
+- Status visible in the dashboard
+- Manual **CHECK WEBHOOK** button in bot detail view
+
+## Dual Mode
+
+Reverse proxy and management mode can be active simultaneously for the same bot. Updates are both forwarded to the backend and tracked in the database.

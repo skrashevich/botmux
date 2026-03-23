@@ -1,0 +1,35 @@
+---
+title: "Users & Roles"
+description: "Role-based access control with bot-level permissions"
+---
+
+## Roles
+
+| Role | Access |
+|------|--------|
+| **admin** | Full access to all bots, user management, routing, LLM config |
+| **user** | Access only to assigned bots |
+
+## Bot Access Control
+
+- Many-to-many relationship: one bot → multiple users, one user → multiple bots
+- Stored in `user_bots` junction table
+- Admins have implicit access to all bots
+
+## User Management
+
+Admin-only operations:
+- Create users with username/password and role
+- Assign bots to users
+- Reset user passwords
+- Promote users to admin
+- Delete users
+
+## UI Enforcement
+
+Non-admin users cannot see:
+- Bot management controls (add/edit/delete)
+- Routing configuration
+- LLM configuration
+- User management panel
+- API key management

@@ -1,0 +1,37 @@
+---
+title: "Docker"
+description: "Run BotMux with Docker and Docker Compose"
+---
+
+## Docker Compose (Recommended)
+
+```bash
+TELEGRAM_BOT_TOKEN="YOUR_TOKEN" docker compose up -d
+```
+
+## Docker Run
+
+```bash
+docker run -d -p 8080:8080 -v botmux-data:/data \
+  -e TELEGRAM_BOT_TOKEN="YOUR_TOKEN" ghcr.io/skrashevich/botmux:main
+```
+
+Data is stored in the `/data` volume inside the container.
+
+## Build Locally
+
+```bash
+# Standard build
+docker build -t botmux .
+
+# Multi-arch build
+docker buildx build --platform linux/amd64,linux/arm64 -t botmux .
+```
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `TELEGRAM_BOT_TOKEN` | Bot token (alternative to `-token` flag) |
+| `TELEGRAM_API_URL` | Custom Telegram API URL |
+| `DEMO_MODE` | Set to `true` for demo mode |

@@ -1,0 +1,48 @@
+---
+title: "How It Works"
+description: "Understanding BotMux's core architecture and update flow"
+---
+
+BotMux takes over long polling for every bot it manages. Only one client can poll a bot token at a time (Telegram limitation).
+
+## Update Flow
+
+```
+Telegram ──getUpdates──> BotMux (polling loop per bot)
+                            │
+                            ├── Management: trackChat() / saveMessage() → SQLite
+                            ├── Proxy (push): POST update → Backend URL
+                            │                    └── webhook reply → Telegram API
+                            ├── Long Poll: enqueue → UpdateQueue (ring buffer)
+                            │                  Backend ──getUpdates──> /tgapi/ → dequeue
+                            ├── Routing: match rules → send via Target Bot → Telegram
+                            │                └── save mapping → route_mappings (SQLite)
+                            └── Reverse Route: check mappings → reply via Source Bot
+                                                                   (Source-NAT return)
+```
+
+## Integration Modes
+
+### Polling Bots
+
+If your bot currently uses `getUpdates`, you have two options:
+
+1. **Long Polling mode** (recommended, zero code changes) — enable "Long Poll" in bot settings, then point your backend's API base URL to BotMux. Your bot keeps calling `getUpdates` as before, but gets updates from BotMux instead of Telegram.
+
+2. **Push mode** — switch the backend to accept webhook-style HTTP POST requests. BotMux will poll Telegram and forward updates to your backend URL.
+
+### Webhook Bots
+
+If your bot already uses webhooks — BotMux will switch it to polling and proxy updates back to the webhook endpoint. No changes needed on the backend side.
+
+## Capturing Outgoing Messages
+
+Telegram's `getUpdates` only returns incoming messages. To capture messages sent by the bot, point your backend at BotMux's API proxy (`/tgapi/`) instead of `api.telegram.org`. The proxy forwards requests transparently and saves outgoing messages to the database.
+
+```
+# Before (direct)
+https://api.telegram.org/bot{TOKEN}/sendMessage
+
+# After (via BotMux proxy)
+http://localhost:8080/tgapi/bot{TOKEN}/sendMessage
+```

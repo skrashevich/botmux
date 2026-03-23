@@ -1,0 +1,30 @@
+---
+title: "Telegram API Proxy"
+description: "Transparent proxy to api.telegram.org with message capture"
+---
+
+The Telegram API proxy at `/tgapi/bot{TOKEN}/{method}` transparently forwards all requests to `api.telegram.org`.
+
+## Usage
+
+Replace the Telegram API base URL in your backend:
+
+```
+# Before
+https://api.telegram.org/bot{TOKEN}/{method}
+
+# After
+http://localhost:8080/tgapi/bot{TOKEN}/{method}
+```
+
+## Authentication
+
+No additional auth required — the bot token in the URL is the authorization (same as Telegram API).
+
+## Message Capture
+
+For send methods, the proxy extracts the sent message from the Telegram response and saves it to the database.
+
+## Long Poll Interception
+
+When `long_poll_enabled` is set, `getUpdates` requests are intercepted and served from BotMux's internal UpdateQueue instead of forwarding to Telegram.

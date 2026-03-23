@@ -1,0 +1,35 @@
+---
+title: "Webhook Bridge"
+description: "Generic HTTP webhook bridge for any protocol"
+---
+
+The generic webhook bridge allows any external system to send and receive messages through a Telegram bot.
+
+## Incoming Messages
+
+Send messages to BotMux:
+
+```
+POST /bridge/{id}/incoming
+Content-Type: application/json
+
+{
+  "chat_id": "external-channel-id",
+  "user_id": "external-user-id",
+  "username": "John Doe",
+  "text": "Hello from external system",
+  "message_id": "msg-123"
+}
+```
+
+## Outgoing Messages
+
+When the bot sends a reply, BotMux forwards it to the configured **Callback URL** via HTTP POST.
+
+## Setup
+
+1. Select a bot → **Bridges** → **Add Bridge**
+2. Set **Protocol** to `webhook`
+3. Set **Callback URL** for outgoing messages
+4. Enable and save
+5. Use the bridge ID in the incoming URL: `/bridge/{id}/incoming`

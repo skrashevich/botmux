@@ -1,0 +1,32 @@
+---
+title: "Audit Log"
+description: "Track all admin actions performed through the web UI"
+---
+
+Every admin action performed through BotMux is recorded in the audit log.
+
+## Tracked Actions
+
+- Bans and unbans
+- Message deletions and pins
+- Admin promotions and demotions
+- Title changes
+- Tag assignments
+
+## Log Entry Fields
+
+| Field | Description |
+|-------|-------------|
+| Action | Type of admin action |
+| Actor | User who performed the action |
+| Target | User or message affected |
+| Details | Additional context |
+| Timestamp | When the action occurred |
+
+## API
+
+```
+GET /api/adminlog?chat_id=&limit=&offset=
+```
+
+Returns paginated audit log entries for the specified chat.

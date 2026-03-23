@@ -1,0 +1,20 @@
+---
+title: "Requirements"
+description: "System requirements for running BotMux"
+---
+
+## Software
+
+- **Go 1.21+** (for building from source)
+- A **Telegram bot token** (create via [@BotFather](https://t.me/BotFather))
+
+No other dependencies. BotMux is a single binary with no external services required.
+
+## Network
+
+| Port | Protocol | Purpose |
+|------|----------|---------|
+| 8080 | HTTP | Web UI and REST API |
+| — | HTTPS (outbound) | `api.telegram.org` (polling per bot) |
+| — | HTTP/HTTPS (outbound) | Backend URL (if proxy mode enabled) |
+| — | HTTP/HTTPS (outbound) | LLM API endpoint (if LLM routing enabled) |

@@ -1,0 +1,37 @@
+---
+title: "Admin Actions"
+description: "Chat administration through the web UI"
+---
+
+BotMux allows performing Telegram admin actions from the web dashboard. All actions require the bot to have corresponding admin rights in the chat.
+
+## Available Actions
+
+### Messages
+- **Send messages** — broadcast to any chat with HTML formatting (`<b>`, `<i>`, `<code>`, `<a>`)
+- **Pin / unpin messages**
+- **Delete messages**
+
+### Users
+- **Ban / unban users**
+
+### Administrators
+- **View all admins** with permission breakdown
+- **Promote users** to admin with granular permissions:
+  - Manage chat, Delete messages, Restrict members
+  - Invite users, Pin messages, Change chat info
+  - Promote other members
+- **Edit permissions** of existing admins
+- **Set custom titles** (up to 16 characters)
+- **Demote** administrators
+
+## Audit Log
+
+Every admin action performed through the web UI is recorded:
+- Bans and unbans
+- Message deletions and pins
+- Admin promotions and demotions
+- Title changes
+- Tag assignments
+
+The log shows action type, actor, target, details, and timestamp.

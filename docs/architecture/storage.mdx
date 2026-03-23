@@ -1,0 +1,37 @@
+---
+title: "Storage"
+description: "SQLite database schema and storage model"
+---
+
+BotMux uses SQLite with WAL mode. The database is created automatically on first run with automatic schema migrations.
+
+## Tables
+
+| Table | Description |
+|-------|-------------|
+| `bots` | Bot configurations (token, modes, backend URL, status, health) |
+| `chats` | Tracked chats/channels (compound PK: `bot_id` + `chat_id`) |
+| `messages` | All observed messages (composite PK: `chat_id` + `message_id`) |
+| `known_users` | Users seen in chats |
+| `admin_log` | Audit trail of web UI actions |
+| `user_tags` | Custom per-chat user classifications |
+| `routes` | Inter-bot routing rules |
+| `route_mappings` | Source-NAT tracking for bidirectional routing |
+| `auth_users` | User accounts |
+| `auth_sessions` | Login sessions |
+| `user_bots` | User↔bot access (many-to-many junction table) |
+| `api_keys` | API key storage |
+| `llm_config` | LLM routing configuration |
+| `bridges` | Protocol bridge configurations |
+| `bridge_chat_mappings` | External↔Telegram chat mappings |
+| `bridge_msg_mappings` | External↔Telegram message mappings |
+
+## Database File
+
+Default: `botdata.db` in the working directory. Override with `-db` flag.
+
+Demo mode uses a separate `demo.db`.
+
+## Migrations
+
+Schema migrations run automatically on startup. No manual migration steps needed.

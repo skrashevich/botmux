@@ -1,0 +1,48 @@
+---
+title: "API Proxy"
+description: "Transparent Telegram API proxy that captures outgoing bot messages"
+---
+
+BotMux provides a Telegram API proxy at `/tgapi/` that transparently forwards requests to `api.telegram.org` and captures outgoing messages.
+
+## Why Use the API Proxy?
+
+Telegram's `getUpdates` only returns incoming messages — messages sent by the bot itself are not included. The API proxy solves this by intercepting send methods and saving the sent message to the database.
+
+## Setup
+
+Change your backend's API base URL:
+
+```
+# Before (direct)
+https://api.telegram.org/bot{TOKEN}/sendMessage
+
+# After (via BotMux proxy)
+http://localhost:8080/tgapi/bot{TOKEN}/sendMessage
+```
+
+The proxy forwards all requests to Telegram and returns responses unchanged.
+
+## Captured Methods
+
+| Method | Description |
+|--------|-------------|
+| `sendMessage` | Text messages |
+| `sendPhoto` | Photos |
+| `sendAudio` | Audio files |
+| `sendDocument` | Documents |
+| `sendVideo` | Videos |
+| `sendAnimation` | GIFs/animations |
+| `sendVoice` | Voice messages |
+| `sendVideoNote` | Video notes |
+| `sendSticker` | Stickers |
+| `sendLocation` | Locations |
+| `sendVenue` | Venues |
+| `sendContact` | Contacts |
+| `sendPoll` | Polls |
+| `sendDice` | Dice |
+| `forwardMessage` | Forwarded messages |
+| `copyMessage` | Copied messages |
+| `editMessageText` | Edited messages |
+
+The **API Proxy URL** is displayed in the bot detail view when proxy mode is enabled (click to copy).
