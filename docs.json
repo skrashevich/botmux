@@ -38,82 +38,82 @@
               {
                 "group": "Getting Started",
                 "pages": [
-                  "docs/index",
-                  "docs/quickstart",
-                  "docs/installation",
-                  "docs/docker"
+                  "docs/en/index",
+                  "docs/en/quickstart",
+                  "docs/en/installation",
+                  "docs/en/docker"
                 ]
               },
               {
                 "group": "Core Concepts",
                 "pages": [
-                  "docs/concepts/how-it-works",
-                  "docs/concepts/multi-bot",
-                  "docs/concepts/bot-setup"
+                  "docs/en/concepts/how-it-works",
+                  "docs/en/concepts/multi-bot",
+                  "docs/en/concepts/bot-setup"
                 ]
               },
               {
                 "group": "Features",
                 "pages": [
-                  "docs/features/reverse-proxy",
-                  "docs/features/long-polling",
-                  "docs/features/api-proxy",
-                  "docs/features/message-monitoring",
-                  "docs/features/analytics",
-                  "docs/features/admin-actions",
-                  "docs/features/user-tags",
-                  "docs/features/audit-log",
-                  "docs/features/media-support",
-                  "docs/features/i18n"
+                  "docs/en/features/reverse-proxy",
+                  "docs/en/features/long-polling",
+                  "docs/en/features/api-proxy",
+                  "docs/en/features/message-monitoring",
+                  "docs/en/features/analytics",
+                  "docs/en/features/admin-actions",
+                  "docs/en/features/user-tags",
+                  "docs/en/features/audit-log",
+                  "docs/en/features/media-support",
+                  "docs/en/features/i18n"
                 ]
               },
               {
                 "group": "Routing",
                 "pages": [
-                  "docs/routing/inter-bot-routing",
-                  "docs/routing/llm-routing",
-                  "docs/routing/source-nat"
+                  "docs/en/routing/inter-bot-routing",
+                  "docs/en/routing/llm-routing",
+                  "docs/en/routing/source-nat"
                 ]
               },
               {
                 "group": "Bridges",
                 "pages": [
-                  "docs/bridges/overview",
-                  "docs/bridges/slack",
-                  "docs/bridges/webhook"
+                  "docs/en/bridges/overview",
+                  "docs/en/bridges/slack",
+                  "docs/en/bridges/webhook"
                 ]
               },
               {
                 "group": "Authentication",
                 "pages": [
-                  "docs/auth/overview",
-                  "docs/auth/users-and-roles",
-                  "docs/auth/api-keys"
+                  "docs/en/auth/overview",
+                  "docs/en/auth/users-and-roles",
+                  "docs/en/auth/api-keys"
                 ]
               },
               {
                 "group": "Configuration",
                 "pages": [
-                  "docs/configuration/cli-flags",
-                  "docs/configuration/environment-variables",
-                  "docs/configuration/custom-telegram-api",
-                  "docs/configuration/demo-mode"
+                  "docs/en/configuration/cli-flags",
+                  "docs/en/configuration/environment-variables",
+                  "docs/en/configuration/custom-telegram-api",
+                  "docs/en/configuration/demo-mode"
                 ]
               },
               {
                 "group": "Architecture",
                 "pages": [
-                  "docs/architecture/overview",
-                  "docs/architecture/data-flow",
-                  "docs/architecture/storage"
+                  "docs/en/architecture/overview",
+                  "docs/en/architecture/data-flow",
+                  "docs/en/architecture/storage"
                 ]
               },
               {
                 "group": "Deployment",
                 "pages": [
-                  "docs/deployment/requirements",
-                  "docs/deployment/resource-requirements",
-                  "docs/deployment/security"
+                  "docs/en/deployment/requirements",
+                  "docs/en/deployment/resource-requirements",
+                  "docs/en/deployment/security"
                 ]
               }
             ]
@@ -126,80 +126,80 @@
               {
                 "group": "Bots",
                 "pages": [
-                  "docs/api-reference/bots/list",
-                  "docs/api-reference/bots/add",
-                  "docs/api-reference/bots/update",
-                  "docs/api-reference/bots/delete",
-                  "docs/api-reference/bots/validate",
-                  "docs/api-reference/bots/health"
+                  "docs/en/api-reference/bots/list",
+                  "docs/en/api-reference/bots/add",
+                  "docs/en/api-reference/bots/update",
+                  "docs/en/api-reference/bots/delete",
+                  "docs/en/api-reference/bots/validate",
+                  "docs/en/api-reference/bots/health"
                 ]
               },
               {
                 "group": "Chats",
                 "pages": [
-                  "docs/api-reference/chats/list",
-                  "docs/api-reference/chats/refresh",
-                  "docs/api-reference/chats/delete"
+                  "docs/en/api-reference/chats/list",
+                  "docs/en/api-reference/chats/refresh",
+                  "docs/en/api-reference/chats/delete"
                 ]
               },
               {
                 "group": "Messages",
                 "pages": [
-                  "docs/api-reference/messages/list",
-                  "docs/api-reference/messages/search",
-                  "docs/api-reference/messages/send",
-                  "docs/api-reference/messages/pin",
-                  "docs/api-reference/messages/unpin",
-                  "docs/api-reference/messages/delete"
+                  "docs/en/api-reference/messages/list",
+                  "docs/en/api-reference/messages/search",
+                  "docs/en/api-reference/messages/send",
+                  "docs/en/api-reference/messages/pin",
+                  "docs/en/api-reference/messages/unpin",
+                  "docs/en/api-reference/messages/delete"
                 ]
               },
               {
                 "group": "Users",
                 "pages": [
-                  "docs/api-reference/users/list",
-                  "docs/api-reference/users/ban",
-                  "docs/api-reference/users/unban"
+                  "docs/en/api-reference/users/list",
+                  "docs/en/api-reference/users/ban",
+                  "docs/en/api-reference/users/unban"
                 ]
               },
               {
                 "group": "Admins",
                 "pages": [
-                  "docs/api-reference/admins/list",
-                  "docs/api-reference/admins/promote",
-                  "docs/api-reference/admins/demote",
-                  "docs/api-reference/admins/title"
+                  "docs/en/api-reference/admins/list",
+                  "docs/en/api-reference/admins/promote",
+                  "docs/en/api-reference/admins/demote",
+                  "docs/en/api-reference/admins/title"
                 ]
               },
               {
                 "group": "Tags",
                 "pages": [
-                  "docs/api-reference/tags/list",
-                  "docs/api-reference/tags/user-tags",
-                  "docs/api-reference/tags/add",
-                  "docs/api-reference/tags/remove"
+                  "docs/en/api-reference/tags/list",
+                  "docs/en/api-reference/tags/user-tags",
+                  "docs/en/api-reference/tags/add",
+                  "docs/en/api-reference/tags/remove"
                 ]
               },
               {
                 "group": "Routes",
                 "pages": [
-                  "docs/api-reference/routes/list",
-                  "docs/api-reference/routes/add",
-                  "docs/api-reference/routes/update",
-                  "docs/api-reference/routes/delete"
+                  "docs/en/api-reference/routes/list",
+                  "docs/en/api-reference/routes/add",
+                  "docs/en/api-reference/routes/update",
+                  "docs/en/api-reference/routes/delete"
                 ]
               },
               {
                 "group": "Analytics & Audit",
                 "pages": [
-                  "docs/api-reference/analytics/stats",
-                  "docs/api-reference/audit-log/list"
+                  "docs/en/api-reference/analytics/stats",
+                  "docs/en/api-reference/audit-log/list"
                 ]
               },
               {
                 "group": "Long Polling & Proxy",
                 "pages": [
-                  "docs/api-reference/long-polling/poll",
-                  "docs/api-reference/telegram-proxy/proxy"
+                  "docs/en/api-reference/long-polling/poll",
+                  "docs/en/api-reference/telegram-proxy/proxy"
                 ]
               }
             ]
@@ -217,82 +217,82 @@
               {
                 "group": "Начало работы",
                 "pages": [
-                  "ru/docs/index",
-                  "ru/docs/quickstart",
-                  "ru/docs/installation",
-                  "ru/docs/docker"
+                  "docs/ru/index",
+                  "docs/ru/quickstart",
+                  "docs/ru/installation",
+                  "docs/ru/docker"
                 ]
               },
               {
                 "group": "Основные концепции",
                 "pages": [
-                  "ru/docs/concepts/how-it-works",
-                  "ru/docs/concepts/multi-bot",
-                  "ru/docs/concepts/bot-setup"
+                  "docs/ru/concepts/how-it-works",
+                  "docs/ru/concepts/multi-bot",
+                  "docs/ru/concepts/bot-setup"
                 ]
               },
               {
                 "group": "Функции",
                 "pages": [
-                  "ru/docs/features/reverse-proxy",
-                  "ru/docs/features/long-polling",
-                  "ru/docs/features/api-proxy",
-                  "ru/docs/features/message-monitoring",
-                  "ru/docs/features/analytics",
-                  "ru/docs/features/admin-actions",
-                  "ru/docs/features/user-tags",
-                  "ru/docs/features/audit-log",
-                  "ru/docs/features/media-support",
-                  "ru/docs/features/i18n"
+                  "docs/ru/features/reverse-proxy",
+                  "docs/ru/features/long-polling",
+                  "docs/ru/features/api-proxy",
+                  "docs/ru/features/message-monitoring",
+                  "docs/ru/features/analytics",
+                  "docs/ru/features/admin-actions",
+                  "docs/ru/features/user-tags",
+                  "docs/ru/features/audit-log",
+                  "docs/ru/features/media-support",
+                  "docs/ru/features/i18n"
                 ]
               },
               {
                 "group": "Маршрутизация",
                 "pages": [
-                  "ru/docs/routing/inter-bot-routing",
-                  "ru/docs/routing/llm-routing",
-                  "ru/docs/routing/source-nat"
+                  "docs/ru/routing/inter-bot-routing",
+                  "docs/ru/routing/llm-routing",
+                  "docs/ru/routing/source-nat"
                 ]
               },
               {
                 "group": "Мосты",
                 "pages": [
-                  "ru/docs/bridges/overview",
-                  "ru/docs/bridges/slack",
-                  "ru/docs/bridges/webhook"
+                  "docs/ru/bridges/overview",
+                  "docs/ru/bridges/slack",
+                  "docs/ru/bridges/webhook"
                 ]
               },
               {
                 "group": "Аутентификация",
                 "pages": [
-                  "ru/docs/auth/overview",
-                  "ru/docs/auth/users-and-roles",
-                  "ru/docs/auth/api-keys"
+                  "docs/ru/auth/overview",
+                  "docs/ru/auth/users-and-roles",
+                  "docs/ru/auth/api-keys"
                 ]
               },
               {
                 "group": "Конфигурация",
                 "pages": [
-                  "ru/docs/configuration/cli-flags",
-                  "ru/docs/configuration/environment-variables",
-                  "ru/docs/configuration/custom-telegram-api",
-                  "ru/docs/configuration/demo-mode"
+                  "docs/ru/configuration/cli-flags",
+                  "docs/ru/configuration/environment-variables",
+                  "docs/ru/configuration/custom-telegram-api",
+                  "docs/ru/configuration/demo-mode"
                 ]
               },
               {
                 "group": "Архитектура",
                 "pages": [
-                  "ru/docs/architecture/overview",
-                  "ru/docs/architecture/data-flow",
-                  "ru/docs/architecture/storage"
+                  "docs/ru/architecture/overview",
+                  "docs/ru/architecture/data-flow",
+                  "docs/ru/architecture/storage"
                 ]
               },
               {
                 "group": "Развертывание",
                 "pages": [
-                  "ru/docs/deployment/requirements",
-                  "ru/docs/deployment/resource-requirements",
-                  "ru/docs/deployment/security"
+                  "docs/ru/deployment/requirements",
+                  "docs/ru/deployment/resource-requirements",
+                  "docs/ru/deployment/security"
                 ]
               }
             ]
@@ -305,80 +305,80 @@
               {
                 "group": "Боты",
                 "pages": [
-                  "ru/docs/api-reference/bots/list",
-                  "ru/docs/api-reference/bots/add",
-                  "ru/docs/api-reference/bots/update",
-                  "ru/docs/api-reference/bots/delete",
-                  "ru/docs/api-reference/bots/validate",
-                  "ru/docs/api-reference/bots/health"
+                  "docs/ru/api-reference/bots/list",
+                  "docs/ru/api-reference/bots/add",
+                  "docs/ru/api-reference/bots/update",
+                  "docs/ru/api-reference/bots/delete",
+                  "docs/ru/api-reference/bots/validate",
+                  "docs/ru/api-reference/bots/health"
                 ]
               },
               {
                 "group": "Чаты",
                 "pages": [
-                  "ru/docs/api-reference/chats/list",
-                  "ru/docs/api-reference/chats/refresh",
-                  "ru/docs/api-reference/chats/delete"
+                  "docs/ru/api-reference/chats/list",
+                  "docs/ru/api-reference/chats/refresh",
+                  "docs/ru/api-reference/chats/delete"
                 ]
               },
               {
                 "group": "Сообщения",
                 "pages": [
-                  "ru/docs/api-reference/messages/list",
-                  "ru/docs/api-reference/messages/search",
-                  "ru/docs/api-reference/messages/send",
-                  "ru/docs/api-reference/messages/pin",
-                  "ru/docs/api-reference/messages/unpin",
-                  "ru/docs/api-reference/messages/delete"
+                  "docs/ru/api-reference/messages/list",
+                  "docs/ru/api-reference/messages/search",
+                  "docs/ru/api-reference/messages/send",
+                  "docs/ru/api-reference/messages/pin",
+                  "docs/ru/api-reference/messages/unpin",
+                  "docs/ru/api-reference/messages/delete"
                 ]
               },
               {
                 "group": "Пользователи",
                 "pages": [
-                  "ru/docs/api-reference/users/list",
-                  "ru/docs/api-reference/users/ban",
-                  "ru/docs/api-reference/users/unban"
+                  "docs/ru/api-reference/users/list",
+                  "docs/ru/api-reference/users/ban",
+                  "docs/ru/api-reference/users/unban"
                 ]
               },
               {
                 "group": "Администраторы",
                 "pages": [
-                  "ru/docs/api-reference/admins/list",
-                  "ru/docs/api-reference/admins/promote",
-                  "ru/docs/api-reference/admins/demote",
-                  "ru/docs/api-reference/admins/title"
+                  "docs/ru/api-reference/admins/list",
+                  "docs/ru/api-reference/admins/promote",
+                  "docs/ru/api-reference/admins/demote",
+                  "docs/ru/api-reference/admins/title"
                 ]
               },
               {
                 "group": "Теги",
                 "pages": [
-                  "ru/docs/api-reference/tags/list",
-                  "ru/docs/api-reference/tags/user-tags",
-                  "ru/docs/api-reference/tags/add",
-                  "ru/docs/api-reference/tags/remove"
+                  "docs/ru/api-reference/tags/list",
+                  "docs/ru/api-reference/tags/user-tags",
+                  "docs/ru/api-reference/tags/add",
+                  "docs/ru/api-reference/tags/remove"
                 ]
               },
               {
                 "group": "Маршруты",
                 "pages": [
-                  "ru/docs/api-reference/routes/list",
-                  "ru/docs/api-reference/routes/add",
-                  "ru/docs/api-reference/routes/update",
-                  "ru/docs/api-reference/routes/delete"
+                  "docs/ru/api-reference/routes/list",
+                  "docs/ru/api-reference/routes/add",
+                  "docs/ru/api-reference/routes/update",
+                  "docs/ru/api-reference/routes/delete"
                 ]
               },
               {
                 "group": "Аналитика и аудит",
                 "pages": [
-                  "ru/docs/api-reference/analytics/stats",
-                  "ru/docs/api-reference/audit-log/list"
+                  "docs/ru/api-reference/analytics/stats",
+                  "docs/ru/api-reference/audit-log/list"
                 ]
               },
               {
                 "group": "Длинный опрос и прокси",
                 "pages": [
-                  "ru/docs/api-reference/long-polling/poll",
-                  "ru/docs/api-reference/telegram-proxy/proxy"
+                  "docs/ru/api-reference/long-polling/poll",
+                  "docs/ru/api-reference/telegram-proxy/proxy"
                 ]
               }
             ]
@@ -396,82 +396,82 @@
               {
                 "group": "入门",
                 "pages": [
-                  "zh/docs/index",
-                  "zh/docs/quickstart",
-                  "zh/docs/installation",
-                  "zh/docs/docker"
+                  "docs/zh/index",
+                  "docs/zh/quickstart",
+                  "docs/zh/installation",
+                  "docs/zh/docker"
                 ]
               },
               {
                 "group": "核心概念",
                 "pages": [
-                  "zh/docs/concepts/how-it-works",
-                  "zh/docs/concepts/multi-bot",
-                  "zh/docs/concepts/bot-setup"
+                  "docs/zh/concepts/how-it-works",
+                  "docs/zh/concepts/multi-bot",
+                  "docs/zh/concepts/bot-setup"
                 ]
               },
               {
                 "group": "功能",
                 "pages": [
-                  "zh/docs/features/reverse-proxy",
-                  "zh/docs/features/long-polling",
-                  "zh/docs/features/api-proxy",
-                  "zh/docs/features/message-monitoring",
-                  "zh/docs/features/analytics",
-                  "zh/docs/features/admin-actions",
-                  "zh/docs/features/user-tags",
-                  "zh/docs/features/audit-log",
-                  "zh/docs/features/media-support",
-                  "zh/docs/features/i18n"
+                  "docs/zh/features/reverse-proxy",
+                  "docs/zh/features/long-polling",
+                  "docs/zh/features/api-proxy",
+                  "docs/zh/features/message-monitoring",
+                  "docs/zh/features/analytics",
+                  "docs/zh/features/admin-actions",
+                  "docs/zh/features/user-tags",
+                  "docs/zh/features/audit-log",
+                  "docs/zh/features/media-support",
+                  "docs/zh/features/i18n"
                 ]
               },
               {
                 "group": "路由",
                 "pages": [
-                  "zh/docs/routing/inter-bot-routing",
-                  "zh/docs/routing/llm-routing",
-                  "zh/docs/routing/source-nat"
+                  "docs/zh/routing/inter-bot-routing",
+                  "docs/zh/routing/llm-routing",
+                  "docs/zh/routing/source-nat"
                 ]
               },
               {
                 "group": "桥接",
                 "pages": [
-                  "zh/docs/bridges/overview",
-                  "zh/docs/bridges/slack",
-                  "zh/docs/bridges/webhook"
+                  "docs/zh/bridges/overview",
+                  "docs/zh/bridges/slack",
+                  "docs/zh/bridges/webhook"
                 ]
               },
               {
                 "group": "身份验证",
                 "pages": [
-                  "zh/docs/auth/overview",
-                  "zh/docs/auth/users-and-roles",
-                  "zh/docs/auth/api-keys"
+                  "docs/zh/auth/overview",
+                  "docs/zh/auth/users-and-roles",
+                  "docs/zh/auth/api-keys"
                 ]
               },
               {
                 "group": "配置",
                 "pages": [
-                  "zh/docs/configuration/cli-flags",
-                  "zh/docs/configuration/environment-variables",
-                  "zh/docs/configuration/custom-telegram-api",
-                  "zh/docs/configuration/demo-mode"
+                  "docs/zh/configuration/cli-flags",
+                  "docs/zh/configuration/environment-variables",
+                  "docs/zh/configuration/custom-telegram-api",
+                  "docs/zh/configuration/demo-mode"
                 ]
               },
               {
                 "group": "架构",
                 "pages": [
-                  "zh/docs/architecture/overview",
-                  "zh/docs/architecture/data-flow",
-                  "zh/docs/architecture/storage"
+                  "docs/zh/architecture/overview",
+                  "docs/zh/architecture/data-flow",
+                  "docs/zh/architecture/storage"
                 ]
               },
               {
                 "group": "部署",
                 "pages": [
-                  "zh/docs/deployment/requirements",
-                  "zh/docs/deployment/resource-requirements",
-                  "zh/docs/deployment/security"
+                  "docs/zh/deployment/requirements",
+                  "docs/zh/deployment/resource-requirements",
+                  "docs/zh/deployment/security"
                 ]
               }
             ]
@@ -484,80 +484,80 @@
               {
                 "group": "机器人",
                 "pages": [
-                  "zh/docs/api-reference/bots/list",
-                  "zh/docs/api-reference/bots/add",
-                  "zh/docs/api-reference/bots/update",
-                  "zh/docs/api-reference/bots/delete",
-                  "zh/docs/api-reference/bots/validate",
-                  "zh/docs/api-reference/bots/health"
+                  "docs/zh/api-reference/bots/list",
+                  "docs/zh/api-reference/bots/add",
+                  "docs/zh/api-reference/bots/update",
+                  "docs/zh/api-reference/bots/delete",
+                  "docs/zh/api-reference/bots/validate",
+                  "docs/zh/api-reference/bots/health"
                 ]
               },
               {
                 "group": "聊天",
                 "pages": [
-                  "zh/docs/api-reference/chats/list",
-                  "zh/docs/api-reference/chats/refresh",
-                  "zh/docs/api-reference/chats/delete"
+                  "docs/zh/api-reference/chats/list",
+                  "docs/zh/api-reference/chats/refresh",
+                  "docs/zh/api-reference/chats/delete"
                 ]
               },
               {
                 "group": "消息",
                 "pages": [
-                  "zh/docs/api-reference/messages/list",
-                  "zh/docs/api-reference/messages/search",
-                  "zh/docs/api-reference/messages/send",
-                  "zh/docs/api-reference/messages/pin",
-                  "zh/docs/api-reference/messages/unpin",
-                  "zh/docs/api-reference/messages/delete"
+                  "docs/zh/api-reference/messages/list",
+                  "docs/zh/api-reference/messages/search",
+                  "docs/zh/api-reference/messages/send",
+                  "docs/zh/api-reference/messages/pin",
+                  "docs/zh/api-reference/messages/unpin",
+                  "docs/zh/api-reference/messages/delete"
                 ]
               },
               {
                 "group": "用户",
                 "pages": [
-                  "zh/docs/api-reference/users/list",
-                  "zh/docs/api-reference/users/ban",
-                  "zh/docs/api-reference/users/unban"
+                  "docs/zh/api-reference/users/list",
+                  "docs/zh/api-reference/users/ban",
+                  "docs/zh/api-reference/users/unban"
                 ]
               },
               {
                 "group": "管理员",
                 "pages": [
-                  "zh/docs/api-reference/admins/list",
-                  "zh/docs/api-reference/admins/promote",
-                  "zh/docs/api-reference/admins/demote",
-                  "zh/docs/api-reference/admins/title"
+                  "docs/zh/api-reference/admins/list",
+                  "docs/zh/api-reference/admins/promote",
+                  "docs/zh/api-reference/admins/demote",
+                  "docs/zh/api-reference/admins/title"
                 ]
               },
               {
                 "group": "标签",
                 "pages": [
-                  "zh/docs/api-reference/tags/list",
-                  "zh/docs/api-reference/tags/user-tags",
-                  "zh/docs/api-reference/tags/add",
-                  "zh/docs/api-reference/tags/remove"
+                  "docs/zh/api-reference/tags/list",
+                  "docs/zh/api-reference/tags/user-tags",
+                  "docs/zh/api-reference/tags/add",
+                  "docs/zh/api-reference/tags/remove"
                 ]
               },
               {
                 "group": "路由",
                 "pages": [
-                  "zh/docs/api-reference/routes/list",
-                  "zh/docs/api-reference/routes/add",
-                  "zh/docs/api-reference/routes/update",
-                  "zh/docs/api-reference/routes/delete"
+                  "docs/zh/api-reference/routes/list",
+                  "docs/zh/api-reference/routes/add",
+                  "docs/zh/api-reference/routes/update",
+                  "docs/zh/api-reference/routes/delete"
                 ]
               },
               {
                 "group": "分析与审计",
                 "pages": [
-                  "zh/docs/api-reference/analytics/stats",
-                  "zh/docs/api-reference/audit-log/list"
+                  "docs/zh/api-reference/analytics/stats",
+                  "docs/zh/api-reference/audit-log/list"
                 ]
               },
               {
                 "group": "长轮询与代理",
                 "pages": [
-                  "zh/docs/api-reference/long-polling/poll",
-                  "zh/docs/api-reference/telegram-proxy/proxy"
+                  "docs/zh/api-reference/long-polling/poll",
+                  "docs/zh/api-reference/telegram-proxy/proxy"
                 ]
               }
             ]
@@ -566,15 +566,23 @@
       }
     ]
   },
-  "changelog": "docs/changelog",
+  "changelog": "docs/en/changelog",
   "redirects": [
     {
+      "source": "/ru/docs/:slug*",
+      "destination": "/docs/ru/:slug*"
+    },
+    {
+      "source": "/zh/docs/:slug*",
+      "destination": "/docs/zh/:slug*"
+    },
+    {
       "source": "/ru/changelog/:slug*",
-      "destination": "/changelog/:slug*"
+      "destination": "/docs/ru/changelog/:slug*"
     },
     {
       "source": "/zh/changelog/:slug*",
-      "destination": "/changelog/:slug*"
+      "destination": "/docs/zh/changelog/:slug*"
     }
   ],
   "footer": {
