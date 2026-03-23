@@ -717,6 +717,14 @@ body::before {
   color: var(--green); letter-spacing: 0.5px;
 }
 .sidebar-footer-role.role-user { color: var(--text3); }
+.sidebar-footer-version {
+  font-family: var(--ff-mono); font-size: 9px; color: var(--text3);
+  cursor: pointer; padding: 2px 6px; border-radius: var(--radius-sm);
+  transition: var(--transition); white-space: nowrap;
+}
+.sidebar-footer-version:hover { color: var(--cyan); background: rgba(34,211,238,0.08); }
+.sidebar-footer-version.checking { opacity: 0.5; pointer-events: none; }
+.sidebar-footer-version.up-to-date { color: var(--green); }
 .sidebar-footer-actions { display: flex; gap: 4px; }
 .sidebar-footer .btn { padding: 4px 8px; font-size: 9px; }
 
@@ -1414,6 +1422,7 @@ body::before { display: none; }
       <div class="sidebar-footer-name" id="footerUserName"></div>
       <div class="sidebar-footer-role" id="footerUserRole"></div>
     </div>
+    <div class="sidebar-footer-version" id="footerVersion" onclick="manualCheckForUpdates()" title=""></div>
     <div class="sidebar-footer-actions">
       <button class="btn" onclick="showLogsPanel()" id="logsBtn" style="display:none;color:var(--green);border-color:var(--green);padding:4px 8px;font-size:9px">LOGS</button>
       <button class="btn" onclick="showAPIKeysModal()" id="apiKeysBtn" style="display:none;color:var(--amber);border-color:var(--amber);padding:4px 8px;font-size:9px">API</button>
@@ -2343,6 +2352,9 @@ function applyLang() {
   document.querySelector('.section-label').childNodes[0].textContent = t('bots') + '\n    ';
   const chatsLabel = document.getElementById('chatsLabel');
   if (chatsLabel) chatsLabel.textContent = t('chats');
+  // version tooltip
+  const fv = document.getElementById('footerVersion');
+  if (fv) fv.title = t('check_for_updates');
   // empty state
   document.querySelector('#emptyState h3').textContent = t('select_bot');
   document.querySelector('#emptyState p').textContent = t('select_bot_hint');
@@ -2449,13 +2461,14 @@ function updateModalLabels() {
   }
   // route modal labels
   const rmLabels = document.querySelectorAll('#routeModal .modal-field > label');
-  if (rmLabels.length >= 6) {
-    rmLabels[0].textContent = t('when_condition');
-    rmLabels[1].textContent = t('match_value');
-    rmLabels[2].textContent = t('then_action');
-    rmLabels[3].textContent = t('via_target_bot');
-    rmLabels[4].innerHTML = `${t('to_target_chat')} <span style="color:var(--text3);text-transform:none">${t('target_chat_hint')}</span>`;
-    rmLabels[5].textContent = t('note');
+  if (rmLabels.length >= 7) {
+    // rmLabels[0] is Source Chat — updated separately by ID below
+    rmLabels[1].textContent = t('when_condition');
+    rmLabels[2].textContent = t('match_value');
+    rmLabels[3].textContent = t('then_action');
+    rmLabels[4].textContent = t('via_target_bot');
+    rmLabels[5].innerHTML = `${t('to_target_chat')} <span style="color:var(--text3);text-transform:none">${t('target_chat_hint')}</span>`;
+    rmLabels[6].textContent = t('note');
   }
   // route modal source chat label
   const srcChatLabel = document.getElementById('routeSourceChatLabel');
@@ -4026,13 +4039,28 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeLight
 // ===== VERSION CHECK & UPDATE BANNER =====
 
 let _latestVersion = null;
+let _currentVersion = null;
+
+function updateFooterVersion(ver, status) {
+  const el = document.getElementById('footerVersion');
+  if (!el) return;
+  el.textContent = ver || '';
+  el.title = t('check_for_updates');
+  el.classList.remove('checking', 'up-to-date');
+  if (status === 'checking') el.classList.add('checking');
+  if (status === 'up-to-date') el.classList.add('up-to-date');
+}
 
 async function checkForUpdates() {
-  if (!isAdmin()) return;
   try {
     const res = await fetch('/api/version');
     const data = await res.json();
+
+    _currentVersion = data.version?.version || '';
+    updateFooterVersion(_currentVersion);
+
     const update = data.update;
+    if (!isAdmin()) return;
     if (!update || !update.update_available) return;
 
     _latestVersion = update.latest_version;
@@ -4046,9 +4074,38 @@ async function checkForUpdates() {
     document.getElementById('updateBannerText').textContent = t('update_banner_text').replace('{version}', update.latest_version);
     document.getElementById('updateBannerLink').textContent = t('update_link');
     document.getElementById('updateBannerLink').href = update.release_url || 'https://github.com/skrashevich/botmux/releases';
-    document.getElementById('updateBannerCurrent').textContent = t('current_version') + ': ' + update.current_version;
+    document.getElementById('updateBannerCurrent').textContent = t('current_version') + ': ' + _currentVersion;
     banner.style.display = '';
   } catch(e) { /* silent */ }
+}
+
+async function manualCheckForUpdates() {
+  const el = document.getElementById('footerVersion');
+  if (!el) return;
+  updateFooterVersion(_currentVersion || '...', 'checking');
+  try {
+    const res = await fetch('/api/version');
+    const data = await res.json();
+    _currentVersion = data.version?.version || '';
+    const update = data.update;
+    if (update && update.update_available) {
+      _latestVersion = update.latest_version;
+      localStorage.removeItem('update_dismissed_version');
+      const banner = document.getElementById('updateBanner');
+      document.getElementById('updateBannerTitle').textContent = t('update_available');
+      document.getElementById('updateBannerText').textContent = t('update_banner_text').replace('{version}', update.latest_version);
+      document.getElementById('updateBannerLink').textContent = t('update_link');
+      document.getElementById('updateBannerLink').href = update.release_url || 'https://github.com/skrashevich/botmux/releases';
+      document.getElementById('updateBannerCurrent').textContent = t('current_version') + ': ' + _currentVersion;
+      banner.style.display = '';
+      updateFooterVersion(_currentVersion);
+    } else {
+      updateFooterVersion(_currentVersion + ' ✓', 'up-to-date');
+      setTimeout(() => updateFooterVersion(_currentVersion), 3000);
+    }
+  } catch(e) {
+    updateFooterVersion(_currentVersion || '?');
+  }
 }
 
 function dismissUpdate() {

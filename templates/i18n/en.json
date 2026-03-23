@@ -318,6 +318,7 @@
   "update_banner_text": "New version {version} is available",
   "update_link": "Download",
   "current_version": "Current version",
+  "check_for_updates": "Click to check for updates",
   "dismiss": "Dismiss",
   "user_profile": "User Profile",
   "first_seen": "First seen",

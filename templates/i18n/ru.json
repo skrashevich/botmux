@@ -318,6 +318,7 @@
   "update_banner_text": "Доступна новая версия {version}",
   "update_link": "Скачать",
   "current_version": "Текущая версия",
+  "check_for_updates": "Нажмите для проверки обновлений",
   "dismiss": "Скрыть",
   "user_profile": "Профиль пользователя",
   "first_seen": "Первое появление",
