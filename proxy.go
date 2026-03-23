@@ -959,6 +959,12 @@ func (pm *ProxyManager) getUpdates(ctx context.Context, token string, offset int
 		"limit":   100,
 	})
 
+	maskedToken := token
+	if len(token) > 8 {
+		maskedToken = token[:8] + "..."
+	}
+	log.Printf("[getUpdates] → Telegram: token=%s offset=%d timeout=%ds limit=100", maskedToken, offset, timeout)
+
 	url := fmt.Sprintf("%s/bot%s/getUpdates", telegramAPIURL, token)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
 	if err != nil {
@@ -988,6 +994,8 @@ func (pm *ProxyManager) getUpdates(ctx context.Context, token string, offset int
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("invalid response: %s", string(body[:min(200, len(body))]))
 	}
+
+	log.Printf("[getUpdates] ← Telegram: token=%s ok=%v updates=%d", maskedToken, result.OK, len(result.Result))
 
 	if !result.OK {
 		if result.RetryAfter > 0 {

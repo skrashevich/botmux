@@ -762,10 +762,13 @@ func (s *Server) handleLongPollGetUpdates(w http.ResponseWriter, r *http.Request
 		timeout = 60
 	}
 
+	log.Printf("[long-poll] botID=%d request: offset=%d limit=%d timeout=%ds", botCfg.ID, offset, limit, timeout)
+
 	queue := s.proxy.GetOrCreateUpdateQueue(botCfg.ID)
 
 	updates := queue.Get(offset, limit)
 	if len(updates) > 0 || timeout == 0 {
+		log.Printf("[long-poll] botID=%d → immediate response: %d updates", botCfg.ID, len(updates))
 		writeJSON(w, longPollResponse(updates))
 		return
 	}
@@ -777,13 +780,16 @@ func (s *Server) handleLongPollGetUpdates(w http.ResponseWriter, r *http.Request
 
 	select {
 	case <-ctx.Done():
+		log.Printf("[long-poll] botID=%d → client disconnected", botCfg.ID)
 		writeJSON(w, longPollResponse(nil))
 	case <-timer.C:
 		updates = queue.Get(offset, limit)
+		log.Printf("[long-poll] botID=%d → timeout, returning %d updates", botCfg.ID, len(updates))
 		writeJSON(w, longPollResponse(updates))
 	case <-notify:
 		time.Sleep(50 * time.Millisecond)
 		updates = queue.Get(offset, limit)
+		log.Printf("[long-poll] botID=%d → notified, returning %d updates", botCfg.ID, len(updates))
 		writeJSON(w, longPollResponse(updates))
 	}
 }
@@ -2519,6 +2525,7 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 	if method == "getUpdates" {
 		if botCfg, err := s.store.GetBotConfigByToken(botToken); err == nil {
 			if botCfg.LongPollEnabled {
+				log.Printf("[tgapi-proxy] getUpdates intercepted → long-poll queue for botID=%d", botCfg.ID)
 				// Serve updates from in-memory UpdateQueue
 				s.handleLongPollGetUpdates(w, r, botCfg)
 				return
