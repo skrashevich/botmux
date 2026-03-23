@@ -20,7 +20,7 @@ type BotConfig struct {
 	ID               int64  `json:"id"`
 	Name             string `json:"name"`
 	Token            string `json:"token"`
-	BotUsername       string `json:"bot_username"`
+	BotUsername      string `json:"bot_username"`
 	ManageEnabled    bool   `json:"manage_enabled"`
 	ProxyEnabled     bool   `json:"proxy_enabled"`
 	BackendURL       string `json:"backend_url"`
@@ -29,11 +29,11 @@ type BotConfig struct {
 	Offset           int64  `json:"offset"`
 	LastError        string `json:"last_error,omitempty"`
 	LastActivity     string `json:"last_activity,omitempty"`
-	UpdatesForwarded  int64  `json:"updates_forwarded"`
-	Source            string `json:"source"` // "cli" or "web"
-	BackendStatus     string `json:"backend_status"`
-	BackendCheckedAt  string `json:"backend_checked_at"`
-	LongPollEnabled   bool   `json:"long_poll_enabled"`
+	UpdatesForwarded int64  `json:"updates_forwarded"`
+	Source           string `json:"source"` // "cli" or "web"
+	BackendStatus    string `json:"backend_status"`
+	BackendCheckedAt string `json:"backend_checked_at"`
+	LongPollEnabled  bool   `json:"long_poll_enabled"`
 }
 
 type Chat struct {
@@ -72,7 +72,7 @@ type ChatStats struct {
 	TodayMessages int            `json:"today_messages"`
 	ActiveUsers   int            `json:"active_users"`
 	TopUsers      []UserActivity `json:"top_users"`
-	HourlyStats   []HourlyStat  `json:"hourly_stats"`
+	HourlyStats   []HourlyStat   `json:"hourly_stats"`
 }
 
 type UserActivity struct {
@@ -116,15 +116,15 @@ type ChatUser struct {
 
 // RouteMapping tracks source↔target message pairs for reverse routing (Source-NAT)
 type RouteMapping struct {
-	ID            int64 `json:"id"`
-	RouteID       int64 `json:"route_id"`
-	SourceBotID   int64 `json:"source_bot_id"`
-	SourceChatID  int64 `json:"source_chat_id"`
-	SourceMsgID   int   `json:"source_msg_id"`
-	TargetBotID   int64 `json:"target_bot_id"`
-	TargetChatID  int64 `json:"target_chat_id"`
-	TargetMsgID   int   `json:"target_msg_id"`
-	CreatedAt     string `json:"created_at"`
+	ID           int64  `json:"id"`
+	RouteID      int64  `json:"route_id"`
+	SourceBotID  int64  `json:"source_bot_id"`
+	SourceChatID int64  `json:"source_chat_id"`
+	SourceMsgID  int    `json:"source_msg_id"`
+	TargetBotID  int64  `json:"target_bot_id"`
+	TargetChatID int64  `json:"target_chat_id"`
+	TargetMsgID  int    `json:"target_msg_id"`
+	CreatedAt    string `json:"created_at"`
 }
 
 // Route defines a routing rule: updates matching conditions on source bot get forwarded to target bot
@@ -132,11 +132,11 @@ type Route struct {
 	ID             int64  `json:"id"`
 	SourceBotID    int64  `json:"source_bot_id"`
 	TargetBotID    int64  `json:"target_bot_id"`
-	SourceChatID   int64  `json:"source_chat_id"`   // filter by source chat (0 = any chat)
-	ConditionType  string `json:"condition_type"`    // "text", "user_id", "chat_id"
-	ConditionValue string `json:"condition_value"`   // regex pattern for text, ID for user/chat
-	Action         string `json:"action"`            // "forward", "copy", or "drop" (ignore message)
-	TargetChatID   int64  `json:"target_chat_id"`    // chat to forward/copy to (0 = same chat)
+	SourceChatID   int64  `json:"source_chat_id"`  // filter by source chat (0 = any chat)
+	ConditionType  string `json:"condition_type"`  // "text", "user_id", "chat_id"
+	ConditionValue string `json:"condition_value"` // regex pattern for text, ID for user/chat
+	Action         string `json:"action"`          // "forward", "copy", or "drop" (ignore message)
+	TargetChatID   int64  `json:"target_chat_id"`  // chat to forward/copy to (0 = same chat)
 	Enabled        bool   `json:"enabled"`
 	Description    string `json:"description"`
 	CreatedAt      string `json:"created_at"`
@@ -782,7 +782,7 @@ func (s *Store) GetChatStats(botID, chatID int64) (*ChatStats, error) {
 			rows2.Scan(&h, &c)
 			hourMap[h] = c
 		}
-		for h := 0; h < 24; h++ {
+		for h := range 24 {
 			stats.HourlyStats = append(stats.HourlyStats, HourlyStat{Hour: h, Count: hourMap[h]})
 		}
 	}
@@ -929,7 +929,7 @@ func (s *Store) GetChatUsers(chatID int64, search string, limit, offset int) ([]
 		) m ON ku.user_id = m.from_id
 		WHERE ku.chat_id = ?
 	`
-	args := []interface{}{chatID, chatID}
+	args := []any{chatID, chatID}
 	if search != "" {
 		q += ` AND ku.username LIKE ?`
 		args = append(args, "%"+search+"%")

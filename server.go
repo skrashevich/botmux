@@ -9,9 +9,9 @@ import (
 	"io"
 	"log"
 	"mime"
-	"path"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -281,7 +281,7 @@ func (s *Server) handleBotList(w http.ResponseWriter, r *http.Request) {
 	}
 	type BotStatus struct {
 		BotConfig
-		Running      bool  `json:"running"`
+		Running       bool  `json:"running"`
 		BotTelegramID int64 `json:"bot_telegram_id,omitempty"`
 	}
 	var result []BotStatus
@@ -362,7 +362,7 @@ func (s *Server) handleBotAdd(w http.ResponseWriter, r *http.Request) {
 	if req.ManageEnabled || req.ProxyEnabled {
 		s.proxy.RestartBot(id)
 	}
-	writeJSON(w, map[string]interface{}{"status": "ok", "id": id})
+	writeJSON(w, map[string]any{"status": "ok", "id": id})
 }
 
 // handleBotUpdate updates an existing bot configuration and restarts it.
@@ -480,10 +480,10 @@ func (s *Server) handleBotHealth(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
 	status, err := s.proxy.CheckAndStoreHealth(id)
 	if err != nil {
-		writeJSON(w, map[string]interface{}{"status": status, "error": err.Error(), "checked_at": time.Now().Format(time.RFC3339)})
+		writeJSON(w, map[string]any{"status": status, "error": err.Error(), "checked_at": time.Now().Format(time.RFC3339)})
 		return
 	}
-	writeJSON(w, map[string]interface{}{"status": status, "checked_at": time.Now().Format(time.RFC3339)})
+	writeJSON(w, map[string]any{"status": status, "checked_at": time.Now().Format(time.RFC3339)})
 }
 
 // Chat handlers
@@ -673,25 +673,25 @@ func (s *Server) handleUpdatesPoll(w http.ResponseWriter, r *http.Request) {
 	botID, err := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
 	if err != nil || botID == 0 {
 		w.WriteHeader(400)
-		writeJSON(w, map[string]interface{}{"ok": false, "description": "bot_id is required"})
+		writeJSON(w, map[string]any{"ok": false, "description": "bot_id is required"})
 		return
 	}
 
 	if !s.checkBotAccess(r, botID) {
 		w.WriteHeader(403)
-		writeJSON(w, map[string]interface{}{"ok": false, "description": "Forbidden"})
+		writeJSON(w, map[string]any{"ok": false, "description": "Forbidden"})
 		return
 	}
 
 	botCfg, err := s.store.GetBotConfig(botID)
 	if err != nil {
 		w.WriteHeader(404)
-		writeJSON(w, map[string]interface{}{"ok": false, "description": "bot not found"})
+		writeJSON(w, map[string]any{"ok": false, "description": "bot not found"})
 		return
 	}
 	if !botCfg.LongPollEnabled {
 		w.WriteHeader(400)
-		writeJSON(w, map[string]interface{}{"ok": false, "description": "long polling is not enabled for this bot"})
+		writeJSON(w, map[string]any{"ok": false, "description": "long polling is not enabled for this bot"})
 		return
 	}
 
@@ -699,12 +699,12 @@ func (s *Server) handleUpdatesPoll(w http.ResponseWriter, r *http.Request) {
 }
 
 // longPollResponse formats updates in Telegram-compatible getUpdates response format.
-func longPollResponse(updates []QueuedUpdate) map[string]interface{} {
-	result := make([]map[string]interface{}, 0, len(updates))
+func longPollResponse(updates []QueuedUpdate) map[string]any {
+	result := make([]map[string]any, 0, len(updates))
 	for _, u := range updates {
 		result = append(result, u.Data)
 	}
-	return map[string]interface{}{
+	return map[string]any{
 		"ok":     true,
 		"result": result,
 	}
@@ -1529,7 +1529,7 @@ func (s *Server) handleAddRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, map[string]interface{}{"status": "ok", "id": id})
+	writeJSON(w, map[string]any{"status": "ok", "id": id})
 }
 
 // handleUpdateRoute updates an existing routing rule.
@@ -1655,7 +1655,7 @@ func (s *Server) handleBridgeAdd(w http.ResponseWriter, r *http.Request) {
 	if s.bridge != nil {
 		s.bridge.Reload(id)
 	}
-	writeJSON(w, map[string]interface{}{"status": "ok", "id": id})
+	writeJSON(w, map[string]any{"status": "ok", "id": id})
 }
 
 // handleBridgeUpdate updates an existing bridge.
@@ -1946,7 +1946,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	})
-	writeJSON(w, map[string]interface{}{
+	writeJSON(w, map[string]any{
 		"status":               "ok",
 		"user":                 user,
 		"must_change_password": user.MustChangePassword,
@@ -2145,7 +2145,7 @@ func (s *Server) handleUserAdd(w http.ResponseWriter, r *http.Request) {
 	for _, botID := range req.BotIDs {
 		s.store.AssignBotToUser(id, botID)
 	}
-	writeJSON(w, map[string]interface{}{"status": "ok", "id": id})
+	writeJSON(w, map[string]any{"status": "ok", "id": id})
 }
 
 // handleUserUpdate updates an application user's display name, role, and bot assignments.
@@ -2486,7 +2486,7 @@ func (s *Server) resolveBot(botID int64) *Bot {
 	return s.proxy.GetManagedBot(botID)
 }
 
-func writeJSON(w http.ResponseWriter, v interface{}) {
+func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
 }
@@ -2540,9 +2540,9 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 			}
 			if s.proxy != nil && s.proxy.IsRunning(botCfg.ID) {
 				// Bot is managed by botmux (polling or webhook) — block getUpdates from reaching Telegram
-				writeJSON(w, map[string]interface{}{
+				writeJSON(w, map[string]any{
 					"ok":          true,
-					"result":      []interface{}{},
+					"result":      []any{},
 					"description": "getUpdates is handled by botmux; enable long_poll_enabled to receive updates via this endpoint",
 				})
 				return
@@ -2564,7 +2564,7 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if method == "" {
-		var bodyObj map[string]interface{}
+		var bodyObj map[string]any
 		if json.Unmarshal(reqBody, &bodyObj) == nil {
 			if m, ok := bodyObj["method"].(string); ok && m != "" {
 				method = m
@@ -2749,7 +2749,7 @@ func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
 
 // inferTelegramMethod tries to guess the Telegram API method from request body fields.
 func inferTelegramMethod(body []byte) string {
-	var params map[string]interface{}
+	var params map[string]any
 	if err := json.Unmarshal(body, &params); err != nil {
 		return ""
 	}
@@ -2792,21 +2792,21 @@ func inferTelegramMethod(body []byte) string {
 
 // sendMethods lists Telegram API methods that return a Message in the result
 var sendMethods = map[string]bool{
-	"sendMessage":    true,
-	"sendPhoto":      true,
-	"sendAudio":      true,
-	"sendDocument":   true,
-	"sendVideo":      true,
-	"sendAnimation":  true,
-	"sendVoice":      true,
-	"sendVideoNote":  true,
-	"sendSticker":    true,
-	"sendLocation":   true,
-	"sendVenue":      true,
-	"sendContact":    true,
-	"sendPoll":       true,
-	"sendDice":       true,
-	"forwardMessage": true,
+	"sendMessage":     true,
+	"sendPhoto":       true,
+	"sendAudio":       true,
+	"sendDocument":    true,
+	"sendVideo":       true,
+	"sendAnimation":   true,
+	"sendVoice":       true,
+	"sendVideoNote":   true,
+	"sendSticker":     true,
+	"sendLocation":    true,
+	"sendVenue":       true,
+	"sendContact":     true,
+	"sendPoll":        true,
+	"sendDice":        true,
+	"forwardMessage":  true,
 	"editMessageText": true,
 }
 
@@ -2837,7 +2837,7 @@ func (s *Server) captureSentMessage(token, method string, reqBody []byte, conten
 	}
 
 	var msg struct {
-		MessageID int    `json:"message_id"`
+		MessageID int `json:"message_id"`
 		Chat      struct {
 			ID    int64  `json:"id"`
 			Type  string `json:"type"`
@@ -2855,13 +2855,27 @@ func (s *Server) captureSentMessage(token, method string, reqBody []byte, conten
 		Photo   []struct {
 			FileID string `json:"file_id"`
 		} `json:"photo"`
-		Video     *struct{ FileID string `json:"file_id"` } `json:"video"`
-		Animation *struct{ FileID string `json:"file_id"` } `json:"animation"`
-		Sticker   *struct{ FileID string `json:"file_id"` } `json:"sticker"`
-		Voice     *struct{ FileID string `json:"file_id"` } `json:"voice"`
-		Audio     *struct{ FileID string `json:"file_id"` } `json:"audio"`
-		Document  *struct{ FileID string `json:"file_id"` } `json:"document"`
-		VideoNote *struct{ FileID string `json:"file_id"` } `json:"video_note"`
+		Video *struct {
+			FileID string `json:"file_id"`
+		} `json:"video"`
+		Animation *struct {
+			FileID string `json:"file_id"`
+		} `json:"animation"`
+		Sticker *struct {
+			FileID string `json:"file_id"`
+		} `json:"sticker"`
+		Voice *struct {
+			FileID string `json:"file_id"`
+		} `json:"voice"`
+		Audio *struct {
+			FileID string `json:"file_id"`
+		} `json:"audio"`
+		Document *struct {
+			FileID string `json:"file_id"`
+		} `json:"document"`
+		VideoNote *struct {
+			FileID string `json:"file_id"`
+		} `json:"video_note"`
 	}
 	if err := json.Unmarshal(resp.Result, &msg); err != nil || msg.MessageID == 0 {
 		return

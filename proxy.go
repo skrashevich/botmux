@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"strings"
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,7 +29,7 @@ type UpdateQueue struct {
 // QueuedUpdate holds a single raw Telegram update with its update_id.
 type QueuedUpdate struct {
 	UpdateID int64
-	Data     map[string]interface{}
+	Data     map[string]any
 }
 
 // NewUpdateQueue creates a queue with the given max capacity.
@@ -42,7 +42,7 @@ func NewUpdateQueue(maxSize int) *UpdateQueue {
 
 // Enqueue adds a raw update to the queue, evicting the oldest if full, and wakes all waiters.
 // Updates already confirmed (UpdateID < confirmedOffset) are silently dropped.
-func (q *UpdateQueue) Enqueue(rawUpdate map[string]interface{}) {
+func (q *UpdateQueue) Enqueue(rawUpdate map[string]any) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -162,9 +162,9 @@ type ProxyManager struct {
 	store        *Store
 	mu           sync.Mutex
 	runners      map[int64]*proxyRunner
-	managedBots  map[int64]*Bot          // botID -> Bot instance for management processing
-	webhookBots  map[int64]bool          // bots receiving updates via webhook (skip polling)
-	updateQueues map[int64]*UpdateQueue  // botID -> long-poll update queue (lazy init)
+	managedBots  map[int64]*Bot         // botID -> Bot instance for management processing
+	webhookBots  map[int64]bool         // bots receiving updates via webhook (skip polling)
+	updateQueues map[int64]*UpdateQueue // botID -> long-poll update queue (lazy init)
 	client       *http.Client
 	llmRouter    *LLMRouter // LLM-based routing
 }
@@ -199,7 +199,7 @@ func (pm *ProxyManager) GetOrCreateUpdateQueue(botID int64) *UpdateQueue {
 }
 
 // EnqueueUpdate adds a raw update to the bot's long-poll queue (if it exists).
-func (pm *ProxyManager) EnqueueUpdate(botID int64, rawUpdate map[string]interface{}) {
+func (pm *ProxyManager) EnqueueUpdate(botID int64, rawUpdate map[string]any) {
 	pm.mu.Lock()
 	q := pm.updateQueues[botID]
 	pm.mu.Unlock()
@@ -266,7 +266,7 @@ func (pm *ProxyManager) WebhookHandler(botID int64) http.HandlerFunc {
 		}
 
 		// Parse as raw JSON for proxy forwarding
-		var rawUpdate map[string]interface{}
+		var rawUpdate map[string]any
 		if err := json.Unmarshal(body, &rawUpdate); err != nil {
 			log.Printf("[proxy] WebhookHandler: botID=%d invalid JSON: %v", botID, err)
 			http.Error(w, "Bad request", 400)
@@ -283,7 +283,7 @@ func (pm *ProxyManager) WebhookHandler(botID int64) http.HandlerFunc {
 }
 
 // processUpdate handles a single update: proxy forwarding + management processing
-func (pm *ProxyManager) processUpdate(botID int64, rawUpdate map[string]interface{}) {
+func (pm *ProxyManager) processUpdate(botID int64, rawUpdate map[string]any) {
 	bot, err := pm.store.GetBotConfig(botID)
 	if err != nil {
 		log.Printf("[proxy] processUpdate: failed to get config for botID=%d: %v", botID, err)
@@ -597,7 +597,7 @@ func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
 	}
 }
 
-func (pm *ProxyManager) processForManagement(botID int64, rawUpdate map[string]interface{}) {
+func (pm *ProxyManager) processForManagement(botID int64, rawUpdate map[string]any) {
 	pm.mu.Lock()
 	bot := pm.managedBots[botID]
 	pm.mu.Unlock()
@@ -620,14 +620,14 @@ func (pm *ProxyManager) processForManagement(botID int64, rawUpdate map[string]i
 }
 
 // applyLLMRoutes uses LLM to decide routing for an incoming update
-func (pm *ProxyManager) applyLLMRoutes(botID int64, rawUpdate map[string]interface{}) {
+func (pm *ProxyManager) applyLLMRoutes(botID int64, rawUpdate map[string]any) {
 	if pm.llmRouter == nil {
 		return
 	}
 
-	msg, _ := rawUpdate["message"].(map[string]interface{})
+	msg, _ := rawUpdate["message"].(map[string]any)
 	if msg == nil {
-		msg, _ = rawUpdate["channel_post"].(map[string]interface{})
+		msg, _ = rawUpdate["channel_post"].(map[string]any)
 	}
 	if msg == nil {
 		return
@@ -645,7 +645,7 @@ func (pm *ProxyManager) applyLLMRoutes(botID int64, rawUpdate map[string]interfa
 	}
 
 	var chatID int64
-	if chat, ok := msg["chat"].(map[string]interface{}); ok {
+	if chat, ok := msg["chat"].(map[string]any); ok {
 		if id, ok := chat["id"].(float64); ok {
 			chatID = int64(id)
 		}
@@ -653,7 +653,7 @@ func (pm *ProxyManager) applyLLMRoutes(botID int64, rawUpdate map[string]interfa
 
 	var fromID int64
 	var fromUser string
-	if from, ok := msg["from"].(map[string]interface{}); ok {
+	if from, ok := msg["from"].(map[string]any); ok {
 		if id, ok := from["id"].(float64); ok {
 			fromID = int64(id)
 		}
@@ -732,7 +732,7 @@ func (pm *ProxyManager) applyLLMRoutes(botID int64, rawUpdate map[string]interfa
 }
 
 // applyRoutes checks routing rules for the source bot and forwards matching updates to target bots
-func (pm *ProxyManager) applyRoutes(sourceBotID int64, rawUpdate map[string]interface{}) {
+func (pm *ProxyManager) applyRoutes(sourceBotID int64, rawUpdate map[string]any) {
 	routes, err := pm.store.GetRoutes(sourceBotID)
 	if err != nil {
 		return
@@ -743,9 +743,9 @@ func (pm *ProxyManager) applyRoutes(sourceBotID int64, rawUpdate map[string]inte
 	var fromID int64
 	var chatID int64
 
-	msg, _ := rawUpdate["message"].(map[string]interface{})
+	msg, _ := rawUpdate["message"].(map[string]any)
 	if msg == nil {
-		msg, _ = rawUpdate["channel_post"].(map[string]interface{})
+		msg, _ = rawUpdate["channel_post"].(map[string]any)
 	}
 	if msg == nil {
 		return // no message to route
@@ -757,12 +757,12 @@ func (pm *ProxyManager) applyRoutes(sourceBotID int64, rawUpdate map[string]inte
 	if caption, ok := msg["caption"].(string); ok && msgText == "" {
 		msgText = caption
 	}
-	if from, ok := msg["from"].(map[string]interface{}); ok {
+	if from, ok := msg["from"].(map[string]any); ok {
 		if id, ok := from["id"].(float64); ok {
 			fromID = int64(id)
 		}
 	}
-	if chat, ok := msg["chat"].(map[string]interface{}); ok {
+	if chat, ok := msg["chat"].(map[string]any); ok {
 		if id, ok := chat["id"].(float64); ok {
 			chatID = int64(id)
 		}
@@ -875,15 +875,15 @@ func (pm *ProxyManager) applyRoutes(sourceBotID int64, rawUpdate map[string]inte
 
 // applyReverseRoutes checks if a message on a target bot is a reply to a routed message,
 // and if so, sends the reply back via the source bot to the original chat (Source-NAT return path)
-func (pm *ProxyManager) applyReverseRoutes(botID int64, rawUpdate map[string]interface{}) {
-	msg, _ := rawUpdate["message"].(map[string]interface{})
+func (pm *ProxyManager) applyReverseRoutes(botID int64, rawUpdate map[string]any) {
+	msg, _ := rawUpdate["message"].(map[string]any)
 	if msg == nil {
 		return
 	}
 
 	// Get the chat ID for this message
 	var chatID int64
-	if chat, ok := msg["chat"].(map[string]interface{}); ok {
+	if chat, ok := msg["chat"].(map[string]any); ok {
 		if id, ok := chat["id"].(float64); ok {
 			chatID = int64(id)
 		}
@@ -897,7 +897,7 @@ func (pm *ProxyManager) applyReverseRoutes(botID int64, rawUpdate map[string]int
 	var mapping *RouteMapping
 	var err error
 
-	if replyTo, ok := msg["reply_to_message"].(map[string]interface{}); ok {
+	if replyTo, ok := msg["reply_to_message"].(map[string]any); ok {
 		if replyMsgID, ok := replyTo["message_id"].(float64); ok {
 			mapping, err = pm.store.FindReverseMappingByReply(botID, chatID, int(replyMsgID))
 		}
@@ -913,7 +913,7 @@ func (pm *ProxyManager) applyReverseRoutes(botID int64, rawUpdate map[string]int
 	}
 
 	// Don't reverse-route messages sent by the target bot itself (avoid loops)
-	if from, ok := msg["from"].(map[string]interface{}); ok {
+	if from, ok := msg["from"].(map[string]any); ok {
 		if isBot, ok := from["is_bot"].(bool); ok && isBot {
 			return
 		}
@@ -973,8 +973,8 @@ func (pm *ProxyManager) applyReverseRoutes(botID int64, rawUpdate map[string]int
 	}
 }
 
-func (pm *ProxyManager) getUpdates(ctx context.Context, token string, offset int64, timeout int) ([]map[string]interface{}, error) {
-	reqBody, _ := json.Marshal(map[string]interface{}{
+func (pm *ProxyManager) getUpdates(ctx context.Context, token string, offset int64, timeout int) ([]map[string]any, error) {
+	reqBody, _ := json.Marshal(map[string]any{
 		"offset":  offset,
 		"timeout": timeout,
 		"limit":   100,
@@ -1006,11 +1006,11 @@ func (pm *ProxyManager) getUpdates(ctx context.Context, token string, offset int
 	}
 
 	var result struct {
-		OK          bool                     `json:"ok"`
-		Result      []map[string]interface{} `json:"result"`
-		Description string                   `json:"description"`
-		ErrorCode   int                      `json:"error_code"`
-		RetryAfter  int                      `json:"retry_after"`
+		OK          bool             `json:"ok"`
+		Result      []map[string]any `json:"result"`
+		Description string           `json:"description"`
+		ErrorCode   int              `json:"error_code"`
+		RetryAfter  int              `json:"retry_after"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("invalid response: %s", string(body[:min(200, len(body))]))
@@ -1028,7 +1028,7 @@ func (pm *ProxyManager) getUpdates(ctx context.Context, token string, offset int
 	return result.Result, nil
 }
 
-func (pm *ProxyManager) forwardUpdate(ctx context.Context, bot *BotConfig, update map[string]interface{}) error {
+func (pm *ProxyManager) forwardUpdate(ctx context.Context, bot *BotConfig, update map[string]any) error {
 	data, err := json.Marshal(update)
 	if err != nil {
 		return err
@@ -1071,7 +1071,7 @@ func (pm *ProxyManager) handleWebhookReply(token string, body []byte) {
 		return
 	}
 
-	var reply map[string]interface{}
+	var reply map[string]any
 	if err := json.Unmarshal(body, &reply); err != nil {
 		log.Printf("[proxy] handleWebhookReply: response is not JSON: %s", truncate(string(body), 200))
 		return
@@ -1218,22 +1218,22 @@ func (pm *ProxyManager) GetManagedBot(botID int64) *Bot {
 }
 
 // summarizeUpdate creates a short description of an update for logging
-func summarizeUpdate(update map[string]interface{}) string {
+func summarizeUpdate(update map[string]any) string {
 	updateID, _ := update["update_id"].(float64)
 	summary := fmt.Sprintf("update_id=%d", int64(updateID))
-	if msg, ok := update["message"].(map[string]interface{}); ok {
+	if msg, ok := update["message"].(map[string]any); ok {
 		if text, ok := msg["text"].(string); ok {
 			if len(text) > 80 {
 				text = text[:80] + "..."
 			}
 			summary += fmt.Sprintf(" text=%q", text)
 		}
-		if from, ok := msg["from"].(map[string]interface{}); ok {
+		if from, ok := msg["from"].(map[string]any); ok {
 			if uname, ok := from["username"].(string); ok {
 				summary += fmt.Sprintf(" from=@%s", uname)
 			}
 		}
-		if chat, ok := msg["chat"].(map[string]interface{}); ok {
+		if chat, ok := msg["chat"].(map[string]any); ok {
 			if chatID, ok := chat["id"].(float64); ok {
 				summary += fmt.Sprintf(" chat_id=%d", int64(chatID))
 			}
@@ -1249,7 +1249,7 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-func mapKeys(m map[string]interface{}) []string {
+func mapKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)

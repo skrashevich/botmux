@@ -129,7 +129,7 @@ func (r *LLMRouter) RouteMessage(ctx context.Context, sourceBotID int64, message
 
 // callLLM calls the OpenAI-compatible Chat Completions API
 func (r *LLMRouter) callLLM(ctx context.Context, cfg *LLMConfig, systemPrompt, userContent string) (*LLMRouteResult, error) {
-	reqBody, err := json.Marshal(map[string]interface{}{
+	reqBody, err := json.Marshal(map[string]any{
 		"model": cfg.Model,
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},

@@ -14,7 +14,7 @@ func TestUpdateQueueEnqueueAndGet(t *testing.T) {
 
 	// Enqueue 3 updates
 	for i := 1; i <= 3; i++ {
-		q.Enqueue(map[string]interface{}{"update_id": float64(i), "text": "msg"})
+		q.Enqueue(map[string]any{"update_id": float64(i), "text": "msg"})
 	}
 
 	// Get all from offset 1
@@ -52,7 +52,7 @@ func TestUpdateQueueEviction(t *testing.T) {
 	q := NewUpdateQueue(3) // max 3
 
 	for i := 1; i <= 5; i++ {
-		q.Enqueue(map[string]interface{}{"update_id": float64(i)})
+		q.Enqueue(map[string]any{"update_id": float64(i)})
 	}
 
 	// Should only have last 3: IDs 3, 4, 5
@@ -74,7 +74,7 @@ func TestUpdateQueueWaitNotify(t *testing.T) {
 	// Enqueue from another goroutine
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		q.Enqueue(map[string]interface{}{"update_id": float64(1)})
+		q.Enqueue(map[string]any{"update_id": float64(1)})
 	}()
 
 	select {
@@ -96,8 +96,8 @@ func TestUpdateQueueDepthAndWaiterCount(t *testing.T) {
 		t.Fatalf("expected depth 0, got %d", q.QueueDepth())
 	}
 
-	q.Enqueue(map[string]interface{}{"update_id": float64(1)})
-	q.Enqueue(map[string]interface{}{"update_id": float64(2)})
+	q.Enqueue(map[string]any{"update_id": float64(1)})
+	q.Enqueue(map[string]any{"update_id": float64(2)})
 	if q.QueueDepth() != 2 {
 		t.Fatalf("expected depth 2, got %d", q.QueueDepth())
 	}
@@ -192,9 +192,9 @@ func TestHandleUpdatesPollImmediateReturn(t *testing.T) {
 
 	// Pre-enqueue an update
 	queue := proxy.GetOrCreateUpdateQueue(botID)
-	queue.Enqueue(map[string]interface{}{
+	queue.Enqueue(map[string]any{
 		"update_id": float64(42),
-		"message":   map[string]interface{}{"text": "hello"},
+		"message":   map[string]any{"text": "hello"},
 	})
 
 	session := createTestAuth(t, store)
@@ -215,12 +215,12 @@ func TestHandleUpdatesPollImmediateReturn(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	json.NewDecoder(resp.Body).Decode(&result)
 	if result["ok"] != true {
 		t.Fatalf("expected ok=true, got %v", result["ok"])
 	}
-	updates, ok := result["result"].([]interface{})
+	updates, ok := result["result"].([]any)
 	if !ok || len(updates) != 1 {
 		t.Fatalf("expected 1 update in result, got %v", result["result"])
 	}
@@ -258,12 +258,12 @@ func TestHandleUpdatesPollEmptyTimeout0(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	json.NewDecoder(resp.Body).Decode(&result)
 	if result["ok"] != true {
 		t.Fatalf("expected ok=true, got %v", result["ok"])
 	}
-	updates, ok := result["result"].([]interface{})
+	updates, ok := result["result"].([]any)
 	if !ok || len(updates) != 0 {
 		t.Fatalf("expected 0 updates, got %v", result["result"])
 	}
@@ -285,9 +285,9 @@ func TestTgapiGetUpdatesLongPoll(t *testing.T) {
 
 	// Pre-enqueue an update
 	queue := proxy.GetOrCreateUpdateQueue(botID)
-	queue.Enqueue(map[string]interface{}{
+	queue.Enqueue(map[string]any{
 		"update_id": float64(99),
-		"message":   map[string]interface{}{"text": "via tgapi"},
+		"message":   map[string]any{"text": "via tgapi"},
 	})
 
 	mux := server.BuildMux()
@@ -306,12 +306,12 @@ func TestTgapiGetUpdatesLongPoll(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	json.NewDecoder(resp.Body).Decode(&result)
 	if result["ok"] != true {
 		t.Fatalf("expected ok=true, got %v", result["ok"])
 	}
-	updates, ok := result["result"].([]interface{})
+	updates, ok := result["result"].([]any)
 	if !ok || len(updates) != 1 {
 		t.Fatalf("expected 1 update, got %v", result["result"])
 	}
@@ -346,10 +346,10 @@ func TestTgapiGetUpdatesDisabledFallsThrough(t *testing.T) {
 	// Should NOT be 200 with ok:true (that's the long poll response)
 	// It should try to proxy to Telegram and fail (502) or succeed if Telegram is reachable
 	if resp.StatusCode == 200 {
-		var result map[string]interface{}
+		var result map[string]any
 		json.NewDecoder(resp.Body).Decode(&result)
 		// If we get a long poll response, that's a bug — it should have proxied
-		if res, ok := result["result"].([]interface{}); ok && len(res) == 0 {
+		if res, ok := result["result"].([]any); ok && len(res) == 0 {
 			// Could be Telegram returning empty, that's fine
 		}
 	}

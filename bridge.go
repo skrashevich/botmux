@@ -14,16 +14,16 @@ import (
 
 // BridgeConfig represents a protocol bridge in the database
 type BridgeConfig struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	Protocol    string `json:"protocol"`     // "webhook", "slack", "discord", "meshtastic"
-	LinkedBotID int64  `json:"linked_bot_id"` // Telegram bot that this bridge is linked to
-	Config      string `json:"config"`        // JSON protocol-specific configuration
-	CallbackURL string `json:"callback_url"`  // URL to POST outgoing messages to
-	Enabled     bool   `json:"enabled"`
-	CreatedAt   string `json:"created_at"`
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Protocol     string `json:"protocol"`      // "webhook", "slack", "discord", "meshtastic"
+	LinkedBotID  int64  `json:"linked_bot_id"` // Telegram bot that this bridge is linked to
+	Config       string `json:"config"`        // JSON protocol-specific configuration
+	CallbackURL  string `json:"callback_url"`  // URL to POST outgoing messages to
+	Enabled      bool   `json:"enabled"`
+	CreatedAt    string `json:"created_at"`
 	LastActivity string `json:"last_activity,omitempty"`
-	LastError   string `json:"last_error,omitempty"`
+	LastError    string `json:"last_error,omitempty"`
 }
 
 // BridgeIncomingMessage is the simple format external sources POST to us
@@ -39,7 +39,7 @@ type BridgeIncomingMessage struct {
 // BridgeOutgoingMessage is what we POST back to the bridge callback
 type BridgeOutgoingMessage struct {
 	BridgeID       int64  `json:"bridge_id"`
-	ExternalChatID string `json:"chat_id"`     // mapped back to external chat ID
+	ExternalChatID string `json:"chat_id"` // mapped back to external chat ID
 	Text           string `json:"text"`
 	TelegramMsgID  int    `json:"telegram_msg_id"`
 	ReplyToExtID   string `json:"reply_to,omitempty"` // external msg ID being replied to
@@ -152,18 +152,18 @@ func (bm *BridgeManager) HandleIncoming(bridgeID int64, msg BridgeIncomingMessag
 	updateID := bm.updateIDSeq.Add(1)
 	syntheticMsgID := int(updateID & 0x7FFFFFFF)
 
-	update := map[string]interface{}{
+	update := map[string]any{
 		"update_id": float64(updateID),
-		"message": map[string]interface{}{
+		"message": map[string]any{
 			"message_id": float64(syntheticMsgID),
 			"text":       msg.Text,
 			"date":       float64(time.Now().Unix()),
-			"chat": map[string]interface{}{
+			"chat": map[string]any{
 				"id":    float64(tgChatID),
 				"type":  "private",
 				"title": fmt.Sprintf("[%s] %s", cfg.Protocol, msg.ExternalChatID),
 			},
-			"from": map[string]interface{}{
+			"from": map[string]any{
 				"id":         float64(bm.syntheticUserID(msg.ExternalUserID)),
 				"is_bot":     false,
 				"first_name": msg.Username,
@@ -175,10 +175,10 @@ func (bm *BridgeManager) HandleIncoming(bridgeID int64, msg BridgeIncomingMessag
 	// Add reply context if available
 	if msg.ReplyToMsgID != "" {
 		if mapping, err := bm.store.GetBridgeMsgMapping(bridgeID, msg.ReplyToMsgID); err == nil && mapping != nil {
-			msgMap := update["message"].(map[string]interface{})
-			msgMap["reply_to_message"] = map[string]interface{}{
+			msgMap := update["message"].(map[string]any)
+			msgMap["reply_to_message"] = map[string]any{
 				"message_id": float64(mapping.TelegramMsgID),
-				"chat": map[string]interface{}{
+				"chat": map[string]any{
 					"id": float64(tgChatID),
 				},
 			}
