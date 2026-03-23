@@ -2538,6 +2538,25 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Intercept setWebhook — register the backend URL in botmux instead of forwarding to Telegram.
+	// botmux continues polling Telegram itself and forwards updates to the webhook URL.
+	if method == "setWebhook" {
+		s.handleInterceptSetWebhook(w, r, botToken)
+		return
+	}
+
+	// Intercept deleteWebhook — disable proxy forwarding in botmux.
+	if method == "deleteWebhook" {
+		s.handleInterceptDeleteWebhook(w, r, botToken)
+		return
+	}
+
+	// Intercept getWebhookInfo — return botmux's internal webhook state.
+	if method == "getWebhookInfo" {
+		s.handleInterceptGetWebhookInfo(w, botToken)
+		return
+	}
+
 	// Intercept getUpdates — never proxy it to Telegram when botmux is already polling this bot.
 	// That would create two concurrent getUpdates calls and Telegram returns "conflict" errors.
 	if method == "getUpdates" {
@@ -2702,6 +2721,200 @@ func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
 	// Step 2: Download and stream the file (with WebP→PNG conversion)
 	downloadURL := fmt.Sprintf("%s/file/bot%s/%s", telegramAPIURL, token, fileResp.Result.FilePath)
 	proxyFileDownload(w, downloadURL, fileResp.Result.FilePath)
+}
+
+// handleInterceptSetWebhook intercepts setWebhook calls and configures botmux to proxy updates
+// to the specified URL instead of forwarding the call to Telegram.
+func (s *Server) handleInterceptSetWebhook(w http.ResponseWriter, r *http.Request, botToken string) {
+	// Parse webhook URL from request (supports JSON body, form body, and query params)
+	var webhookURL string
+	var dropPending bool
+
+	body, _ := io.ReadAll(r.Body)
+	if len(body) > 0 {
+		// Try JSON
+		var params map[string]any
+		if json.Unmarshal(body, &params) == nil {
+			if u, ok := params["url"].(string); ok {
+				webhookURL = u
+			}
+			if dp, ok := params["drop_pending_updates"].(bool); ok {
+				dropPending = dp
+			}
+		} else {
+			// Try form
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			r.ParseForm()
+			webhookURL = r.FormValue("url")
+			dropPending = r.FormValue("drop_pending_updates") == "true" || r.FormValue("drop_pending_updates") == "True"
+		}
+	}
+	if webhookURL == "" {
+		webhookURL = r.URL.Query().Get("url")
+	}
+
+	// Empty URL is equivalent to deleteWebhook
+	if webhookURL == "" {
+		s.handleInterceptDeleteWebhook(w, r, botToken)
+		return
+	}
+
+	maskedToken := botToken
+	if len(maskedToken) > 8 {
+		maskedToken = maskedToken[:4] + "..." + maskedToken[len(maskedToken)-4:]
+	}
+
+	// Find or auto-register bot
+	botCfg, err := s.store.GetBotConfigByToken(botToken)
+	if err != nil {
+		// Bot not in DB — auto-register via getMe
+		botCfg, err = s.autoRegisterBot(botToken)
+		if err != nil {
+			log.Printf("[tgapi-proxy] setWebhook: failed to auto-register bot=%s: %v", maskedToken, err)
+			writeJSON(w, map[string]any{"ok": false, "error_code": 401, "description": "Unauthorized: invalid bot token"})
+			return
+		}
+	}
+
+	// Update bot config: enable proxy, set backend URL
+	botCfg.ProxyEnabled = true
+	botCfg.BackendURL = webhookURL
+	if err := s.store.UpdateBotConfig(*botCfg); err != nil {
+		log.Printf("[tgapi-proxy] setWebhook: failed to update config for botID=%d: %v", botCfg.ID, err)
+		writeJSON(w, map[string]any{"ok": false, "error_code": 500, "description": "Internal error updating bot config"})
+		return
+	}
+
+	// Drop pending updates if requested
+	if dropPending && s.proxy != nil {
+		if _, depth := s.proxy.GetQueueStats(botCfg.ID); depth > 0 {
+			s.proxy.RemoveUpdateQueue(botCfg.ID)
+		}
+	}
+
+	// Restart bot in proxy manager to pick up new config
+	if s.proxy != nil {
+		s.proxy.RestartBot(botCfg.ID)
+	}
+
+	log.Printf("[tgapi-proxy] setWebhook intercepted: bot=%s webhook_url=%s (proxy mode)", maskedToken, webhookURL)
+	writeJSON(w, map[string]any{"ok": true, "result": true, "description": "Webhook was set"})
+}
+
+// handleInterceptDeleteWebhook intercepts deleteWebhook and disables proxy forwarding in botmux.
+func (s *Server) handleInterceptDeleteWebhook(w http.ResponseWriter, r *http.Request, botToken string) {
+	maskedToken := botToken
+	if len(maskedToken) > 8 {
+		maskedToken = maskedToken[:4] + "..." + maskedToken[len(maskedToken)-4:]
+	}
+
+	botCfg, err := s.store.GetBotConfigByToken(botToken)
+	if err != nil {
+		log.Printf("[tgapi-proxy] deleteWebhook: bot=%s not found", maskedToken)
+		writeJSON(w, map[string]any{"ok": true, "result": true, "description": "Webhook was deleted"})
+		return
+	}
+
+	// Parse drop_pending_updates
+	var dropPending bool
+	body, _ := io.ReadAll(r.Body)
+	if len(body) > 0 {
+		var params map[string]any
+		if json.Unmarshal(body, &params) == nil {
+			if dp, ok := params["drop_pending_updates"].(bool); ok {
+				dropPending = dp
+			}
+		}
+	}
+	if r.URL.Query().Get("drop_pending_updates") == "true" {
+		dropPending = true
+	}
+
+	// Clear backend URL, disable proxy
+	botCfg.ProxyEnabled = false
+	botCfg.BackendURL = ""
+	if err := s.store.UpdateBotConfig(*botCfg); err != nil {
+		log.Printf("[tgapi-proxy] deleteWebhook: failed to update config for botID=%d: %v", botCfg.ID, err)
+	}
+
+	// Drop pending updates if requested
+	if dropPending && s.proxy != nil {
+		s.proxy.RemoveUpdateQueue(botCfg.ID)
+	}
+
+	// Restart bot to apply config
+	if s.proxy != nil {
+		s.proxy.RestartBot(botCfg.ID)
+	}
+
+	log.Printf("[tgapi-proxy] deleteWebhook intercepted: bot=%s (proxy disabled)", maskedToken)
+	writeJSON(w, map[string]any{"ok": true, "result": true, "description": "Webhook was deleted"})
+}
+
+// handleInterceptGetWebhookInfo returns botmux's internal webhook state for the bot.
+func (s *Server) handleInterceptGetWebhookInfo(w http.ResponseWriter, botToken string) {
+	result := map[string]any{
+		"url":                    "",
+		"has_custom_certificate": false,
+		"pending_update_count":   0,
+		"max_connections":        40,
+		"ip_address":             "",
+	}
+
+	if botCfg, err := s.store.GetBotConfigByToken(botToken); err == nil {
+		if botCfg.ProxyEnabled && botCfg.BackendURL != "" {
+			result["url"] = botCfg.BackendURL
+		}
+		if s.proxy != nil {
+			_, depth := s.proxy.GetQueueStats(botCfg.ID)
+			result["pending_update_count"] = depth
+		}
+	}
+
+	writeJSON(w, map[string]any{"ok": true, "result": result})
+}
+
+// autoRegisterBot validates a bot token via getMe and registers it in the database.
+func (s *Server) autoRegisterBot(token string) (*BotConfig, error) {
+	// Call getMe to validate token and get bot info
+	getMeURL := fmt.Sprintf("%s/bot%s/getMe", telegramAPIURL, token)
+	resp, err := http.Get(getMeURL)
+	if err != nil {
+		return nil, fmt.Errorf("getMe request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var getMeResp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			ID        int64  `json:"id"`
+			FirstName string `json:"first_name"`
+			Username  string `json:"username"`
+			IsBot     bool   `json:"is_bot"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&getMeResp); err != nil || !getMeResp.OK {
+		return nil, fmt.Errorf("getMe failed or token invalid")
+	}
+
+	botCfg := BotConfig{
+		Name:        getMeResp.Result.FirstName,
+		Token:       token,
+		BotUsername:  getMeResp.Result.Username,
+		Source:      "web",
+	}
+	id, err := s.store.AddBotConfig(botCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create bot config: %w", err)
+	}
+	botCfg.ID = id
+
+	maskedToken := token
+	if len(maskedToken) > 8 {
+		maskedToken = maskedToken[:4] + "..." + maskedToken[len(maskedToken)-4:]
+	}
+	log.Printf("[tgapi-proxy] auto-registered bot: id=%d username=@%s token=%s", id, botCfg.BotUsername, maskedToken)
+	return &botCfg, nil
 }
 
 // proxyFileDownload downloads a file from the upstream Telegram API and streams it to w.
