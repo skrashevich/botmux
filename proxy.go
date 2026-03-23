@@ -270,8 +270,8 @@ func (pm *ProxyManager) processUpdate(botID int64, rawUpdate map[string]interfac
 		pm.processForManagement(botID, rawUpdate)
 	}
 
-	// Proxy: forward to backend
-	if bot.ProxyEnabled && bot.BackendURL != "" {
+	// Proxy: forward to backend (skip if long poll enabled — backend pulls via queue)
+	if bot.ProxyEnabled && bot.BackendURL != "" && !bot.LongPollEnabled {
 		log.Printf("[proxy] forward: botID=%d %s → %s", botID, updateSummary, bot.BackendURL)
 		if err := pm.forwardUpdate(context.Background(), bot, rawUpdate); err != nil {
 			pm.store.UpdateBotStatus(botID, fmt.Sprintf("forward error: %v", err), "")
@@ -536,8 +536,8 @@ func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
 				pm.EnqueueUpdate(botID, update)
 			}
 
-			// Proxy: forward to backend
-			if bot.ProxyEnabled && bot.BackendURL != "" {
+			// Proxy: forward to backend (skip if long poll enabled — backend pulls via queue)
+			if bot.ProxyEnabled && bot.BackendURL != "" && !bot.LongPollEnabled {
 				log.Printf("[proxy] forward: botID=%d %s → %s", botID, updateSummary, bot.BackendURL)
 				err := pm.forwardUpdate(ctx, bot, update)
 				if err != nil {
