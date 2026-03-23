@@ -1,0 +1,54 @@
+---
+title: 'March 23, 2026'
+description: 'LLM routing, Slack bridges, demo mode, real-time streaming, and more.'
+---
+
+<Update label="2026-03-23" description="Week of March 17–23" tags={["Features", "Improvements", "Fixes"]}>
+
+## New features
+
+- **LLM-based message routing** — You can now route messages between bots using an OpenAI-compatible LLM. Configure your LLM provider and bot descriptions, and BotMux will intelligently decide which bot should handle each incoming message.
+
+- **Protocol bridges with Slack support** — Bridge your Telegram bots to external messaging platforms. The first supported integration is Slack, letting you relay messages between Telegram chats and Slack channels.
+
+- **Demo mode** — Try BotMux without committing to a full setup. Demo mode creates isolated ephemeral sessions with pre-filled credentials, so you can explore the dashboard and features instantly.
+
+- **Real-time message streaming** — Messages now stream to the dashboard in real time via Server-Sent Events. You no longer need to manually refresh to see new messages — they appear automatically as they arrive.
+
+- **Application log viewer** — Admins can now view and stream application logs directly in the web UI. The log viewer includes auto-scroll and is available from the admin dashboard.
+
+- **Source chat filtering for routes** — Routing rules now support a source chat filter. You can restrict a route so it only forwards messages from a specific chat, giving you finer control over inter-bot message routing.
+
+- **Authentication and user management** — BotMux now includes a built-in authentication system with a login screen, user management, and role-based access.
+
+- **API key management** — Generate and manage API keys for programmatic access to the BotMux REST API.
+
+- **Multi-bot message tracking** — Messages are now tracked per bot, so you can view and search message history for each bot independently.
+
+- **Custom Telegram API base URL** — You can override the default Telegram API endpoint with a custom URL using a CLI flag or environment variable. Useful if you run a local Telegram Bot API server.
+
+- **Docker support** — BotMux ships with a Dockerfile, docker-compose.yml, and multi-platform Docker builds.
+
+- **Message replies and media lightbox** — You can now reply to messages directly from the dashboard. Media files open in a lightbox for easier viewing, with improved sticker rendering and WebP-to-PNG conversion.
+
+## Improvements
+
+- **Long polling support** — Bots can now use long polling to receive updates, as an alternative to webhooks. Configure it per bot from the dashboard.
+
+- **Better Telegram API method detection** — The API proxy now infers the Telegram method from query parameters or request body fields, improving reliability when capturing outgoing bot messages.
+
+- **Improved Russian translations** — Updated and standardized all Russian-language UI strings for consistency and readability.
+
+- **Enhanced bot token validation** — The bot registration form now validates tokens before saving and shows mode hints to help you choose between proxy and management modes.
+
+## Bug fixes
+
+- **Fixed message timestamps** — Resolved an issue where message timestamps were displayed incorrectly due to a seconds-vs-milliseconds mismatch.
+
+- **Fixed Docker healthcheck** — The container healthcheck now uses the public `/api/health` endpoint instead of an auth-protected route, so Docker health status reports correctly.
+
+- **Fixed chat scroll and reply layout** — The chat view now preserves your scroll position on auto-refresh, shows message previews in the chat list, and correctly renders reply threads.
+
+- **Fixed media content type handling** — The media proxy now correctly determines content types based on file extension, with proper caching headers.
+
+</Update>

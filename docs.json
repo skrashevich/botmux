@@ -203,6 +203,7 @@
       }
     ]
   },
+  "changelog": "changelog",
   "footer": {
     "socials": {
       "github": "https://github.com/skrashevich/botmux"
