@@ -93,6 +93,7 @@ func (s *Server) BuildMux() *http.ServeMux {
 	}
 
 	// Telegram API proxy — no auth (backends use this)
+	mux.HandleFunc("/tgapi/file/", s.handleTelegramFileProxy)
 	mux.HandleFunc("/tgapi/", s.handleTelegramAPIProxy)
 
 	// Health check — no auth (no sensitive info)
@@ -2528,6 +2529,15 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 	botToken := strings.TrimPrefix(parts[0], "bot")
 	method := parts[1]
 
+	// Intercept logOut and close — never proxy these to Telegram.
+	// logOut disables the token for 10 minutes, close shuts down the bot instance.
+	// Both would break botmux's own polling. Return success without forwarding.
+	if method == "logOut" || method == "close" {
+		log.Printf("[tgapi-proxy] intercepted %s (not forwarded to Telegram)", method)
+		writeJSON(w, map[string]any{"ok": true, "result": true})
+		return
+	}
+
 	// Intercept getUpdates — never proxy it to Telegram when botmux is already polling this bot.
 	// That would create two concurrent getUpdates calls and Telegram returns "conflict" errors.
 	if method == "getUpdates" {
@@ -2689,20 +2699,31 @@ func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 2: Download the file
+	// Step 2: Download and stream the file (with WebP→PNG conversion)
 	downloadURL := fmt.Sprintf("%s/file/bot%s/%s", telegramAPIURL, token, fileResp.Result.FilePath)
-	fileResp2, err := http.Get(downloadURL)
+	proxyFileDownload(w, downloadURL, fileResp.Result.FilePath)
+}
+
+// proxyFileDownload downloads a file from the upstream Telegram API and streams it to w.
+// Handles WebP→PNG conversion for stickers and Content-Type detection.
+func proxyFileDownload(w http.ResponseWriter, downloadURL string, filePath string) {
+	resp, err := http.Get(downloadURL)
 	if err != nil {
-		http.Error(w, "download failed", 500)
+		http.Error(w, "download failed", 502)
 		return
 	}
-	defer fileResp2.Body.Close()
+	defer resp.Body.Close()
 
-	// Check if WebP and convert to PNG for browser compatibility (stickers etc.)
-	ct := fileResp2.Header.Get("Content-Type")
-	isWebP := strings.Contains(ct, "webp") || strings.HasSuffix(fileResp.Result.FilePath, ".webp")
+	if resp.StatusCode != 200 {
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+		return
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	isWebP := strings.Contains(ct, "webp") || strings.HasSuffix(filePath, ".webp")
 	if isWebP {
-		body, err := io.ReadAll(fileResp2.Body)
+		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			http.Error(w, "read failed", 500)
 			return
@@ -2721,30 +2742,52 @@ func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine correct Content-Type: upstream may return application/octet-stream
+	// Determine correct Content-Type
 	if ct == "" || ct == "application/octet-stream" {
-		// Try to infer from file extension
-		ext := path.Ext(fileResp.Result.FilePath)
+		ext := path.Ext(filePath)
 		if mimeType := mime.TypeByExtension(ext); mimeType != "" {
 			ct = mimeType
 		} else {
-			// Sniff from content
 			var buf bytes.Buffer
 			sniffBytes := make([]byte, 512)
-			n, _ := io.ReadAtLeast(fileResp2.Body, sniffBytes, 1)
+			n, _ := io.ReadAtLeast(resp.Body, sniffBytes, 1)
 			if n > 0 {
 				ct = http.DetectContentType(sniffBytes[:n])
 				buf.Write(sniffBytes[:n])
 			}
 			w.Header().Set("Content-Type", ct)
 			w.Header().Set("Cache-Control", "public, max-age=86400")
-			io.Copy(w, io.MultiReader(&buf, fileResp2.Body))
+			io.Copy(w, io.MultiReader(&buf, resp.Body))
 			return
 		}
 	}
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "public, max-age=86400")
-	io.Copy(w, fileResp2.Body)
+	io.Copy(w, resp.Body)
+}
+
+// handleTelegramFileProxy serves file downloads at /tgapi/file/bot{TOKEN}/{path...}
+// This makes botmux compatible as a drop-in base_file_url for Telegram bot libraries.
+func (s *Server) handleTelegramFileProxy(w http.ResponseWriter, r *http.Request) {
+	// Parse path: /tgapi/file/bot{TOKEN}/{file_path...}
+	filePath := strings.TrimPrefix(r.URL.Path, "/tgapi/file/")
+	parts := strings.SplitN(filePath, "/", 2)
+	if len(parts) < 2 || !strings.HasPrefix(parts[0], "bot") {
+		http.Error(w, "Invalid path. Use /tgapi/file/bot{TOKEN}/{file_path}", 400)
+		return
+	}
+
+	botToken := strings.TrimPrefix(parts[0], "bot")
+	remotePath := parts[1]
+
+	maskedToken := botToken
+	if len(maskedToken) > 8 {
+		maskedToken = maskedToken[:4] + "..." + maskedToken[len(maskedToken)-4:]
+	}
+	log.Printf("[tgapi-file] GET bot=%s path=%s", maskedToken, remotePath)
+
+	downloadURL := fmt.Sprintf("%s/file/bot%s/%s", telegramAPIURL, botToken, remotePath)
+	proxyFileDownload(w, downloadURL, remotePath)
 }
 
 // inferTelegramMethod tries to guess the Telegram API method from request body fields.
