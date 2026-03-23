@@ -1,4 +1,8 @@
-# botmux
+<p align="center">
+  <img src="logo.svg" alt="BotMux" width="280">
+</p>
+
+<p align="center">
 
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](https://pkg.go.dev/github.com/skrashevich/botmux)
 [![Release](https://img.shields.io/github/v/release/skrashevich/botmux?color=blue)](https://github.com/skrashevich/botmux/releases/latest)
@@ -6,6 +10,8 @@
 [![Docker](https://img.shields.io/github/actions/workflow/status/skrashevich/botmux/docker.yml?label=docker&logo=docker)](https://github.com/skrashevich/botmux/actions/workflows/docker.yml)
 [![Docs](https://img.shields.io/badge/docs-mintlify-blue?logo=readthedocs&logoColor=white)](https://botmux.mintlify.app/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
+</p>
 
 > **[Documentation](https://botmux.mintlify.app/)** — full setup guide, API reference, and architecture overview.
 
