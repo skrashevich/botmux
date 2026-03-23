@@ -2400,11 +2400,24 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 	botToken := strings.TrimPrefix(parts[0], "bot")
 	method := parts[1]
 
-	// Intercept getUpdates for bots with long_poll_enabled
+	// Intercept getUpdates — never proxy it to Telegram when botmux is already polling this bot.
+	// That would create two concurrent getUpdates calls and Telegram returns "conflict" errors.
 	if method == "getUpdates" {
-		if botCfg, err := s.store.GetBotConfigByToken(botToken); err == nil && botCfg.LongPollEnabled {
-			s.handleLongPollGetUpdates(w, r, botCfg)
-			return
+		if botCfg, err := s.store.GetBotConfigByToken(botToken); err == nil {
+			if botCfg.LongPollEnabled {
+				// Serve updates from in-memory UpdateQueue
+				s.handleLongPollGetUpdates(w, r, botCfg)
+				return
+			}
+			if s.proxy != nil && s.proxy.IsRunning(botCfg.ID) {
+				// Bot is managed by botmux (polling or webhook) — block getUpdates from reaching Telegram
+				writeJSON(w, map[string]interface{}{
+					"ok":          true,
+					"result":      []interface{}{},
+					"description": "getUpdates is handled by botmux; enable long_poll_enabled to receive updates via this endpoint",
+				})
+				return
+			}
 		}
 	}
 
