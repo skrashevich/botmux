@@ -284,7 +284,7 @@ Slack channel                    BotMux                         Telegram
 
 ## Requirements
 
-- Go 1.21+
+- Go 1.26+
 - A Telegram bot token (create via [@BotFather](https://t.me/BotFather))
 
 ## Installation

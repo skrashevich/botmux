@@ -90,7 +90,7 @@ Two ways:
 ## Deployment
 
 ### Requirements
-- Go 1.21+ (for building from source)
+- Go 1.26+ (for building from source)
 - A Telegram bot token from @BotFather
 
 ### Docker
