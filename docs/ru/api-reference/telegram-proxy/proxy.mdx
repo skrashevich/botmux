@@ -17,6 +17,20 @@ https://api.telegram.org/bot{TOKEN}/{method}
 http://localhost:8080/tgapi/bot{TOKEN}/{method}
 ```
 
+## Загрузка файлов
+
+Отдельный эндпоинт для загрузки файлов доступен по адресу `/tgapi/file/bot{TOKEN}/{file_path}`. Это делает BotMux полной заменой URL загрузки файлов Telegram, позволяя настроить его как `base_file_url` в вашей библиотеке ботов:
+
+```
+# До
+https://api.telegram.org/file/bot{TOKEN}/{file_path}
+
+# После
+http://localhost:8080/tgapi/file/bot{TOKEN}/{file_path}
+```
+
+Файлы WebP (стикеры) автоматически конвертируются в PNG. Типы контента определяются по расширению файла с fallback на определение по содержимому. Ответы включают заголовок `Cache-Control: public, max-age=86400`.
+
 ## Аутентификация
 
 Дополнительная аутентификация не требуется — токен бота в URL является авторизацией (аналогично Telegram API).
@@ -25,6 +39,15 @@ http://localhost:8080/tgapi/bot{TOKEN}/{method}
 
 Для методов отправки прокси извлекает отправленное сообщение из ответа Telegram и сохраняет его в базу данных.
 
-## Перехват Long Polling
+## Перехватываемые методы
 
-Когда включён параметр `long_poll_enabled`, запросы `getUpdates` перехватываются и обслуживаются из внутренней очереди UpdateQueue BotMux вместо пересылки в Telegram.
+Ряд методов Telegram Bot API перехватывается и обрабатывается BotMux вместо пересылки в Telegram:
+
+| Метод | Поведение |
+|-------|-----------|
+| `setWebhook` | Настраивает URL бэкенда бота в BotMux и включает режим прокси. Автоматически регистрирует неизвестных ботов через `getMe`. Поддерживает параметры `url` и `drop_pending_updates`. |
+| `deleteWebhook` | Очищает URL бэкенда и отключает режим прокси. Поддерживает `drop_pending_updates`. |
+| `getWebhookInfo` | Возвращает внутреннее состояние вебхука BotMux (`url`, `pending_update_count`, `has_custom_certificate`, `max_connections`, `ip_address`). |
+| `getUpdates` | Когда включён long polling, обслуживается из внутренней очереди BotMux вместо пересылки в Telegram. |
+| `logOut` | Возвращает `{"ok": true, "result": true}` без пересылки. Предотвращает отключение токена на 10 минут. |
+| `close` | Возвращает `{"ok": true, "result": true}` без пересылки. Предотвращает остановку экземпляра бота на стороне Telegram. |

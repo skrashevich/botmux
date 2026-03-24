@@ -15,16 +15,29 @@ BotMux can poll Telegram for updates and forward them as webhook POST requests t
 
 BotMux will poll Telegram and forward each update as a POST request to the backend URL.
 
-## Webhook Responses
+## Automatic setup via API proxy
+
+If your backend uses the [API proxy](/docs/en/features/api-proxy) (`/tgapi/`), you can skip manual configuration entirely. When your backend calls `setWebhook` through the proxy, BotMux automatically:
+
+1. Registers the bot (if not already known) by calling Telegram's `getMe`
+2. Sets the webhook URL as the bot's backend URL
+3. Enables proxy mode
+4. Starts polling Telegram and forwarding updates to your backend
+
+This means you can point an existing bot at `http://your-botmux:8080/tgapi/bot{TOKEN}/setWebhook` and it will configure itself with no manual steps.
+
+Similarly, calling `deleteWebhook` through the proxy disables forwarding and clears the backend URL.
+
+## Webhook responses
 
 The backend can respond with a [webhook-style reply](https://core.telegram.org/bots/api#making-requests-when-getting-updates) — JSON with a `method` field — and BotMux will proxy it back to the Telegram API.
 
-## Health Monitoring
+## Health monitoring
 
 - Automatic health checks every 60 seconds
 - Status visible in the dashboard
 - Manual **CHECK WEBHOOK** button in bot detail view
 
-## Dual Mode
+## Dual mode
 
 Reverse proxy and management mode can be active simultaneously for the same bot. Updates are both forwarded to the backend and tracked in the database.

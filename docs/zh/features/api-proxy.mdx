@@ -3,7 +3,7 @@ title: "API 代理"
 description: "透明的 Telegram API 代理，捕获机器人发出的消息"
 ---
 
-BotMux 在 `/tgapi/` 提供 Telegram API 代理，透明转发请求到 `api.telegram.org` 并捕获发出的消息。
+BotMux 在 `/tgapi/` 提供 Telegram API 代理，透明转发请求到 `api.telegram.org` 并捕获发出的消息。代理还会拦截多个管理方法，使您的后端可以使用标准 Telegram Bot API 而不会与 BotMux 的内部状态冲突。
 
 ## 为什么使用 API 代理？
 
@@ -14,16 +14,30 @@ Telegram 的 `getUpdates` 只返回收到的消息——机器人自身发送的
 更改后端的 API 基础 URL：
 
 ```
-# Before (direct)
+# 之前（直连）
 https://api.telegram.org/bot{TOKEN}/sendMessage
 
-# After (via BotMux proxy)
+# 之后（通过 BotMux 代理）
 http://localhost:8080/tgapi/bot{TOKEN}/sendMessage
 ```
 
-代理将所有请求转发到 Telegram 并原样返回响应。
+代理将所有请求转发到 Telegram 并原样返回响应，但[被拦截的方法](#被拦截的方法)除外，这些方法由 BotMux 内部处理。
 
-## 捕获的方法
+## 文件下载代理
+
+BotMux 还提供文件下载端点，可作为 Telegram 机器人库的 `base_file_url` 直接替换：
+
+```
+# Telegram 默认
+https://api.telegram.org/file/bot{TOKEN}/{file_path}
+
+# 通过 BotMux 代理
+http://localhost:8080/tgapi/file/bot{TOKEN}/{file_path}
+```
+
+此端点从 Telegram 下载文件并流式传输给客户端。WebP 文件（贴纸）会自动转换为 PNG 以兼容浏览器。
+
+## 捕获的发送方法
 
 | 方法 | 说明 |
 |--------|-------------|
@@ -46,3 +60,20 @@ http://localhost:8080/tgapi/bot{TOKEN}/sendMessage
 | `editMessageText` | 编辑消息 |
 
 当启用代理模式时，**API 代理 URL** 会显示在机器人详情视图中（点击复制）。
+
+## 被拦截的方法
+
+以下 Telegram Bot API 方法被代理拦截，由 BotMux 内部处理而不是转发到 Telegram：
+
+| 方法 | 行为 |
+|--------|----------|
+| `setWebhook` | 将 webhook URL 注册为 BotMux 中机器人的后端 URL 并启用代理模式。如果机器人令牌尚未注册，BotMux 会通过 `getMe` 自动注册。支持 `url` 和 `drop_pending_updates` 参数。 |
+| `deleteWebhook` | 清除后端 URL 并禁用机器人的代理模式。支持 `drop_pending_updates`。 |
+| `getWebhookInfo` | 返回 BotMux 的内部 webhook 状态，包括配置的后端 URL 和待处理的更新数量。 |
+| `getUpdates` | 当启用长轮询时，从 BotMux 的内部队列返回更新，而不是直接轮询 Telegram。 |
+| `logOut` | 返回成功而不转发到 Telegram。转发会导致令牌被禁用 10 分钟，破坏 BotMux 的轮询。 |
+| `close` | 返回成功而不转发到 Telegram。转发会关闭 Telegram 端的机器人实例。 |
+
+<Note>
+`setWebhook` 拦截实现了零配置迁移：将您现有的机器人后端指向 BotMux 的 API 代理 URL，BotMux 将自动注册机器人并开始将更新转发到您的后端。
+</Note>
