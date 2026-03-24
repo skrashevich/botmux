@@ -17,14 +17,37 @@ https://api.telegram.org/bot{TOKEN}/{method}
 http://localhost:8080/tgapi/bot{TOKEN}/{method}
 ```
 
+## File downloads
+
+A dedicated file download endpoint is available at `/tgapi/file/bot{TOKEN}/{file_path}`. This makes BotMux a drop-in replacement for Telegram's file download URL, so you can configure it as your bot library's `base_file_url`:
+
+```
+# Before
+https://api.telegram.org/file/bot{TOKEN}/{file_path}
+
+# After
+http://localhost:8080/tgapi/file/bot{TOKEN}/{file_path}
+```
+
+WebP files (stickers) are automatically converted to PNG. Content types are detected from file extensions, with sniffing as a fallback. Responses include a `Cache-Control: public, max-age=86400` header.
+
 ## Authentication
 
 No additional auth required — the bot token in the URL is the authorization (same as Telegram API).
 
-## Message Capture
+## Message capture
 
 For send methods, the proxy extracts the sent message from the Telegram response and saves it to the database.
 
-## Long Poll Interception
+## Intercepted methods
 
-When `long_poll_enabled` is set, `getUpdates` requests are intercepted and served from BotMux's internal UpdateQueue instead of forwarding to Telegram.
+Several Telegram Bot API methods are intercepted and handled by BotMux instead of being forwarded to Telegram:
+
+| Method | Behavior |
+|--------|----------|
+| `setWebhook` | Configures the bot's backend URL in BotMux and enables proxy mode. Auto-registers unknown bots via `getMe`. Supports `url` and `drop_pending_updates` parameters. |
+| `deleteWebhook` | Clears the backend URL and disables proxy mode. Supports `drop_pending_updates`. |
+| `getWebhookInfo` | Returns BotMux's internal webhook state (`url`, `pending_update_count`, `has_custom_certificate`, `max_connections`, `ip_address`). |
+| `getUpdates` | When long polling is enabled, served from BotMux's internal queue instead of forwarding to Telegram. |
+| `logOut` | Returns `{"ok": true, "result": true}` without forwarding. Prevents token being disabled for 10 minutes. |
+| `close` | Returns `{"ok": true, "result": true}` without forwarding. Prevents the bot instance from being shut down on Telegram's side. |
