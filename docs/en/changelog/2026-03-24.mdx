@@ -1,0 +1,38 @@
+---
+title: 'March 24, 2026'
+description: 'User profiles, update notifications, webhook interception, new branding, and reliability fixes.'
+---
+
+<Update label="2026-03-24" description="Week of March 24" tags={["Features", "Improvements", "Fixes"]}>
+
+## New features
+
+- **User profiles** — Click any username in the dashboard to view a profile modal showing user statistics and recent actions. Usernames are now clickable throughout the message view and user lists.
+
+- **Update notifications** — BotMux now checks GitHub for new releases and displays a dismissible banner when an update is available. You can also manually check for updates from the dashboard footer. Learn more about [deployment](/docs/en/deployment/requirements).
+
+- **Webhook interception** — BotMux now intercepts `setWebhook`, `deleteWebhook`, and `getWebhookInfo` API calls made through the [API proxy](/docs/en/features/api-proxy). This means bots are automatically configured when your backend sets a webhook, with no manual setup required.
+
+- **New branding** — BotMux has a new Hub logo representing its multiplexer function. The logo appears in the sidebar, login screen, and browser favicon.
+
+- **Externalized translations** — Interface translations are now loaded from external files instead of being bundled inline. This makes it easier to contribute new translations and keeps the UI code cleaner. English and Russian are available out of the box. See [i18n](/docs/en/features/i18n) for details.
+
+## Improvements
+
+- **Footer version display** — The dashboard footer now shows the current BotMux version with a button to manually check for updates.
+
+- **Enhanced log viewer** — The [application log viewer](/docs/en/features/analytics) is now larger, displays bot names alongside log entries, and uses improved color coding for easier scanning.
+
+- **Better long polling** — Improved parameter parsing and handling for [long polling](/docs/en/features/long-polling) updates. The UI now shows clearer hints about long polling configuration, and backend forwarding is automatically skipped when long polling is enabled for a bot.
+
+- **Improved media downloads** — The Telegram [file proxy](/docs/en/features/media-support) now handles media downloads more reliably, with better file retrieval and content delivery.
+
+## Bug fixes
+
+- **Fixed database locking under load** — Added a busy timeout to the SQLite connection, preventing lock errors when multiple requests hit the database simultaneously.
+
+- **Fixed duplicate polling** — BotMux now blocks concurrent `getUpdates` calls to the same bot, preventing conflicts when both the proxy and a long-poll client try to fetch updates at the same time.
+
+- **Fixed long-poll parameter parsing** — Switched to structured JSON parsing for long-poll request parameters, resolving edge cases where update offsets or limits were not applied correctly.
+
+</Update>
