@@ -619,50 +619,100 @@ func (pm *ProxyManager) processForManagement(botID int64, rawUpdate map[string]a
 	bot.processUpdate(update)
 }
 
+// parsedMessage holds common fields extracted from a raw Telegram update's message or channel_post.
+type parsedMessage struct {
+	Msg       map[string]any
+	Text      string
+	ChatID    int64
+	FromID    int64
+	FromUser  string
+	MessageID int
+}
+
+// parseUpdateMessage extracts common message fields from a raw update map.
+// It checks rawUpdate["message"] first, then rawUpdate["channel_post"].
+// Returns nil if neither exists.
+func parseUpdateMessage(rawUpdate map[string]any) *parsedMessage {
+	msg, _ := rawUpdate["message"].(map[string]any)
+	if msg == nil {
+		msg, _ = rawUpdate["channel_post"].(map[string]any)
+	}
+	if msg == nil {
+		return nil
+	}
+
+	p := &parsedMessage{Msg: msg}
+
+	if t, ok := msg["text"].(string); ok {
+		p.Text = t
+	}
+	if caption, ok := msg["caption"].(string); ok && p.Text == "" {
+		p.Text = caption
+	}
+
+	if chat, ok := msg["chat"].(map[string]any); ok {
+		if id, ok := chat["id"].(float64); ok {
+			p.ChatID = int64(id)
+		}
+	}
+
+	if from, ok := msg["from"].(map[string]any); ok {
+		if id, ok := from["id"].(float64); ok {
+			p.FromID = int64(id)
+		}
+		if uname, ok := from["username"].(string); ok {
+			p.FromUser = "@" + uname
+		}
+	}
+
+	if msgIDFloat, ok := msg["message_id"].(float64); ok {
+		p.MessageID = int(msgIDFloat)
+	}
+
+	return p
+}
+
+// matchRouteCondition checks whether a route's condition matches the given message fields.
+func matchRouteCondition(route Route, msgText string, fromID int64, chatID int64) bool {
+	switch route.ConditionType {
+	case "text":
+		if msgText != "" && route.ConditionValue != "" {
+			re, err := regexp.Compile("(?i)" + route.ConditionValue)
+			if err != nil {
+				log.Printf("[routing] route id=%d invalid regex %q: %v", route.ID, route.ConditionValue, err)
+				return false
+			}
+			return re.MatchString(msgText)
+		}
+	case "user_id":
+		if fromID != 0 {
+			targetUID, _ := strconv.ParseInt(route.ConditionValue, 10, 64)
+			return fromID == targetUID
+		}
+	case "chat_id":
+		if chatID != 0 {
+			targetCID, _ := strconv.ParseInt(route.ConditionValue, 10, 64)
+			return chatID == targetCID
+		}
+	}
+	return false
+}
+
 // applyLLMRoutes uses LLM to decide routing for an incoming update
 func (pm *ProxyManager) applyLLMRoutes(botID int64, rawUpdate map[string]any) {
 	if pm.llmRouter == nil {
 		return
 	}
 
-	msg, _ := rawUpdate["message"].(map[string]any)
-	if msg == nil {
-		msg, _ = rawUpdate["channel_post"].(map[string]any)
+	parsed := parseUpdateMessage(rawUpdate)
+	if parsed == nil {
+		return
 	}
-	if msg == nil {
+	if parsed.Text == "" {
 		return
 	}
 
-	var msgText string
-	if t, ok := msg["text"].(string); ok {
-		msgText = t
-	}
-	if caption, ok := msg["caption"].(string); ok && msgText == "" {
-		msgText = caption
-	}
-	if msgText == "" {
-		return
-	}
-
-	var chatID int64
-	if chat, ok := msg["chat"].(map[string]any); ok {
-		if id, ok := chat["id"].(float64); ok {
-			chatID = int64(id)
-		}
-	}
-
-	var fromID int64
-	var fromUser string
-	if from, ok := msg["from"].(map[string]any); ok {
-		if id, ok := from["id"].(float64); ok {
-			fromID = int64(id)
-		}
-		if uname, ok := from["username"].(string); ok {
-			fromUser = "@" + uname
-		}
-	}
-
-	result, err := pm.llmRouter.RouteMessage(context.Background(), botID, msgText, chatID, fromID, fromUser)
+	result, err := pm.llmRouter.RouteMessage(context.Background(), botID, parsed.Text, parsed.ChatID, parsed.FromID, parsed.FromUser)
 	if err != nil {
 		log.Printf("[llm-routing] error: %v", err)
 		return
@@ -681,19 +731,14 @@ func (pm *ProxyManager) applyLLMRoutes(botID int64, rawUpdate map[string]any) {
 
 	destChatID := result.TargetChatID
 	if destChatID == 0 {
-		destChatID = chatID
-	}
-
-	var sourceMsgID int
-	if msgIDFloat, ok := msg["message_id"].(float64); ok {
-		sourceMsgID = int(msgIDFloat)
+		destChatID = parsed.ChatID
 	}
 
 	var targetMsgID int
 	switch result.Action {
 	case "forward":
-		if msgText != "" {
-			sentID, err := targetBot.SendMessageGetID(destChatID, msgText)
+		if parsed.Text != "" {
+			sentID, err := targetBot.SendMessageGetID(destChatID, parsed.Text)
 			if err != nil {
 				log.Printf("[llm-routing] forward FAILED: %v", err)
 			} else {
@@ -703,8 +748,8 @@ func (pm *ProxyManager) applyLLMRoutes(botID int64, rawUpdate map[string]any) {
 			}
 		}
 	case "copy":
-		if sourceMsgID != 0 {
-			sentID, err := targetBot.ForwardMessageGetID(destChatID, chatID, sourceMsgID)
+		if parsed.MessageID != 0 {
+			sentID, err := targetBot.ForwardMessageGetID(destChatID, parsed.ChatID, parsed.MessageID)
 			if err != nil {
 				log.Printf("[llm-routing] copy FAILED: %v", err)
 			} else {
@@ -717,12 +762,12 @@ func (pm *ProxyManager) applyLLMRoutes(botID int64, rawUpdate map[string]any) {
 		log.Printf("[llm-routing] unknown action %q, skipping", result.Action)
 	}
 
-	if targetMsgID != 0 && sourceMsgID != 0 {
+	if targetMsgID != 0 && parsed.MessageID != 0 {
 		pm.store.SaveRouteMapping(RouteMapping{
 			RouteID:      0,
 			SourceBotID:  botID,
-			SourceChatID: chatID,
-			SourceMsgID:  sourceMsgID,
+			SourceChatID: parsed.ChatID,
+			SourceMsgID:  parsed.MessageID,
 			TargetBotID:  result.TargetBotID,
 			TargetChatID: destChatID,
 			TargetMsgID:  targetMsgID,
@@ -739,33 +784,9 @@ func (pm *ProxyManager) applyRoutes(sourceBotID int64, rawUpdate map[string]any)
 	}
 
 	// Extract message info from raw update
-	var msgText string
-	var fromID int64
-	var chatID int64
-
-	msg, _ := rawUpdate["message"].(map[string]any)
-	if msg == nil {
-		msg, _ = rawUpdate["channel_post"].(map[string]any)
-	}
-	if msg == nil {
+	parsed := parseUpdateMessage(rawUpdate)
+	if parsed == nil {
 		return // no message to route
-	}
-
-	if t, ok := msg["text"].(string); ok {
-		msgText = t
-	}
-	if caption, ok := msg["caption"].(string); ok && msgText == "" {
-		msgText = caption
-	}
-	if from, ok := msg["from"].(map[string]any); ok {
-		if id, ok := from["id"].(float64); ok {
-			fromID = int64(id)
-		}
-	}
-	if chat, ok := msg["chat"].(map[string]any); ok {
-		if id, ok := chat["id"].(float64); ok {
-			chatID = int64(id)
-		}
 	}
 
 	for _, route := range routes {
@@ -774,34 +795,11 @@ func (pm *ProxyManager) applyRoutes(sourceBotID int64, rawUpdate map[string]any)
 		}
 
 		// Filter by source chat if specified
-		if route.SourceChatID != 0 && route.SourceChatID != chatID {
+		if route.SourceChatID != 0 && route.SourceChatID != parsed.ChatID {
 			continue
 		}
 
-		matched := false
-		switch route.ConditionType {
-		case "text":
-			if msgText != "" && route.ConditionValue != "" {
-				re, err := regexp.Compile("(?i)" + route.ConditionValue)
-				if err != nil {
-					log.Printf("[routing] route id=%d invalid regex %q: %v", route.ID, route.ConditionValue, err)
-					continue
-				}
-				matched = re.MatchString(msgText)
-			}
-		case "user_id":
-			if fromID != 0 {
-				targetUID, _ := strconv.ParseInt(route.ConditionValue, 10, 64)
-				matched = fromID == targetUID
-			}
-		case "chat_id":
-			if chatID != 0 {
-				targetCID, _ := strconv.ParseInt(route.ConditionValue, 10, 64)
-				matched = chatID == targetCID
-			}
-		}
-
-		if !matched {
+		if !matchRouteCondition(route, parsed.Text, parsed.FromID, parsed.ChatID) {
 			continue
 		}
 
@@ -819,12 +817,7 @@ func (pm *ProxyManager) applyRoutes(sourceBotID int64, rawUpdate map[string]any)
 
 		destChatID := route.TargetChatID
 		if destChatID == 0 {
-			destChatID = chatID
-		}
-
-		var sourceMsgID int
-		if msgIDFloat, ok := msg["message_id"].(float64); ok {
-			sourceMsgID = int(msgIDFloat)
+			destChatID = parsed.ChatID
 		}
 
 		var targetMsgID int
@@ -834,8 +827,8 @@ func (pm *ProxyManager) applyRoutes(sourceBotID int64, rawUpdate map[string]any)
 				route.ID, route.ConditionType, route.ConditionValue, sourceBotID)
 			return
 		case "forward":
-			if msgText != "" {
-				sentID, err := targetBot.SendMessageGetID(destChatID, msgText)
+			if parsed.Text != "" {
+				sentID, err := targetBot.SendMessageGetID(destChatID, parsed.Text)
 				if err != nil {
 					log.Printf("[routing] route id=%d forward FAILED: %v", route.ID, err)
 				} else {
@@ -844,31 +837,31 @@ func (pm *ProxyManager) applyRoutes(sourceBotID int64, rawUpdate map[string]any)
 				}
 			}
 		case "copy":
-			if sourceMsgID != 0 {
-				sentID, err := targetBot.ForwardMessageGetID(destChatID, chatID, sourceMsgID)
+			if parsed.MessageID != 0 {
+				sentID, err := targetBot.ForwardMessageGetID(destChatID, parsed.ChatID, parsed.MessageID)
 				if err != nil {
 					log.Printf("[routing] route id=%d copy FAILED: %v", route.ID, err)
 				} else {
 					targetMsgID = sentID
-					log.Printf("[routing] route id=%d copied msg %d to chat %d via bot %d (msg %d)", route.ID, sourceMsgID, destChatID, route.TargetBotID, sentID)
+					log.Printf("[routing] route id=%d copied msg %d to chat %d via bot %d (msg %d)", route.ID, parsed.MessageID, destChatID, route.TargetBotID, sentID)
 				}
 			}
 		}
 
 		// Save mapping for reverse routing (Source-NAT)
-		if targetMsgID != 0 && sourceMsgID != 0 {
+		if targetMsgID != 0 && parsed.MessageID != 0 {
 			pm.store.SaveRouteMapping(RouteMapping{
 				RouteID:      route.ID,
 				SourceBotID:  sourceBotID,
-				SourceChatID: chatID,
-				SourceMsgID:  sourceMsgID,
+				SourceChatID: parsed.ChatID,
+				SourceMsgID:  parsed.MessageID,
 				TargetBotID:  route.TargetBotID,
 				TargetChatID: destChatID,
 				TargetMsgID:  targetMsgID,
 				CreatedAt:    time.Now().Format(time.RFC3339),
 			})
 			log.Printf("[routing] saved mapping: bot%d/chat%d/msg%d ↔ bot%d/chat%d/msg%d",
-				sourceBotID, chatID, sourceMsgID, route.TargetBotID, destChatID, targetMsgID)
+				sourceBotID, parsed.ChatID, parsed.MessageID, route.TargetBotID, destChatID, targetMsgID)
 		}
 	}
 }
@@ -876,19 +869,15 @@ func (pm *ProxyManager) applyRoutes(sourceBotID int64, rawUpdate map[string]any)
 // applyReverseRoutes checks if a message on a target bot is a reply to a routed message,
 // and if so, sends the reply back via the source bot to the original chat (Source-NAT return path)
 func (pm *ProxyManager) applyReverseRoutes(botID int64, rawUpdate map[string]any) {
+	// IMPORTANT: reverse routes only process "message", never "channel_post"
 	msg, _ := rawUpdate["message"].(map[string]any)
 	if msg == nil {
 		return
 	}
 
-	// Get the chat ID for this message
-	var chatID int64
-	if chat, ok := msg["chat"].(map[string]any); ok {
-		if id, ok := chat["id"].(float64); ok {
-			chatID = int64(id)
-		}
-	}
-	if chatID == 0 {
+	// Use a temporary update with only "message" to prevent parseUpdateMessage from picking up channel_post
+	parsed := parseUpdateMessage(map[string]any{"message": msg})
+	if parsed == nil || parsed.ChatID == 0 {
 		return
 	}
 
@@ -899,13 +888,13 @@ func (pm *ProxyManager) applyReverseRoutes(botID int64, rawUpdate map[string]any
 
 	if replyTo, ok := msg["reply_to_message"].(map[string]any); ok {
 		if replyMsgID, ok := replyTo["message_id"].(float64); ok {
-			mapping, err = pm.store.FindReverseMappingByReply(botID, chatID, int(replyMsgID))
+			mapping, err = pm.store.FindReverseMappingByReply(botID, parsed.ChatID, int(replyMsgID))
 		}
 	}
 
 	if mapping == nil || err != nil {
 		// Fallback: check if this chat has any active mapping (latest conversation)
-		mapping, err = pm.store.FindReverseMapping(botID, chatID)
+		mapping, err = pm.store.FindReverseMapping(botID, parsed.ChatID)
 	}
 
 	if mapping == nil || err != nil {
@@ -919,14 +908,7 @@ func (pm *ProxyManager) applyReverseRoutes(botID int64, rawUpdate map[string]any
 		}
 	}
 
-	var msgText string
-	if t, ok := msg["text"].(string); ok {
-		msgText = t
-	}
-	if caption, ok := msg["caption"].(string); ok && msgText == "" {
-		msgText = caption
-	}
-	if msgText == "" {
+	if parsed.Text == "" {
 		return
 	}
 
@@ -940,10 +922,10 @@ func (pm *ProxyManager) applyReverseRoutes(botID int64, rawUpdate map[string]any
 		return
 	}
 
-	sentID, sendErr := sourceBot.SendMessageReply(mapping.SourceChatID, msgText, mapping.SourceMsgID)
+	sentID, sendErr := sourceBot.SendMessageReply(mapping.SourceChatID, parsed.Text, mapping.SourceMsgID)
 	if sendErr != nil {
 		// Fallback: send without reply if original message is too old
-		sentID, sendErr = sourceBot.SendMessageGetID(mapping.SourceChatID, msgText)
+		sentID, sendErr = sourceBot.SendMessageGetID(mapping.SourceChatID, parsed.Text)
 		if sendErr != nil {
 			log.Printf("[routing-reverse] FAILED to send reply via bot %d to chat %d: %v",
 				mapping.SourceBotID, mapping.SourceChatID, sendErr)
@@ -952,22 +934,18 @@ func (pm *ProxyManager) applyReverseRoutes(botID int64, rawUpdate map[string]any
 	}
 
 	log.Printf("[routing-reverse] bot%d/chat%d → bot%d/chat%d (reply to msg %d, sent msg %d)",
-		botID, chatID, mapping.SourceBotID, mapping.SourceChatID, mapping.SourceMsgID, sentID)
+		botID, parsed.ChatID, mapping.SourceBotID, mapping.SourceChatID, mapping.SourceMsgID, sentID)
 
 	// Save reverse mapping so the conversation can continue
-	var thisMsgID int
-	if msgIDFloat, ok := msg["message_id"].(float64); ok {
-		thisMsgID = int(msgIDFloat)
-	}
-	if sentID != 0 && thisMsgID != 0 {
+	if sentID != 0 && parsed.MessageID != 0 {
 		pm.store.SaveRouteMapping(RouteMapping{
 			RouteID:      mapping.RouteID,
 			SourceBotID:  mapping.SourceBotID,
 			SourceChatID: mapping.SourceChatID,
 			SourceMsgID:  sentID,
 			TargetBotID:  botID,
-			TargetChatID: chatID,
-			TargetMsgID:  thisMsgID,
+			TargetChatID: parsed.ChatID,
+			TargetMsgID:  parsed.MessageID,
 			CreatedAt:    time.Now().Format(time.RFC3339),
 		})
 	}
