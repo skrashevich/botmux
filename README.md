@@ -1,4 +1,11 @@
 <p align="center">
+
+<!-- badges:start -->
+[![GitHub stars](https://img.shields.io/github/stars/skrashevich/botmux?style=flat-square)](https://github.com/skrashevich/botmux/stargazers)
+[![Last commit](https://img.shields.io/github/last-commit/skrashevich/botmux?style=flat-square)](https://github.com/skrashevich/botmux/commits/main)
+[![License](https://img.shields.io/github/license/skrashevich/botmux?style=flat-square)](https://github.com/skrashevich/botmux/blob/main/LICENSE)
+<!-- badges:end -->
+
   <img src="logo.svg" alt="BotMux" width="280">
 </p>
 
