@@ -1,0 +1,20 @@
+---
+title: 'April 20, 2026'
+description: 'File download proxy, expanded API method interception, and smarter getUpdates handling.'
+---
+
+<Update label="2026-04-20" description="Week of April 20" tags={["Features", "Improvements"]}>
+
+## New features
+
+- **File download proxy** — BotMux now provides a file download endpoint at `/tgapi/file/bot{TOKEN}/{file_path}` that works as a drop-in replacement for Telegram's file download URL. You can configure it as your bot library's `base_file_url` and BotMux will stream files directly from Telegram. WebP stickers are automatically converted to PNG for browser compatibility, and responses include proper caching headers. See [API proxy](/docs/en/features/api-proxy) for setup details.
+
+## Improvements
+
+- **Expanded method interception** — The [API proxy](/docs/en/features/api-proxy) now intercepts `logOut` and `close` Telegram API calls in addition to webhook and polling methods. `logOut` calls are blocked from reaching Telegram to prevent your bot token from being disabled for 10 minutes, and `close` calls are blocked to prevent the bot instance from being shut down on Telegram's side.
+
+- **Smarter getUpdates handling** — When a bot is managed by BotMux but long polling is not enabled, the API proxy now returns an empty result for `getUpdates` instead of forwarding the request to Telegram. This prevents conflict errors when your backend calls `getUpdates` while BotMux is already polling the same bot. Learn more about [long polling](/docs/en/features/long-polling).
+
+- **Chinese documentation** — BotMux documentation is now available in Chinese (simplified) alongside English and Russian. Switch languages from the navigation bar. See [i18n](/docs/en/features/i18n) for details on language support.
+
+</Update>
