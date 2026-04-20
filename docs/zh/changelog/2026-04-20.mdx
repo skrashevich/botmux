@@ -1,0 +1,20 @@
+---
+title: '2026年4月20日'
+description: '文件下载代理、扩展 API 方法拦截和更智能的 getUpdates 处理。'
+---
+
+<Update label="2026-04-20" description="4月20日当周" tags={["功能", "改进"]}>
+
+## 新功能
+
+- **文件下载代理** — BotMux 现在提供文件下载端点 `/tgapi/file/bot{TOKEN}/{file_path}`，可作为 Telegram 文件下载 URL 的直接替代。您可以将其配置为机器人库的 `base_file_url`，BotMux 将直接从 Telegram 流式传输文件。WebP 贴纸会自动转换为 PNG 以兼容浏览器，响应包含适当的缓存头。详情请参阅 [API 代理](/docs/zh/features/api-proxy)。
+
+## 改进
+
+- **扩展方法拦截** — [API 代理](/docs/zh/features/api-proxy)现在除了拦截 Webhook 和轮询方法外，还拦截 `logOut` 和 `close` Telegram API 调用。`logOut` 调用被阻止发送到 Telegram，以防止机器人令牌被禁用 10 分钟；`close` 调用被阻止以防止机器人实例在 Telegram 端被关闭。
+
+- **更智能的 getUpdates 处理** — 当机器人由 BotMux 管理但未启用长轮询时，API 代理现在对 `getUpdates` 返回空结果，而不是将请求转发到 Telegram。这可以防止在您的后端调用 `getUpdates` 而 BotMux 已在轮询同一机器人时出现冲突错误。了解更多关于[长轮询](/docs/zh/features/long-polling)的信息。
+
+- **中文文档** — BotMux 文档现已提供简体中文版本，与英文和俄文并列。通过导航栏切换语言。详情请参阅 [i18n](/docs/zh/features/i18n)。
+
+</Update>
