@@ -693,13 +693,9 @@ func (s *Store) DeleteChat(botID int64, chatID int64) error {
 	return err
 }
 
-// Message methods (unchanged - keyed by chat_id which is globally unique)
-
-// SaveMessage inserts a new message or updates an existing one keyed by
-// (bot_id, chat_id, id). On conflict it refreshes text/caption and media so
-// that streaming bot edits (editMessageText / EditedMessage) are reflected in
-// the UI, while preserving identity fields (from_id, from_user, date,
-// reply_to_id) and the deleted tombstone.
+// SaveMessage upserts by (bot_id, chat_id, id). On conflict it refreshes only
+// text/media so streaming bot edits (editMessageText, EditedMessage) surface
+// in the UI; identity fields and the deleted tombstone are preserved.
 func (s *Store) SaveMessage(m Message) error {
 	res, err := s.db.Exec(`
 		INSERT INTO messages (id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, media_type, file_id)
@@ -710,19 +706,15 @@ func (s *Store) SaveMessage(m Message) error {
 			file_id    = CASE WHEN excluded.file_id    != '' THEN excluded.file_id    ELSE messages.file_id    END
 		WHERE messages.deleted = 0
 	`, m.ID, m.BotID, m.ChatID, m.FromUser, m.FromID, m.Text, m.Date, m.ReplyToID, m.MediaType, m.FileID)
-	if err == nil {
-		if rows, _ := res.RowsAffected(); rows > 0 {
-			// Reload the current row so subscribers see authoritative state
-			// after edits (identity/date preserved, text/media possibly updated).
-			if cur, gerr := s.GetMessage(m.BotID, m.ChatID, m.ID); gerr == nil && cur != nil {
-				s.notifySubscribers(*cur)
-			} else {
-				m.DateStr = time.UnixMilli(m.Date).Format("2006-01-02 15:04:05")
-				s.notifySubscribers(m)
-			}
+	if err != nil {
+		return err
+	}
+	if rows, _ := res.RowsAffected(); rows > 0 {
+		if cur, _ := s.GetMessage(m.BotID, m.ChatID, m.ID); cur != nil {
+			s.notifySubscribers(*cur)
 		}
 	}
-	return err
+	return nil
 }
 
 func (s *Store) GetMessages(botID, chatID int64, limit, offset int) ([]Message, error) {

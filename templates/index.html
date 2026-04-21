@@ -3456,8 +3456,7 @@ function connectMessageStream(chatID) {
       const msgMap = {};
       msgMap[m.id] = m;
 
-      // Streaming edits: if the row already exists, replace it in place so the
-      // full message text (not just the first chunk) becomes visible.
+      // Streaming edits: replace the existing row in place so text updates surface.
       const existing = document.getElementById('msg-' + m.id);
       if (existing) {
         const temp = document.createElement('div');
