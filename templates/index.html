@@ -2840,7 +2840,7 @@ function renderRoutes(routes) {
               <span class="route-cond-value">${r.source_chat_id}</span>
             </span>` : ''}
             <span class="route-cond">
-              <span class="route-cond-type">${condLabel}</span>
+              <span class="route-cond-type">${esc(condLabel)}</span>
               <span class="route-cond-value">${esc(r.condition_value)}</span>
             </span>
             ${r.action !== 'drop' ? `<span class="route-arrow"></span>
@@ -2895,11 +2895,11 @@ function updateRoutePreview() {
   preview.innerHTML = `
     <span style="color:var(--cyan)">${esc(sourceName)}</span>
     <span class="route-cond" style="margin:0 2px">
-      <span class="route-cond-type">${condLabel}</span>
+      <span class="route-cond-type">${esc(condLabel)}</span>
       <span class="route-cond-value">${esc(condValue.length > 20 ? condValue.substring(0,20) + '...' : condValue)}</span>
     </span>
     <span class="route-arrow"></span>
-    <span class="route-action-badge ${actionBadgeClass}">${actionLbl}</span>
+    <span class="route-action-badge ${actionBadgeClass}">${esc(actionLbl)}</span>
     ${isDrop ? '' : `<span style="color:var(--green)">${esc(targetName)}</span>`}
   `;
 }
@@ -3363,7 +3363,7 @@ function renderMsgRow(m, msgMap) {
     ${m.deleted ? `<span class="msg-deleted-badge">${t('deleted')}</span>` : ''}
     <span class="msg-time">${m.date_str}</span>
     <div class="msg-actions">
-      ${!m.deleted ? `<button class="btn btn-sm" onclick="setReply(${m.id}, '${esc(m.from_user).replace(/'/g, "\\'")}')">${t('reply')}</button>` : ''}
+      ${!m.deleted ? `<button class="btn btn-sm" onclick="setReply(${m.id}, '${esc(m.from_user).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">${t('reply')}</button>` : ''}
       ${currentChat.is_admin && !m.deleted ? `
         <button class="btn btn-sm" onclick="pinMsg(${m.id})">${t('pin')}</button>
         <button class="btn btn-danger btn-sm" onclick="deleteMsg(${m.id})">${t('del')}</button>
@@ -3887,7 +3887,7 @@ async function loadUsers(append = false) {
           `).join('')}</div>` : ''}
         </div>
         <div class="user-card-actions">
-          <button class="btn btn-sm" onclick="quickTag(${u.user_id}, '${esc(u.username).replace(/'/g, "\\'")}')">${t('tag')}</button>
+          <button class="btn btn-sm" onclick="quickTag(${u.user_id}, '${esc(u.username).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">${t('tag')}</button>
           ${currentChat.is_admin ? `
             <button class="btn btn-danger btn-sm" onclick="banUsr(${u.user_id})">${t('ban')}</button>
             <button class="btn btn-sm" onclick="unbanUsr(${u.user_id})">${t('unban')}</button>
