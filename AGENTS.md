@@ -18,7 +18,7 @@ go build -o botmux .
 # Flags: -addr :8080, -db botdata.db, -webhook URL
 ```
 
-No tests, no linter configured. Single `go build` produces the binary.
+No linter configured. Single `go build` produces the binary. Tests live in `tests/` (`go test ./tests/...`).
 
 ## Architecture
 

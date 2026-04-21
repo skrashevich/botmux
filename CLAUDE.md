@@ -73,9 +73,10 @@ Multi-package Go app organized into `internal/`, `pkg/`, and root `package main`
 ### internal/version — Version checking
 - **version.go** — `Checker` fetches latest release from GitHub API with 6-hour cache. `CompareSemver()` for version comparison.
 
-### Tests (root, package main)
-- **e2e_*_test.go** — End-to-end integration tests with fake Telegram/Slack/LLM servers.
-- **server_capture_test.go, longpoll_test.go, version_test.go** — Unit/integration tests.
+### Tests (tests/, package tests)
+- **tests/e2e_*_test.go** — End-to-end integration tests with fake Telegram/Slack/LLM servers.
+- **tests/server_capture_test.go, tests/longpoll_test.go, tests/version_test.go** — Unit/integration tests.
+- **tests/testdata/tg/** — Test fixtures (JSON snapshots, media files).
 
 ## Key Design Decisions
 
