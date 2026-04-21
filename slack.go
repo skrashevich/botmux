@@ -17,8 +17,9 @@ import (
 
 // SlackConfig holds Slack-specific bridge configuration (stored as JSON in BridgeConfig.Config)
 type SlackConfig struct {
-	BotToken      string `json:"bot_token"`      // xoxb-... Slack bot token
-	SigningSecret string `json:"signing_secret"` // Slack app signing secret for request verification
+	BotToken      string `json:"bot_token"`               // xoxb-... Slack bot token
+	SigningSecret string `json:"signing_secret"`          // Slack app signing secret for request verification
+	APIBaseURL    string `json:"api_base_url,omitempty"`  // base URL for Slack API calls; defaults to https://slack.com/api
 }
 
 // SlackEventPayload is the outer envelope Slack sends for all Events API requests
@@ -175,7 +176,11 @@ func (bm *BridgeManager) resolveSlackUsername(cfg *SlackConfig, userID string) s
 		return userID
 	}
 
-	req, err := http.NewRequest("GET", "https://slack.com/api/users.info?"+url.Values{"user": {userID}}.Encode(), nil)
+	base := cfg.APIBaseURL
+	if base == "" {
+		base = "https://slack.com/api"
+	}
+	req, err := http.NewRequest("GET", base+"/users.info?"+url.Values{"user": {userID}}.Encode(), nil)
 	if err != nil {
 		return userID
 	}
@@ -229,7 +234,11 @@ func (bm *BridgeManager) postSlackMessage(slackCfg *SlackConfig, channel, text, 
 		return fmt.Errorf("marshal error: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://slack.com/api/chat.postMessage", bytes.NewReader(data))
+	base := slackCfg.APIBaseURL
+	if base == "" {
+		base = "https://slack.com/api"
+	}
+	req, err := http.NewRequest("POST", base+"/chat.postMessage", bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("request error: %w", err)
 	}

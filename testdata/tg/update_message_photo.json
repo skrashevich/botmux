@@ -1,0 +1,46 @@
+{
+  "update_id": 10000002,
+  "message": {
+    "message_id": 1235,
+    "from": {
+      "id": 987654321,
+      "is_bot": false,
+      "first_name": "John",
+      "last_name": "Doe",
+      "username": "johndoe",
+      "language_code": "en"
+    },
+    "chat": {
+      "id": 987654321,
+      "first_name": "John",
+      "last_name": "Doe",
+      "username": "johndoe",
+      "type": "private"
+    },
+    "date": 1745064060,
+    "photo": [
+      {
+        "file_id": "AgACAgIAAxkBAAIBAAFm_example_small_AAJBW",
+        "file_unique_id": "AQADsmall",
+        "file_size": 1234,
+        "width": 90,
+        "height": 51
+      },
+      {
+        "file_id": "AgACAgIAAxkBAAIBAAFm_example_medium_AAJBW",
+        "file_unique_id": "AQADmedium",
+        "file_size": 12340,
+        "width": 320,
+        "height": 180
+      },
+      {
+        "file_id": "AgACAgIAAxkBAAIBAAFm_example_large_AAJBW",
+        "file_unique_id": "AQADlarge",
+        "file_size": 56789,
+        "width": 800,
+        "height": 450
+      }
+    ],
+    "caption": "Check out this photo!"
+  }
+}

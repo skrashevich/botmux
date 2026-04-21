@@ -1,0 +1,44 @@
+{
+  "ok": true,
+  "result": {
+    "message_id": 1250,
+    "from": {
+      "id": 111222333,
+      "is_bot": true,
+      "first_name": "MyBot",
+      "username": "mybot"
+    },
+    "chat": {
+      "id": 987654321,
+      "first_name": "John",
+      "last_name": "Doe",
+      "username": "johndoe",
+      "type": "private"
+    },
+    "date": 1745064480,
+    "photo": [
+      {
+        "file_id": "AgACAgIAAxkBAAIBAAFm_sent_small_AAJBW",
+        "file_unique_id": "AQADsentSmall",
+        "file_size": 2048,
+        "width": 90,
+        "height": 51
+      },
+      {
+        "file_id": "AgACAgIAAxkBAAIBAAFm_sent_medium_AAJBW",
+        "file_unique_id": "AQADsentMedium",
+        "file_size": 20480,
+        "width": 320,
+        "height": 180
+      },
+      {
+        "file_id": "AgACAgIAAxkBAAIBAAFm_sent_large_AAJBW",
+        "file_unique_id": "AQADsentLarge",
+        "file_size": 102400,
+        "width": 1280,
+        "height": 720
+      }
+    ],
+    "caption": "Here is your photo!"
+  }
+}

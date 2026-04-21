@@ -1,0 +1,39 @@
+{
+  "update_id": 10000006,
+  "chat_member": {
+    "chat": {
+      "id": -1001234567890,
+      "title": "Test Group",
+      "type": "supergroup",
+      "username": "testgroup"
+    },
+    "from": {
+      "id": 987654321,
+      "is_bot": false,
+      "first_name": "John",
+      "last_name": "Doe",
+      "username": "johndoe"
+    },
+    "date": 1745064300,
+    "old_chat_member": {
+      "user": {
+        "id": 555666777,
+        "is_bot": false,
+        "first_name": "Alice",
+        "username": "alice"
+      },
+      "status": "member"
+    },
+    "new_chat_member": {
+      "user": {
+        "id": 555666777,
+        "is_bot": false,
+        "first_name": "Alice",
+        "username": "alice"
+      },
+      "status": "kicked",
+      "until_date": 0
+    },
+    "invite_link": null
+  }
+}

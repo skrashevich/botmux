@@ -9,6 +9,8 @@ require (
 
 require golang.org/x/crypto v0.49.0
 
+require go.uber.org/goleak v1.3.0 // indirect
+
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect

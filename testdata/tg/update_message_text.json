@@ -1,0 +1,30 @@
+{
+  "update_id": 10000001,
+  "message": {
+    "message_id": 1234,
+    "from": {
+      "id": 987654321,
+      "is_bot": false,
+      "first_name": "John",
+      "last_name": "Doe",
+      "username": "johndoe",
+      "language_code": "en"
+    },
+    "chat": {
+      "id": 987654321,
+      "first_name": "John",
+      "last_name": "Doe",
+      "username": "johndoe",
+      "type": "private"
+    },
+    "date": 1745064000,
+    "text": "Hello, bot!",
+    "entities": [
+      {
+        "offset": 0,
+        "length": 11,
+        "type": "mention"
+      }
+    ]
+  }
+}

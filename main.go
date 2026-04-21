@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 )
 
 // Build-time variables injected via ldflags
@@ -94,7 +97,7 @@ func main() {
 
 	// Register CLI bot if token is provided
 	if *token != "" {
-		cliBot, err := NewBot(*token, store, 0)
+		cliBot, err := NewBot(*token, store, 0, telegramAPIURL)
 		if err != nil {
 			log.Fatalf("Failed to create bot: %v", err)
 		}
@@ -142,7 +145,12 @@ func main() {
 	// Set bridge notification hook on all managed bots
 	bridgeMgr.InstallHooks()
 
-	if err := server.Start(*addr); err != nil {
+	// Graceful shutdown: SIGINT/SIGTERM triggers srv.Shutdown(15s).
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := server.StartContext(ctx, *addr); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
+	log.Printf("shutdown: complete")
 }

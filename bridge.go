@@ -279,7 +279,7 @@ func (bm *BridgeManager) ensureManagedBot(botID int64) {
 	if err != nil {
 		return
 	}
-	managedBot, err := NewBot(bot.Token, bm.store, botID)
+	managedBot, err := NewBot(bot.Token, bm.store, botID, telegramAPIURL)
 	if err != nil {
 		log.Printf("[bridge] ensureManagedBot: failed for bot %d: %v", botID, err)
 		return

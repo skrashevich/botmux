@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -9,8 +10,10 @@ import (
 	"io"
 	"log"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -34,6 +37,7 @@ type Server struct {
 	demoMode       bool
 	logBuf         *LogBuffer
 	versionChecker *VersionChecker
+	tgAPIBaseURL   string // override for Telegram API base URL (tests/custom deployments)
 }
 
 func NewServer(store *Store, proxy *ProxyManager) *Server {
@@ -43,6 +47,15 @@ func NewServer(store *Store, proxy *ProxyManager) *Server {
 		bots:           make(map[int64]*Bot),
 		versionChecker: NewVersionChecker(),
 	}
+}
+
+// tgAPIURL returns the effective Telegram API base URL for this server instance.
+// When tgAPIBaseURL is set (e.g. in tests), it takes precedence over the package-level telegramAPIURL.
+func (s *Server) tgAPIURL() string {
+	if s.tgAPIBaseURL != "" {
+		return s.tgAPIBaseURL
+	}
+	return telegramAPIURL
 }
 
 func (s *Server) SetBridgeManager(bm *BridgeManager) {
@@ -230,6 +243,36 @@ func (s *Server) Start(addr string) error {
 	return http.ListenAndServe(addr, mux)
 }
 
+// StartContext runs the HTTP server until ctx is cancelled, then performs a
+// graceful Shutdown (15s timeout). Prefer this over Start() in main() so that
+// SIGTERM/SIGINT causes in-flight requests to drain cleanly and pending DB
+// writes (SQLite WAL checkpoint) complete before the process exits.
+func (s *Server) StartContext(ctx context.Context, addr string) error {
+	mux := s.BuildMux()
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		log.Printf("Web interface at http://%s", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- err
+		}
+		close(errCh)
+	}()
+	select {
+	case <-ctx.Done():
+		log.Printf("shutdown: draining HTTP server (15s timeout)...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutdownCtx)
+	case err := <-errCh:
+		return err
+	}
+}
+
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	data, err := templateFS.ReadFile("templates/index.html")
 	if err != nil {
@@ -349,7 +392,7 @@ func (s *Server) handleBotAdd(w http.ResponseWriter, r *http.Request) {
 
 	// Create managed Bot instance if needed
 	if req.ManageEnabled {
-		managedBot, err := NewBot(req.Token, s.store, id)
+		managedBot, err := NewBot(req.Token, s.store, id, s.tgAPIBaseURL)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -719,7 +762,7 @@ func (s *Server) handleLongPollGetUpdates(w http.ResponseWriter, r *http.Request
 	var limit, timeout int
 	if r.Method == http.MethodPost {
 		// Read body once, then try JSON → form fallback
-		bodyBytes, _ := io.ReadAll(r.Body)
+		bodyBytes, _ := io.ReadAll(io.LimitReader(r.Body, 64*1024))
 		var parsed bool
 		if len(bodyBytes) > 0 {
 			var jsonBody struct {
@@ -2514,6 +2557,54 @@ func isValidHexColor(s string) bool {
 	return true
 }
 
+// validBotToken checks for safe characters only. Real Telegram format is
+// <digits>:<35 base64url chars>, but we accept any alphanumeric+`_-` token so
+// test fixtures keep working. The point is to reject ?, /, @, %, CRLF etc.
+// which would inject metacharacters into the upstream URL.
+func validBotToken(tok string) bool {
+	if tok == "" || len(tok) > 128 {
+		return false
+	}
+	for i := 0; i < len(tok); i++ {
+		c := tok[i]
+		ok := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || c == '_' || c == '-' || c == ':'
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// validTelegramMethod allows only bare alphanumeric method names (no /, ?, @, .).
+// Blocks URL injection via method path segment.
+func validTelegramMethod(m string) bool {
+	if m == "" || len(m) > 64 {
+		return false
+	}
+	for i := 0; i < len(m); i++ {
+		c := m[i]
+		ok := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// validFilePath whitelists Telegram file paths (typically "photos/file_N.jpg"
+// or "documents/file_N.ext"). Reject traversal, schemes, and absolute paths.
+func validFilePath(p string) bool {
+	if p == "" || len(p) > 256 {
+		return false
+	}
+	if strings.Contains(p, "..") || strings.HasPrefix(p, "/") ||
+		strings.ContainsAny(p, "\\:@?#") {
+		return false
+	}
+	return true
+}
+
 // handleTelegramAPIProxy proxies requests to api.telegram.org and captures sent messages.
 // URL format: /tgapi/bot{TOKEN}/{method}
 // Backends set their API base URL to http://{addr}/tgapi/ instead of https://api.telegram.org/
@@ -2528,6 +2619,19 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 
 	botToken := strings.TrimPrefix(parts[0], "bot")
 	method := parts[1]
+
+	// Validate token shape (Telegram format: <bot_id>:<35-char base64url-alphabet>).
+	// Reject anything that could embed URL metacharacters into the upstream request.
+	if !validBotToken(botToken) {
+		http.Error(w, "invalid bot token", 400)
+		return
+	}
+	// Validate method — must be alphanumeric only. Prevents URL injection / path
+	// traversal into the upstream URL constructed via fmt.Sprintf later.
+	if !validTelegramMethod(method) {
+		http.Error(w, "invalid method", 400)
+		return
+	}
 
 	// Intercept logOut and close — never proxy these to Telegram.
 	// logOut disables the token for 10 minutes, close shuts down the bot instance.
@@ -2557,30 +2661,31 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Intercept getUpdates — never proxy it to Telegram when botmux is already polling this bot.
-	// That would create two concurrent getUpdates calls and Telegram returns "conflict" errors.
+	// Intercept getUpdates — never proxy it to Telegram when the bot is known to
+	// botmux. Two concurrent getUpdates consumers (us + backend) would produce
+	// Telegram "Conflict: terminated by other getUpdates request" errors.
 	if method == "getUpdates" {
 		if botCfg, err := s.store.GetBotConfigByToken(botToken); err == nil {
 			if botCfg.LongPollEnabled {
 				log.Printf("[tgapi-proxy] getUpdates intercepted → long-poll queue for botID=%d", botCfg.ID)
-				// Serve updates from in-memory UpdateQueue
 				s.handleLongPollGetUpdates(w, r, botCfg)
 				return
 			}
-			if s.proxy != nil && s.proxy.IsRunning(botCfg.ID) {
-				// Bot is managed by botmux (polling or webhook) — block getUpdates from reaching Telegram
-				writeJSON(w, map[string]any{
-					"ok":          true,
-					"result":      []any{},
-					"description": "getUpdates is handled by botmux; enable long_poll_enabled to receive updates via this endpoint",
-				})
-				return
-			}
+			// Bot is known (stored) — always intercept to prevent split-brain with
+			// botmux's internal pollLoop (which may be starting/stopping/restarting).
+			writeJSON(w, map[string]any{
+				"ok":          true,
+				"result":      []any{},
+				"description": "getUpdates is handled by botmux; enable long_poll_enabled to receive updates via this endpoint",
+			})
+			return
 		}
 	}
 
 	// Read request body
-	reqBody, err := io.ReadAll(r.Body)
+	// Cap /tgapi/ body to 50 MB — sendDocument/sendVideo can include file uploads
+	// (inline multipart), but nothing legit will exceed this. Prevents OOM DoS.
+	reqBody, err := io.ReadAll(io.LimitReader(r.Body, 50*1024*1024))
 	if err != nil {
 		http.Error(w, "Failed to read request body", 400)
 		return
@@ -2618,7 +2723,7 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 	log.Printf("[tgapi-proxy] %s %s bot=%s path=%s body=%s", r.Method, method, maskedToken, r.URL.Path, bodyPreview)
 
 	// Forward to Telegram
-	tgURL := fmt.Sprintf("%s/bot%s/%s", telegramAPIURL, botToken, method)
+	tgURL := fmt.Sprintf("%s/bot%s/%s", s.tgAPIURL(), botToken, method)
 	tgReq, err := http.NewRequestWithContext(r.Context(), r.Method, tgURL, io.NopCloser(strings.NewReader(string(reqBody))))
 	if err != nil {
 		http.Error(w, "Failed to create request", 500)
@@ -2697,9 +2802,20 @@ func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 1: getFile to get file_path
-	getFileURL := fmt.Sprintf("%s/bot%s/getFile?file_id=%s", telegramAPIURL, token, fileID)
-	resp, err := http.Get(getFileURL)
+	// Step 1: getFile to get file_path. Validate + escape file_id to prevent
+	// query-string injection into the outbound URL.
+	if fileID == "" || len(fileID) > 256 || strings.ContainsAny(fileID, "\r\n\t /\\?#") {
+		http.Error(w, "invalid file_id", 400)
+		return
+	}
+	if !validBotToken(token) {
+		http.Error(w, "invalid bot token", 400)
+		return
+	}
+	getFileURL := fmt.Sprintf("%s/bot%s/getFile?file_id=%s", s.tgAPIURL(), token, url.QueryEscape(fileID))
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, getFileURL, nil)
+	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, "getFile failed", 500)
 		return
@@ -2713,24 +2829,77 @@ func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
 			FileSize int64  `json:"file_size"`
 		} `json:"result"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&fileResp); err != nil || !fileResp.OK {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&fileResp); err != nil || !fileResp.OK {
 		http.Error(w, "getFile failed", 500)
 		return
 	}
 
+	// Validate FilePath returned by Telegram — untrusted when custom -tg-api is in play.
+	if !validFilePath(fileResp.Result.FilePath) {
+		http.Error(w, "invalid file path", 400)
+		return
+	}
+
 	// Step 2: Download and stream the file (with WebP→PNG conversion)
-	downloadURL := fmt.Sprintf("%s/file/bot%s/%s", telegramAPIURL, token, fileResp.Result.FilePath)
+	downloadURL := fmt.Sprintf("%s/file/bot%s/%s", s.tgAPIURL(), token, fileResp.Result.FilePath)
 	proxyFileDownload(w, downloadURL, fileResp.Result.FilePath)
 }
 
 // handleInterceptSetWebhook intercepts setWebhook calls and configures botmux to proxy updates
 // to the specified URL instead of forwarding the call to Telegram.
+// validateWebhookURL ensures the caller-supplied webhook URL is safe to register.
+// Rejects non-HTTPS (except loopback for dev), credentials in URL, and private/loopback/link-local
+// hosts when over HTTPS — blocks SSRF where attacker registers http://169.254.169.254/ or similar.
+// Localhost HTTP is allowed to not break local dev/test; production deployments should set
+// BOTMUX_STRICT_WEBHOOK=1 to require HTTPS always (see env check).
+func validateWebhookURL(raw string) error {
+	if raw == "" {
+		return fmt.Errorf("empty url")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid url: %w", err)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("url missing host")
+	}
+	if u.User != nil {
+		return fmt.Errorf("url must not contain userinfo credentials")
+	}
+	strict := os.Getenv("BOTMUX_STRICT_WEBHOOK") == "1"
+	switch u.Scheme {
+	case "https":
+		// OK
+	case "http":
+		// Allow http ONLY for loopback hostnames in non-strict mode.
+		host := u.Hostname()
+		if strict {
+			return fmt.Errorf("http not allowed; use https")
+		}
+		if !(host == "localhost" || host == "127.0.0.1" || host == "::1") {
+			return fmt.Errorf("http not allowed for non-loopback host %q; use https", host)
+		}
+	default:
+		return fmt.Errorf("unsupported scheme %q (https required)", u.Scheme)
+	}
+	// Block IP literals pointing at private / link-local / loopback ranges unless loopback-http allowed above.
+	if ip := net.ParseIP(u.Hostname()); ip != nil {
+		if strict && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()) {
+			return fmt.Errorf("private/loopback/link-local IP not allowed: %s", ip)
+		}
+		if !strict && (ip.IsLinkLocalUnicast() || ip.IsUnspecified()) {
+			return fmt.Errorf("link-local or unspecified IP not allowed: %s", ip)
+		}
+	}
+	return nil
+}
+
 func (s *Server) handleInterceptSetWebhook(w http.ResponseWriter, r *http.Request, botToken string) {
 	// Parse webhook URL from request (supports JSON body, form body, and query params)
 	var webhookURL string
 	var dropPending bool
 
-	body, _ := io.ReadAll(r.Body)
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 64*1024))
 	if len(body) > 0 {
 		// Try JSON
 		var params map[string]any
@@ -2759,15 +2928,27 @@ func (s *Server) handleInterceptSetWebhook(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// SSRF / URL hygiene validation
+	if err := validateWebhookURL(webhookURL); err != nil {
+		writeJSON(w, map[string]any{"ok": false, "error_code": 400, "description": "invalid webhook url: " + err.Error()})
+		return
+	}
+
 	maskedToken := botToken
 	if len(maskedToken) > 8 {
 		maskedToken = maskedToken[:4] + "..." + maskedToken[len(maskedToken)-4:]
 	}
 
-	// Find or auto-register bot
+	// Find or auto-register bot. Auto-register is gated by BOTMUX_ALLOW_AUTO_REGISTER=1
+	// to prevent any attacker who phished a bot token from redirecting its updates
+	// through the service. Default: reject unknown tokens with 401.
 	botCfg, err := s.store.GetBotConfigByToken(botToken)
 	if err != nil {
-		// Bot not in DB — auto-register via getMe
+		if os.Getenv("BOTMUX_ALLOW_AUTO_REGISTER") != "1" {
+			log.Printf("[tgapi-proxy] setWebhook: rejected unknown bot=%s (auto-register disabled)", maskedToken)
+			writeJSON(w, map[string]any{"ok": false, "error_code": 401, "description": "Unauthorized: bot not registered; set BOTMUX_ALLOW_AUTO_REGISTER=1 to allow auto-registration"})
+			return
+		}
 		botCfg, err = s.autoRegisterBot(botToken)
 		if err != nil {
 			log.Printf("[tgapi-proxy] setWebhook: failed to auto-register bot=%s: %v", maskedToken, err)
@@ -2792,8 +2973,10 @@ func (s *Server) handleInterceptSetWebhook(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	// Restart bot in proxy manager to pick up new config
+	// Mark as webhook-mode so pollLoop stops and updates come only via /tghook/.
+	// Without this, the bot would be polled AND receive webhook updates → dual delivery.
 	if s.proxy != nil {
+		s.proxy.SetWebhookMode(botCfg.ID)
 		s.proxy.RestartBot(botCfg.ID)
 	}
 
@@ -2817,7 +3000,7 @@ func (s *Server) handleInterceptDeleteWebhook(w http.ResponseWriter, r *http.Req
 
 	// Parse drop_pending_updates
 	var dropPending bool
-	body, _ := io.ReadAll(r.Body)
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 8*1024))
 	if len(body) > 0 {
 		var params map[string]any
 		if json.Unmarshal(body, &params) == nil {
@@ -2876,9 +3059,13 @@ func (s *Server) handleInterceptGetWebhookInfo(w http.ResponseWriter, botToken s
 
 // autoRegisterBot validates a bot token via getMe and registers it in the database.
 func (s *Server) autoRegisterBot(token string) (*BotConfig, error) {
+	if !validBotToken(token) {
+		return nil, fmt.Errorf("invalid bot token")
+	}
 	// Call getMe to validate token and get bot info
-	getMeURL := fmt.Sprintf("%s/bot%s/getMe", telegramAPIURL, token)
-	resp, err := http.Get(getMeURL)
+	getMeURL := fmt.Sprintf("%s/bot%s/getMe", s.tgAPIURL(), token)
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(getMeURL)
 	if err != nil {
 		return nil, fmt.Errorf("getMe request failed: %w", err)
 	}
@@ -2893,7 +3080,7 @@ func (s *Server) autoRegisterBot(token string) (*BotConfig, error) {
 			IsBot     bool   `json:"is_bot"`
 		} `json:"result"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&getMeResp); err != nil || !getMeResp.OK {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&getMeResp); err != nil || !getMeResp.OK {
 		return nil, fmt.Errorf("getMe failed or token invalid")
 	}
 
@@ -2920,7 +3107,10 @@ func (s *Server) autoRegisterBot(token string) (*BotConfig, error) {
 // proxyFileDownload downloads a file from the upstream Telegram API and streams it to w.
 // Handles WebP→PNG conversion for stickers and Content-Type detection.
 func proxyFileDownload(w http.ResponseWriter, downloadURL string, filePath string) {
-	resp, err := http.Get(downloadURL)
+	// 60s total client timeout — covers large media downloads but bounds the
+	// goroutine lifetime if upstream stalls.
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Get(downloadURL)
 	if err != nil {
 		http.Error(w, "download failed", 502)
 		return
@@ -2993,13 +3183,22 @@ func (s *Server) handleTelegramFileProxy(w http.ResponseWriter, r *http.Request)
 	botToken := strings.TrimPrefix(parts[0], "bot")
 	remotePath := parts[1]
 
+	if !validBotToken(botToken) {
+		http.Error(w, "invalid bot token", 400)
+		return
+	}
+	if !validFilePath(remotePath) {
+		http.Error(w, "invalid file path", 400)
+		return
+	}
+
 	maskedToken := botToken
 	if len(maskedToken) > 8 {
 		maskedToken = maskedToken[:4] + "..." + maskedToken[len(maskedToken)-4:]
 	}
 	log.Printf("[tgapi-file] GET bot=%s path=%s", maskedToken, remotePath)
 
-	downloadURL := fmt.Sprintf("%s/file/bot%s/%s", telegramAPIURL, botToken, remotePath)
+	downloadURL := fmt.Sprintf("%s/file/bot%s/%s", s.tgAPIURL(), botToken, remotePath)
 	proxyFileDownload(w, downloadURL, remotePath)
 }
 

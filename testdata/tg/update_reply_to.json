@@ -1,0 +1,41 @@
+{
+  "update_id": 10000008,
+  "message": {
+    "message_id": 1241,
+    "from": {
+      "id": 987654321,
+      "is_bot": false,
+      "first_name": "John",
+      "last_name": "Doe",
+      "username": "johndoe",
+      "language_code": "en"
+    },
+    "chat": {
+      "id": 987654321,
+      "first_name": "John",
+      "last_name": "Doe",
+      "username": "johndoe",
+      "type": "private"
+    },
+    "date": 1745064420,
+    "text": "This is a reply!",
+    "reply_to_message": {
+      "message_id": 1234,
+      "from": {
+        "id": 111222333,
+        "is_bot": true,
+        "first_name": "MyBot",
+        "username": "mybot"
+      },
+      "chat": {
+        "id": 987654321,
+        "first_name": "John",
+        "last_name": "Doe",
+        "username": "johndoe",
+        "type": "private"
+      },
+      "date": 1745064000,
+      "text": "Original message from the bot"
+    }
+  }
+}

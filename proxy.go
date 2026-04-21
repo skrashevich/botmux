@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -157,16 +159,31 @@ func (q *UpdateQueue) QueueDepth() int {
 	return len(q.updates)
 }
 
+// rateLimitError signals that Telegram returned 429 with a retry_after hint.
+// pollLoop and other consumers honor the delay instead of running their own
+// short backoff (which would extend the flood-ban window).
+type rateLimitError struct {
+	After       time.Duration
+	Description string
+}
+
+func (e *rateLimitError) Error() string {
+	return fmt.Sprintf("rate limited, retry after %s: %s", e.After, e.Description)
+}
+
 // ProxyManager manages polling and forwarding for all bots
 type ProxyManager struct {
-	store        *Store
-	mu           sync.Mutex
-	runners      map[int64]*proxyRunner
-	managedBots  map[int64]*Bot         // botID -> Bot instance for management processing
-	webhookBots  map[int64]bool         // bots receiving updates via webhook (skip polling)
-	updateQueues map[int64]*UpdateQueue // botID -> long-poll update queue (lazy init)
-	client       *http.Client
-	llmRouter    *LLMRouter // LLM-based routing
+	store             *Store
+	mu                sync.Mutex
+	runners           map[int64]*proxyRunner
+	managedBots       map[int64]*Bot         // botID -> Bot instance for management processing
+	webhookBots       map[int64]bool         // bots receiving updates via webhook (skip polling)
+	updateQueues      map[int64]*UpdateQueue // botID -> long-poll update queue (lazy init)
+	client            *http.Client
+	llmRouter         *LLMRouter    // LLM-based routing
+	tgAPIBaseURL      string        // base URL for Telegram API (default = package-level telegramAPIURL)
+	retryDelayInitial time.Duration // initial backoff delay for pollLoop (default 1s)
+	retryDelayMax     time.Duration // maximum backoff delay for pollLoop (default 30s)
 }
 
 type proxyRunner struct {
@@ -176,13 +193,16 @@ type proxyRunner struct {
 
 func NewProxyManager(store *Store) *ProxyManager {
 	return &ProxyManager{
-		store:        store,
-		runners:      make(map[int64]*proxyRunner),
-		managedBots:  make(map[int64]*Bot),
-		webhookBots:  make(map[int64]bool),
-		updateQueues: make(map[int64]*UpdateQueue),
-		client:       &http.Client{Timeout: 120 * time.Second},
-		llmRouter:    NewLLMRouter(store),
+		store:             store,
+		runners:           make(map[int64]*proxyRunner),
+		managedBots:       make(map[int64]*Bot),
+		webhookBots:       make(map[int64]bool),
+		updateQueues:      make(map[int64]*UpdateQueue),
+		client:            &http.Client{Timeout: 120 * time.Second},
+		llmRouter:         NewLLMRouter(store),
+		tgAPIBaseURL:      telegramAPIURL,
+		retryDelayInitial: 1 * time.Second,
+		retryDelayMax:     30 * time.Second,
 	}
 }
 
@@ -259,7 +279,8 @@ func (pm *ProxyManager) WebhookHandler(botID int64) http.HandlerFunc {
 			return
 		}
 
-		body, err := io.ReadAll(r.Body)
+		// Telegram updates are <30KB in practice; cap at 256KB for safety.
+		body, err := io.ReadAll(io.LimitReader(r.Body, 256*1024))
 		if err != nil {
 			http.Error(w, "Bad request", 400)
 			return
@@ -327,7 +348,15 @@ func (pm *ProxyManager) processUpdate(botID int64, rawUpdate map[string]any) {
 	// LLM-based routing
 	pm.applyLLMRoutes(botID, rawUpdate)
 
-	pm.store.UpdateBotOffset(botID, int64(updateID)+1)
+	// Skip offset advancement for bridge-synthetic updates. Bridge uses
+	// time.Now().Unix() as seed (~1.7B+), while real Telegram update_ids are
+	// small positive ints (<1e9 in practice). Advancing bot.Offset past a real
+	// Telegram id would permanently skip all future real updates. Threshold
+	// 10^9 is a safe sentinel between real TG range and bridge synthetic range.
+	const bridgeUpdateIDThreshold = int64(1_000_000_000)
+	if realID := int64(updateID); realID > 0 && realID < bridgeUpdateIDThreshold {
+		pm.store.UpdateBotOffset(botID, realID+1)
+	}
 	pm.store.UpdateBotStatus(botID, "", time.Now().Format(time.RFC3339))
 }
 
@@ -359,7 +388,7 @@ func (pm *ProxyManager) Start() {
 				pm.mu.Unlock()
 				if !hasManagedBot {
 					log.Printf("[proxy] Start: creating managed Bot instance for bot id=%d", bot.ID)
-					managedBot, err := NewBot(bot.Token, pm.store, bot.ID)
+					managedBot, err := NewBot(bot.Token, pm.store, bot.ID, pm.tgAPIBaseURL)
 					if err != nil {
 						log.Printf("[proxy] Start: failed to create Bot instance for bot id=%d: %v", bot.ID, err)
 					} else {
@@ -437,25 +466,22 @@ func (pm *ProxyManager) RestartBot(botID int64) error {
 
 	pm.stopBot(botID)
 
-	// Skip polling for webhook-mode bots
 	pm.mu.Lock()
 	isWebhook := pm.webhookBots[botID]
 	pm.mu.Unlock()
-	if isWebhook {
-		log.Printf("[proxy] RestartBot: botID=%d uses webhook mode, not starting polling", botID)
-		return nil
-	}
 
 	active := bot.ManageEnabled || bot.ProxyEnabled
 
-	// Create or remove managed Bot instance
+	// Create or remove managed Bot instance. This MUST run even for webhook-mode
+	// bots — WebhookHandler → processForManagement needs the Bot instance to
+	// dispatch updates; skipping this leaves incoming webhook updates unprocessed.
 	if bot.ManageEnabled {
 		pm.mu.Lock()
 		_, hasManagedBot := pm.managedBots[botID]
 		pm.mu.Unlock()
 		if !hasManagedBot {
 			log.Printf("[proxy] RestartBot: creating managed Bot instance for botID=%d", botID)
-			managedBot, err := NewBot(bot.Token, pm.store, botID)
+			managedBot, err := NewBot(bot.Token, pm.store, botID, pm.tgAPIBaseURL)
 			if err != nil {
 				log.Printf("[proxy] RestartBot: failed to create bot instance for botID=%d: %v", botID, err)
 				return fmt.Errorf("failed to create bot instance: %w", err)
@@ -466,6 +492,12 @@ func (pm *ProxyManager) RestartBot(botID int64) error {
 		}
 	} else {
 		pm.UnregisterManagedBot(botID)
+	}
+
+	// Skip polling for webhook-mode bots (managed Bot instance already set up above).
+	if isWebhook {
+		log.Printf("[proxy] RestartBot: botID=%d uses webhook mode, not starting polling", botID)
+		return nil
 	}
 
 	if active {
@@ -481,8 +513,8 @@ func (pm *ProxyManager) RestartBot(botID int64) error {
 }
 
 func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
-	retryDelay := time.Second
-	maxRetryDelay := 30 * time.Second
+	retryDelay := pm.retryDelayInitial
+	maxRetryDelay := pm.retryDelayMax
 	lastHealthCheck := time.Time{}
 	healthCheckInterval := 60 * time.Second
 	pollCount := 0
@@ -499,8 +531,20 @@ func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
 
 		bot, err := pm.store.GetBotConfig(botID)
 		if err != nil {
-			log.Printf("[proxy] pollLoop: failed to load config for botID=%d: %v — exiting", botID, err)
-			return
+			// ErrNoRows → bot deleted, exit permanently.
+			// Other errors (SQLite BUSY/LOCKED, disk stall) → transient, retry with backoff.
+			if errors.Is(err, sql.ErrNoRows) {
+				log.Printf("[proxy] pollLoop: botID=%d deleted — exiting", botID)
+				return
+			}
+			log.Printf("[proxy] pollLoop: botID=%d transient store error: %v — retrying", botID, err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(retryDelay):
+			}
+			retryDelay = min(retryDelay*2, maxRetryDelay)
+			continue
 		}
 		if !bot.ManageEnabled && !bot.ProxyEnabled {
 			log.Printf("[proxy] pollLoop: botID=%d has no manage/proxy enabled — exiting", botID)
@@ -521,8 +565,28 @@ func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
 		updates, err := pm.getUpdates(ctx, bot.Token, bot.Offset, timeout)
 		if err != nil {
 			pm.store.UpdateBotStatus(botID, fmt.Sprintf("getUpdates error: %v", err), "")
-			log.Printf("[proxy] pollLoop: botID=%d getUpdates ERROR: %v", botID, err)
 
+			// Honor Telegram's retry_after on 429 (rate limit). Short exponential
+			// backoff would hammer the API and extend the flood ban.
+			var rlErr *rateLimitError
+			if errors.As(err, &rlErr) {
+				delay := rlErr.After
+				if delay < retryDelay {
+					delay = retryDelay
+				}
+				if delay > maxRetryDelay*4 {
+					delay = maxRetryDelay * 4 // absolute cap against absurd retry_after
+				}
+				log.Printf("[proxy] pollLoop: botID=%d 429 retry_after=%s (honoring)", botID, delay)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(delay):
+				}
+				continue
+			}
+
+			log.Printf("[proxy] pollLoop: botID=%d getUpdates ERROR: %v", botID, err)
 			select {
 			case <-ctx.Done():
 				return
@@ -532,7 +596,7 @@ func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
 			continue
 		}
 
-		retryDelay = time.Second
+		retryDelay = pm.retryDelayInitial
 
 		if len(updates) > 0 {
 			log.Printf("[proxy] pollLoop: botID=%d received %d updates", botID, len(updates))
@@ -986,7 +1050,7 @@ func (pm *ProxyManager) getUpdates(ctx context.Context, token string, offset int
 	}
 	log.Printf("[getUpdates] → Telegram: token=%s offset=%d timeout=%ds limit=100", maskedToken, offset, timeout)
 
-	url := fmt.Sprintf("%s/bot%s/getUpdates", telegramAPIURL, token)
+	url := fmt.Sprintf("%s/bot%s/getUpdates", pm.tgAPIBaseURL, token)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, err
@@ -1020,7 +1084,10 @@ func (pm *ProxyManager) getUpdates(ctx context.Context, token string, offset int
 
 	if !result.OK {
 		if result.RetryAfter > 0 {
-			return nil, fmt.Errorf("rate limited, retry after %ds: %s", result.RetryAfter, result.Description)
+			return nil, &rateLimitError{
+				After:       time.Duration(result.RetryAfter) * time.Second,
+				Description: result.Description,
+			}
 		}
 		return nil, fmt.Errorf("API error %d: %s", result.ErrorCode, result.Description)
 	}
@@ -1095,7 +1162,7 @@ func (pm *ProxyManager) handleWebhookReply(token string, body []byte) {
 		return
 	}
 
-	apiURL := fmt.Sprintf("%s/bot%s/%s", telegramAPIURL, token, method)
+	apiURL := fmt.Sprintf("%s/bot%s/%s", pm.tgAPIBaseURL, token, method)
 	log.Printf("[proxy] handleWebhookReply: executing method=%s (%d bytes params)", method, len(data))
 
 	resp, err := pm.client.Post(apiURL, "application/json", bytes.NewReader(data))
@@ -1111,7 +1178,7 @@ func (pm *ProxyManager) handleWebhookReply(token string, body []byte) {
 }
 
 func (pm *ProxyManager) ValidateToken(token string) (string, error) {
-	url := fmt.Sprintf("%s/bot%s/getMe", telegramAPIURL, token)
+	url := fmt.Sprintf("%s/bot%s/getMe", pm.tgAPIBaseURL, token)
 	resp, err := pm.client.Get(url)
 	if err != nil {
 		return "", err
@@ -1136,7 +1203,7 @@ func (pm *ProxyManager) ValidateToken(token string) (string, error) {
 
 func (pm *ProxyManager) DeleteWebhook(token string) error {
 	log.Printf("[proxy] DeleteWebhook: removing webhook")
-	url := fmt.Sprintf("%s/bot%s/deleteWebhook", telegramAPIURL, token)
+	url := fmt.Sprintf("%s/bot%s/deleteWebhook", pm.tgAPIBaseURL, token)
 	resp, err := pm.client.Get(url)
 	if err != nil {
 		return err

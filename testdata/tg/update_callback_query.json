@@ -1,0 +1,42 @@
+{
+  "update_id": 10000004,
+  "callback_query": {
+    "id": "4382bfdwdsb323b2d9",
+    "from": {
+      "id": 987654321,
+      "is_bot": false,
+      "first_name": "John",
+      "last_name": "Doe",
+      "username": "johndoe",
+      "language_code": "en"
+    },
+    "message": {
+      "message_id": 1111,
+      "from": {
+        "id": 111222333,
+        "is_bot": true,
+        "first_name": "MyBot",
+        "username": "mybot"
+      },
+      "chat": {
+        "id": 987654321,
+        "first_name": "John",
+        "last_name": "Doe",
+        "username": "johndoe",
+        "type": "private"
+      },
+      "date": 1745064180,
+      "text": "Choose an option:",
+      "reply_markup": {
+        "inline_keyboard": [
+          [
+            {"text": "Option A", "callback_data": "option_a"},
+            {"text": "Option B", "callback_data": "option_b"}
+          ]
+        ]
+      }
+    },
+    "chat_instance": "-1234567890123456789",
+    "data": "option_a"
+  }
+}

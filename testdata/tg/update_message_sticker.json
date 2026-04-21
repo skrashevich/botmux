@@ -1,0 +1,41 @@
+{
+  "update_id": 10000003,
+  "message": {
+    "message_id": 1236,
+    "from": {
+      "id": 987654321,
+      "is_bot": false,
+      "first_name": "John",
+      "last_name": "Doe",
+      "username": "johndoe",
+      "language_code": "en"
+    },
+    "chat": {
+      "id": 987654321,
+      "first_name": "John",
+      "last_name": "Doe",
+      "username": "johndoe",
+      "type": "private"
+    },
+    "date": 1745064120,
+    "sticker": {
+      "file_id": "CAACAgIAAxkBAAIBAAFm_sticker_main_AAJBW",
+      "file_unique_id": "AQADsticker",
+      "type": "regular",
+      "width": 512,
+      "height": 512,
+      "is_animated": false,
+      "is_video": false,
+      "thumbnail": {
+        "file_id": "AAMCAgADGQEAAgEAAWb_sticker_thumb_AAJBW",
+        "file_unique_id": "AQADstickerThumb",
+        "file_size": 3456,
+        "width": 128,
+        "height": 128
+      },
+      "emoji": "\ud83d\ude00",
+      "set_name": "SampleStickerPack",
+      "file_size": 19678
+    }
+  }
+}

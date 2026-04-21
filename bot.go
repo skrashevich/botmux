@@ -17,14 +17,15 @@ type Bot struct {
 	api           *tgbotapi.BotAPI
 	store         *Store
 	botID         int64 // ID in bots table
+	baseURL       string
 	onMessageSent OnMessageSentFunc
 }
 
-func NewBot(token string, store *Store, botID int64) (*Bot, error) {
+func NewBot(token string, store *Store, botID int64, baseURL string) (*Bot, error) {
 	var api *tgbotapi.BotAPI
 	var err error
-	if telegramAPIURL != "https://api.telegram.org" {
-		api, err = tgbotapi.NewBotAPIWithAPIEndpoint(token, telegramAPIURL+"/bot%s/%s")
+	if baseURL != "" && baseURL != "https://api.telegram.org" {
+		api, err = tgbotapi.NewBotAPIWithAPIEndpoint(token, baseURL+"/bot%s/%s")
 	} else {
 		api, err = tgbotapi.NewBotAPI(token)
 	}
@@ -32,7 +33,7 @@ func NewBot(token string, store *Store, botID int64) (*Bot, error) {
 		return nil, err
 	}
 	log.Printf("Bot [%d] authorized as @%s", botID, api.Self.UserName)
-	return &Bot{api: api, store: store, botID: botID}, nil
+	return &Bot{api: api, store: store, botID: botID, baseURL: baseURL}, nil
 }
 
 // WebhookStatus represents the current webhook state of the bot
@@ -116,14 +117,64 @@ func (b *Bot) processUpdate(update tgbotapi.Update) {
 	if update.Message != nil {
 		b.handleMessage(update.Message)
 	}
+	if update.EditedMessage != nil {
+		// Treat edited messages as updates to an existing message (save latest state)
+		b.handleMessage(update.EditedMessage)
+	}
 	if update.ChannelPost != nil {
 		b.handleChannelPost(update.ChannelPost)
+	}
+	if update.EditedChannelPost != nil {
+		b.handleChannelPost(update.EditedChannelPost)
 	}
 	if update.MyChatMember != nil {
 		b.handleMyChatMember(update.MyChatMember)
 	}
 	if update.ChatMember != nil {
 		b.handleChatMember(update.ChatMember)
+	}
+	if update.CallbackQuery != nil {
+		b.handleCallbackQuery(update.CallbackQuery)
+	}
+}
+
+// handleCallbackQuery tracks inline-button interactions so they appear in message
+// history / user profile and can participate in routing. Stored as a synthetic
+// message with MediaType="callback" and Text set to the callback data.
+func (b *Bot) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
+	if cb == nil || cb.From == nil {
+		return
+	}
+	var chatID int64
+	var replyToID int
+	if cb.Message != nil {
+		chatID = cb.Message.Chat.ID
+		b.trackChat(&cb.Message.Chat)
+		replyToID = cb.Message.MessageID
+	}
+	if chatID == 0 {
+		return
+	}
+	fromUser := formatUsername(cb.From)
+	b.store.TrackUser(chatID, cb.From.ID, fromUser)
+
+	// Synthetic message id for callback tracking. Use high positive range (>= 2e9)
+	// so it never collides with real Telegram msg ids (~1e9 max in practice).
+	// Stable across runs for same (from, timestamp) so routing mappings are idempotent.
+	syntheticID := 2_000_000_000 + int(time.Now().UnixNano()%1_000_000_000)
+	m := Message{
+		ID:        syntheticID,
+		BotID:     b.botID,
+		ChatID:    chatID,
+		FromUser:  fromUser,
+		FromID:    cb.From.ID,
+		Text:      cb.Data,
+		Date:      time.Now().UnixMilli(),
+		ReplyToID: replyToID,
+		MediaType: "callback",
+	}
+	if err := b.store.SaveMessage(m); err != nil {
+		log.Printf("[bot %d] handleCallbackQuery: SaveMessage failed: %v", b.botID, err)
 	}
 }
 
