@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"io"
 	"log"
+	"math"
 	"mime"
 	"net"
 	"net/http"
@@ -3539,7 +3540,7 @@ func parseTelegramRequestParams(body []byte, contentType string) (telegramReques
 		params := telegramRequestParams{
 			ChatID:        rawInt64(raw["chat_id"]),
 			FromChatID:    rawInt64(raw["from_chat_id"]),
-			MessageID:     int(rawInt64(raw["message_id"])),
+			MessageID:     rawInt(raw["message_id"]),
 			Caption:       rawString(raw["caption"]),
 			RemoveCaption: rawBool(raw["remove_caption"]),
 		}
@@ -3560,6 +3561,22 @@ func parseTelegramRequestParams(body []byte, contentType string) (telegramReques
 	default:
 		return telegramRequestParams{}, false
 	}
+}
+
+func rawInt(value json.RawMessage) int {
+	var n int
+	if err := json.Unmarshal(value, &n); err == nil {
+		return n
+	}
+
+	var s string
+	if err := json.Unmarshal(value, &s); err == nil {
+		n64 := valueInt64(s)
+		if n64 >= math.MinInt && n64 <= math.MaxInt {
+			return int(n64)
+		}
+	}
+	return 0
 }
 
 func rawInt64(value json.RawMessage) int64 {
