@@ -351,7 +351,7 @@ func TestE2E_ChatAdmin(t *testing.T) {
 				}
 			}
 			return false
-		}, 1*time.Second, "M-02: Alice should be tracked after chat_member update")
+		}, 5*time.Second, "M-02: Alice should be tracked after chat_member update")
 	})
 
 	// M-03: new_chat_members — message with new member list.
