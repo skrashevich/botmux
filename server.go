@@ -3261,8 +3261,10 @@ var sendMethods = map[string]bool{
 	"sendContact":     true,
 	"sendPoll":        true,
 	"sendDice":        true,
-	"forwardMessage":  true,
-	"editMessageText": true,
+	"forwardMessage":     true,
+	"editMessageText":    true,
+	"editMessageCaption": true,
+	"editMessageMedia":   true,
 }
 
 type telegramRequestParams struct {

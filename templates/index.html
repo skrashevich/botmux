@@ -3451,15 +3451,27 @@ function connectMessageStream(chatID) {
   messageEventSource.onmessage = (e) => {
     try {
       const m = JSON.parse(e.data);
+      const list = document.getElementById('messagesList');
+      const content = document.getElementById('messagesContent');
+      const msgMap = {};
+      msgMap[m.id] = m;
+
+      // Streaming edits: if the row already exists, replace it in place so the
+      // full message text (not just the first chunk) becomes visible.
+      const existing = document.getElementById('msg-' + m.id);
+      if (existing) {
+        const temp = document.createElement('div');
+        temp.innerHTML = renderMsgRow(m, msgMap);
+        const replacement = temp.firstElementChild;
+        if (replacement) existing.replaceWith(replacement);
+        renderedMsgIds.add(m.id);
+        return;
+      }
       if (renderedMsgIds.has(m.id)) return;
       renderedMsgIds.add(m.id);
 
-      const list = document.getElementById('messagesList');
-      const content = document.getElementById('messagesContent');
       const wasAtBottom = (content.scrollHeight - content.scrollTop - content.clientHeight) < 60;
 
-      const msgMap = {};
-      msgMap[m.id] = m;
       const temp = document.createElement('div');
       temp.innerHTML = renderMsgRow(m, msgMap);
       const el = temp.firstElementChild;
