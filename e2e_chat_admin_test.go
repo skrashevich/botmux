@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/skrashevich/botmux/internal/models"
 )
 
 // setupChatAdminBot registers a manage-enabled bot with all necessary fake TG
@@ -31,7 +33,7 @@ func setupChatAdminBot(h *e2eHarness, token string) int64 {
 		_, _ = w.Write([]byte(`{"ok":true,"result":{"id":-1001234567890,"type":"supergroup","title":"Test Group","username":"testgroup","description":""}}`))
 	})
 
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:         token,
 		Name:          "chatadminbot",
 		BotUsername:   "mybot",
@@ -40,8 +42,8 @@ func setupChatAdminBot(h *e2eHarness, token string) int64 {
 	return botID
 }
 
-// findChatInStore returns the first Chat matching chatID in GetChats result, or nil.
-func findChatInStore(h *e2eHarness, botID, chatID int64) *Chat {
+// findChatInStore returns the first models.Chat matching chatID in GetChats result, or nil.
+func findChatInStore(h *e2eHarness, botID, chatID int64) *models.Chat {
 	chats, err := h.store.GetChats(botID)
 	if err != nil {
 		return nil
@@ -295,7 +297,7 @@ func TestE2E_ChatAdmin(t *testing.T) {
 	})
 
 	// --------------------------------------------------------------------------
-	// Chat member updates M-01..M-03
+	// models.Chat member updates M-01..M-03
 	// --------------------------------------------------------------------------
 
 	// M-01: my_chat_member — bot status change (member → administrator).

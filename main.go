@@ -10,6 +10,14 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+
+	"github.com/skrashevich/botmux/internal/bot"
+	"github.com/skrashevich/botmux/internal/bridge"
+	"github.com/skrashevich/botmux/internal/proxy"
+	"github.com/skrashevich/botmux/internal/server"
+	"github.com/skrashevich/botmux/internal/store"
+	verpkg "github.com/skrashevich/botmux/internal/version"
+	"github.com/skrashevich/botmux/pkg/logbuf"
 )
 
 // Build-time variables injected via ldflags
@@ -77,56 +85,58 @@ func main() {
 	}
 
 	// Set up log buffer to capture application logs for web UI
-	logBuf := NewLogBuffer(1000)
+	logBuf := logbuf.New(1000)
 	log.SetOutput(io.MultiWriter(os.Stderr, logBuf))
 
-	store, err := NewStore(*dbPath)
+	st, err := store.NewStore(*dbPath)
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
-	defer store.Close()
+	defer st.Close()
 
 	if *demoMode {
-		seedDemoData(store)
+		seedDemoData(st)
 	}
 
-	proxy := NewProxyManager(store)
-	server := NewServer(store, proxy)
-	server.demoMode = *demoMode
-	server.logBuf = logBuf
+	pm := proxy.NewManager(st, telegramAPIURL)
+	srv := server.NewServer(st, pm)
+	srv.DemoMode = *demoMode
+	srv.LogBuf = logBuf
+	srv.VersionChecker = verpkg.NewChecker(version, commit, buildDate)
+	srv.TgAPIBaseURL = telegramAPIURL
 
 	// Register CLI bot if token is provided
 	if *token != "" {
-		cliBot, err := NewBot(*token, store, 0, telegramAPIURL)
+		cliBot, err := bot.NewBot(*token, st, 0, telegramAPIURL)
 		if err != nil {
 			log.Fatalf("Failed to create bot: %v", err)
 		}
 
-		botID, err := store.RegisterCLIBot(*token, cliBot.GetBotInfo())
+		botID, err := st.RegisterCLIBot(*token, cliBot.GetBotInfo())
 		if err != nil {
 			log.Fatalf("Failed to register CLI bot: %v", err)
 		}
-		cliBot.botID = botID
+		cliBot.SetBotID(botID)
 
-		store.MigrateLegacyChats(botID)
-		proxy.RegisterManagedBot(botID, cliBot)
-		server.RegisterBot(botID, cliBot)
+		st.MigrateLegacyChats(botID)
+		pm.RegisterManagedBot(botID, cliBot)
+		srv.RegisterBot(botID, cliBot)
 
 		if *webhookURL != "" {
 			if err := cliBot.SetWebhook(*webhookURL); err != nil {
 				log.Fatalf("Failed to set webhook: %v", err)
 			}
-			proxy.SetWebhookMode(botID)
-			server.SetWebhookHandler("/tghook", proxy.WebhookHandler(botID))
+			pm.SetWebhookMode(botID)
+			srv.SetWebhookHandler("/tghook", pm.WebhookHandler(botID))
 			log.Printf("CLI bot [%d] @%s: webhook mode at %s", botID, cliBot.GetBotInfo(), *webhookURL)
 		} else {
-			if err := proxy.DeleteWebhook(*token); err != nil {
+			if err := pm.DeleteWebhook(*token); err != nil {
 				log.Printf("Warning: could not delete webhook: %v", err)
 			}
 			log.Printf("CLI bot [%d] @%s: polling mode", botID, cliBot.GetBotInfo())
 		}
 	} else if !*demoMode {
-		bots, _ := store.GetBotConfigs()
+		bots, _ := st.GetBotConfigs()
 		if len(bots) == 0 {
 			log.Fatal("No token provided and no bots in database. Use -token flag or TELEGRAM_BOT_TOKEN env var to add the first bot, or add one via the web UI.")
 		}
@@ -134,13 +144,13 @@ func main() {
 	}
 
 	// Start ProxyManager for ALL bots
-	proxy.Start()
-	defer proxy.StopAll()
+	pm.Start()
+	defer pm.StopAll()
 
 	// Start BridgeManager
-	bridgeMgr := NewBridgeManager(store, proxy)
+	bridgeMgr := bridge.NewManager(st, pm, telegramAPIURL)
 	bridgeMgr.Start()
-	server.SetBridgeManager(bridgeMgr)
+	srv.SetBridgeManager(bridgeMgr)
 
 	// Set bridge notification hook on all managed bots
 	bridgeMgr.InstallHooks()
@@ -149,7 +159,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := server.StartContext(ctx, *addr); err != nil {
+	if err := srv.StartContext(ctx, *addr); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 	log.Printf("shutdown: complete")

@@ -1,4 +1,4 @@
-package main
+package bot
 
 import (
 	"encoding/json"
@@ -8,11 +8,13 @@ import (
 	"time"
 
 	tgbotapi "github.com/OvyFlash/telegram-bot-api"
+	"github.com/skrashevich/botmux/internal/models"
+	"github.com/skrashevich/botmux/internal/store"
 )
 
-// allowedUpdateTypes is the shared list of update types requested from the Telegram API.
+// AllowedUpdateTypes is the shared list of update types requested from the Telegram API.
 // Used by both StartPolling (library path) and ProxyManager.getUpdates (raw HTTP path).
-var allowedUpdateTypes = []string{
+var AllowedUpdateTypes = []string{
 	"message", "edited_message",
 	"channel_post", "edited_channel_post",
 	"callback_query",
@@ -22,18 +24,15 @@ var allowedUpdateTypes = []string{
 	"poll", "poll_answer",
 }
 
-// OnMessageSentFunc is called when a bot sends a message (for bridge outgoing notifications)
-type OnMessageSentFunc func(botID int64, chatID int64, text string, msgID int, replyToMsgID int)
-
 type Bot struct {
 	api           *tgbotapi.BotAPI
-	store         *Store
+	store         *store.Store
 	botID         int64 // ID in bots table
 	baseURL       string
-	onMessageSent OnMessageSentFunc
+	onMessageSent models.OnMessageSentFunc
 }
 
-func NewBot(token string, store *Store, botID int64, baseURL string) (*Bot, error) {
+func NewBot(token string, s *store.Store, botID int64, baseURL string) (*Bot, error) {
 	var api *tgbotapi.BotAPI
 	var err error
 	if baseURL != "" && baseURL != "https://api.telegram.org" {
@@ -45,7 +44,22 @@ func NewBot(token string, store *Store, botID int64, baseURL string) (*Bot, erro
 		return nil, err
 	}
 	log.Printf("Bot [%d] authorized as @%s", botID, api.Self.UserName)
-	return &Bot{api: api, store: store, botID: botID, baseURL: baseURL}, nil
+	return &Bot{api: api, store: s, botID: botID, baseURL: baseURL}, nil
+}
+
+// SetOnMessageSent sets the callback invoked when the bot sends a message.
+func (b *Bot) SetOnMessageSent(fn models.OnMessageSentFunc) {
+	b.onMessageSent = fn
+}
+
+// BotID returns the bot's database ID.
+func (b *Bot) BotID() int64 {
+	return b.botID
+}
+
+// SetBotID sets the bot's database ID.
+func (b *Bot) SetBotID(id int64) {
+	b.botID = id
 }
 
 // WebhookStatus represents the current webhook state of the bot
@@ -100,7 +114,7 @@ func (b *Bot) StartPolling() {
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
-	u.AllowedUpdates = allowedUpdateTypes
+	u.AllowedUpdates = AllowedUpdateTypes
 
 	updates := b.api.GetUpdatesChan(u)
 
@@ -123,6 +137,11 @@ func (b *Bot) WebhookHandler() http.HandlerFunc {
 		b.processUpdate(update)
 		w.WriteHeader(200)
 	}
+}
+
+// ProcessUpdate dispatches an incoming Telegram update (exported for proxy package use).
+func (b *Bot) ProcessUpdate(update tgbotapi.Update) {
+	b.processUpdate(update)
 }
 
 func (b *Bot) processUpdate(update tgbotapi.Update) {
@@ -176,14 +195,14 @@ func (b *Bot) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 	if chatID == 0 {
 		return
 	}
-	fromUser := formatUsername(cb.From)
+	fromUser := FormatUsername(cb.From)
 	b.store.TrackUser(chatID, cb.From.ID, fromUser)
 
 	// Synthetic message id for callback tracking. Use high positive range (>= 2e9)
 	// so it never collides with real Telegram msg ids (~1e9 max in practice).
 	// Stable across runs for same (from, timestamp) so routing mappings are idempotent.
 	syntheticID := 2_000_000_000 + int(time.Now().UnixNano()%1_000_000_000)
-	m := Message{
+	m := models.Message{
 		ID:        syntheticID,
 		BotID:     b.botID,
 		ChatID:    chatID,
@@ -199,7 +218,8 @@ func (b *Bot) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 	}
 }
 
-func formatUsername(user *tgbotapi.User) string {
+// FormatUsername formats a Telegram user's display name.
+func FormatUsername(user *tgbotapi.User) string {
 	name := user.FirstName
 	if user.LastName != "" {
 		name += " " + user.LastName
@@ -253,7 +273,7 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 	var fromID int64
 	var fromIsBot bool
 	if msg.From != nil {
-		fromUser = formatUsername(msg.From)
+		fromUser = FormatUsername(msg.From)
 		fromID = msg.From.ID
 		fromIsBot = msg.From.IsBot
 		b.store.TrackUser(msg.Chat.ID, fromID, fromUser)
@@ -262,7 +282,7 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 	if msg.NewChatMembers != nil {
 		for i := range msg.NewChatMembers {
 			u := &msg.NewChatMembers[i]
-			b.store.TrackUser(msg.Chat.ID, u.ID, formatUsername(u))
+			b.store.TrackUser(msg.Chat.ID, u.ID, FormatUsername(u))
 		}
 	}
 
@@ -278,7 +298,7 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 
 	mediaType, fileID := extractMedia(msg)
 
-	m := Message{
+	m := models.Message{
 		ID:        msg.MessageID,
 		BotID:     b.botID,
 		ChatID:    msg.Chat.ID,
@@ -312,7 +332,7 @@ func (b *Bot) handleChannelPost(msg *tgbotapi.Message) {
 
 	mediaType, fileID := extractMedia(msg)
 
-	m := Message{
+	m := models.Message{
 		ID:        msg.MessageID,
 		BotID:     b.botID,
 		ChatID:    msg.Chat.ID,
@@ -335,7 +355,7 @@ func (b *Bot) handleMyChatMember(update *tgbotapi.ChatMemberUpdated) {
 func (b *Bot) handleChatMember(update *tgbotapi.ChatMemberUpdated) {
 	user := update.NewChatMember.User
 	if user != nil {
-		name := formatUsername(user)
+		name := FormatUsername(user)
 		b.store.TrackUser(update.Chat.ID, user.ID, name)
 	}
 }
@@ -377,7 +397,7 @@ func (b *Bot) trackChat(chat *tgbotapi.Chat) {
 		}
 	}
 
-	c := Chat{
+	c := models.Chat{
 		ID:          chat.ID,
 		Type:        chat.Type,
 		Title:       title,
@@ -393,7 +413,7 @@ func (b *Bot) trackChat(chat *tgbotapi.Chat) {
 	}
 }
 
-func (b *Bot) RefreshChat(chatID int64) (*Chat, error) {
+func (b *Bot) RefreshChat(chatID int64) (*models.Chat, error) {
 	fullChat, err := b.api.GetChat(tgbotapi.ChatInfoConfig{
 		ChatConfig: tgbotapi.ChatConfig{ChatID: chatID},
 	})
@@ -420,7 +440,7 @@ func (b *Bot) RefreshChat(chatID int64) (*Chat, error) {
 		memberCount = count
 	}
 
-	c := Chat{
+	c := models.Chat{
 		ID:          fullChat.ID,
 		Type:        fullChat.Type,
 		Title:       fullChat.Title,
@@ -446,7 +466,7 @@ func (b *Bot) SendMessage(chatID int64, text string) error {
 	}
 	// Save the sent message to DB
 	fromUser := "@" + b.api.Self.UserName
-	b.store.SaveMessage(Message{
+	b.store.SaveMessage(models.Message{
 		ID:       sent.MessageID,
 		BotID:    b.botID,
 		ChatID:   sent.Chat.ID,
@@ -470,7 +490,7 @@ func (b *Bot) SendMessageGetID(chatID int64, text string) (int, error) {
 		return 0, err
 	}
 	fromUser := "@" + b.api.Self.UserName
-	b.store.SaveMessage(Message{
+	b.store.SaveMessage(models.Message{
 		ID: sent.MessageID, BotID: b.botID, ChatID: sent.Chat.ID,
 		FromUser: fromUser, FromID: b.api.Self.ID,
 		Text: text, Date: int64(sent.Date) * 1000,
@@ -491,7 +511,7 @@ func (b *Bot) SendMessageReply(chatID int64, text string, replyToMsgID int) (int
 		return 0, err
 	}
 	fromUser := "@" + b.api.Self.UserName
-	b.store.SaveMessage(Message{
+	b.store.SaveMessage(models.Message{
 		ID: sent.MessageID, BotID: b.botID, ChatID: sent.Chat.ID,
 		FromUser: fromUser, FromID: b.api.Self.ID,
 		Text: text, Date: int64(sent.Date) * 1000,
@@ -548,7 +568,7 @@ func (b *Bot) UnbanUser(chatID int64, userID int64) error {
 	return err
 }
 
-func (b *Bot) GetAdmins(chatID int64) ([]AdminInfo, error) {
+func (b *Bot) GetAdmins(chatID int64) ([]models.AdminInfo, error) {
 	admins, err := b.api.GetChatAdministrators(tgbotapi.ChatAdministratorsConfig{
 		ChatConfig: tgbotapi.ChatConfig{ChatID: chatID},
 	})
@@ -556,13 +576,13 @@ func (b *Bot) GetAdmins(chatID int64) ([]AdminInfo, error) {
 		return nil, err
 	}
 
-	var result []AdminInfo
+	var result []models.AdminInfo
 	for _, a := range admins {
 		username := ""
 		if a.User != nil {
-			username = formatUsername(a.User)
+			username = FormatUsername(a.User)
 		}
-		info := AdminInfo{
+		info := models.AdminInfo{
 			UserID:      a.User.ID,
 			Username:    username,
 			Status:      a.Status,
@@ -603,9 +623,9 @@ func (b *Bot) GetAdmins(chatID int64) ([]AdminInfo, error) {
 	return result, nil
 }
 
-func (b *Bot) PromoteAdmin(chatID int64, userID int64, perms AdminInfo) error {
+func (b *Bot) PromoteAdmin(chatID int64, userID int64, perms models.AdminInfo) error {
 	promo := tgbotapi.PromoteChatMemberConfig{
-		ChatMemberConfig: tgbotapi.ChatMemberConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: chatID}, UserID: userID},
+		ChatMemberConfig:   tgbotapi.ChatMemberConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: chatID}, UserID: userID},
 		CanDeleteMessages:  perms.CanDeleteMessages,
 		CanRestrictMembers: perms.CanRestrictMembers,
 		CanPromoteMembers:  perms.CanPromoteMembers,
@@ -645,4 +665,14 @@ func (b *Bot) GetBotName() string {
 
 func (b *Bot) GetSelfID() int64 {
 	return b.api.Self.ID
+}
+
+// GetToken returns the bot's API token.
+func (b *Bot) GetToken() string {
+	return b.api.Token
+}
+
+// GetSelfUserName returns the bot's username.
+func (b *Bot) GetSelfUserName() string {
+	return b.api.Self.UserName
 }

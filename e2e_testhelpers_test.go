@@ -11,6 +11,13 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/skrashevich/botmux/internal/auth"
+	"github.com/skrashevich/botmux/internal/bridge"
+	"github.com/skrashevich/botmux/internal/models"
+	"github.com/skrashevich/botmux/internal/proxy"
+	"github.com/skrashevich/botmux/internal/server"
+	"github.com/skrashevich/botmux/internal/store"
 )
 
 // e2eHarness wires up a complete in-process test environment.
@@ -19,10 +26,10 @@ type e2eHarness struct {
 	fake    *fakeTG          // always present — fake Telegram HTTP server
 	fakeSlk *httptest.Server // only when withFakeSlack() opt is applied
 	fakeLLM *httptest.Server // only when withFakeLLM() opt is applied
-	store   *Store
-	proxy   *ProxyManager
-	server  *Server
-	bridge  *BridgeManager   // always created; Start() only when withBridge() is applied
+	store   *store.Store
+	proxy   *proxy.Manager
+	server  *server.Server
+	bridge  *bridge.Manager  // always created; Start() only when withBridge() is applied
 	ts      *httptest.Server // httptest.NewServer(server.BuildMux()); only with withHTTPServer()
 	session string           // admin session cookie for /api/* requests
 }
@@ -48,8 +55,7 @@ func withHTTPServer() e2eOpt {
 // withFastBackoff sets the ProxyManager retry delays to near-zero for fast error-path tests.
 func withFastBackoff() e2eOpt {
 	return func(h *e2eHarness) {
-		h.proxy.retryDelayInitial = 1 * time.Millisecond
-		h.proxy.retryDelayMax = 10 * time.Millisecond
+		h.proxy.SetRetryDelays(1*time.Millisecond, 10*time.Millisecond)
 	}
 }
 
@@ -98,7 +104,7 @@ func setupE2E(t *testing.T, opts ...e2eOpt) *e2eHarness {
 
 	// 2. Store — reuse the newTestStore helper from server_capture_test.go
 	dbPath := filepath.Join(t.TempDir(), "e2e.db")
-	store, err := NewStore(dbPath)
+	store, err := store.NewStore(dbPath)
 	if err != nil {
 		t.Fatalf("setupE2E: NewStore: %v", err)
 	}
@@ -106,16 +112,15 @@ func setupE2E(t *testing.T, opts ...e2eOpt) *e2eHarness {
 	h.store = store
 
 	// 3. ProxyManager — point at fake TG
-	h.proxy = NewProxyManager(store)
-	h.proxy.tgAPIBaseURL = h.fake.URL()
+	h.proxy = proxy.NewManager(store, h.fake.URL())
 	t.Cleanup(func() { h.proxy.StopAll() })
 
 	// 4. Server — point at fake TG
-	h.server = NewServer(store, h.proxy)
-	h.server.tgAPIBaseURL = h.fake.URL()
+	h.server = server.NewServer(store, h.proxy)
+	h.server.TgAPIBaseURL = h.fake.URL()
 
 	// 5. BridgeManager — always created; Start() only via withBridge()
-	h.bridge = NewBridgeManager(store, h.proxy)
+	h.bridge = bridge.NewManager(store, h.proxy, h.fake.URL())
 	h.server.SetBridgeManager(h.bridge)
 
 	// 6. Admin session for API calls — reuse createTestAuth from longpoll_test.go
@@ -131,7 +136,7 @@ func setupE2E(t *testing.T, opts ...e2eOpt) *e2eHarness {
 
 // AddBot registers a bot in the fake TG server and adds it to the store.
 // Returns the assigned bot ID.
-func (h *e2eHarness) AddBot(cfg BotConfig) int64 {
+func (h *e2eHarness) AddBot(cfg models.BotConfig) int64 {
 	h.t.Helper()
 
 	username := cfg.BotUsername
@@ -173,7 +178,7 @@ func (h *e2eHarness) CallTgapi(method, token string, body any) (int, map[string]
 		h.t.Fatalf("CallTgapi: NewRequest: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: h.session})
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: h.session})
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -201,7 +206,7 @@ func (h *e2eHarness) CallMedia(botID int64, fileID string) (*http.Response, []by
 	if err != nil {
 		h.t.Fatalf("CallMedia: NewRequest: %v", err)
 	}
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: h.session})
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: h.session})
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -219,7 +224,7 @@ func (h *e2eHarness) CallMedia(botID int64, fileID string) (*http.Response, []by
 // InjectUpdate calls processUpdate directly — for integration tests that don't need pollLoop.
 func (h *e2eHarness) InjectUpdate(botID int64, update map[string]any) {
 	h.t.Helper()
-	h.proxy.processUpdate(botID, update)
+	h.proxy.ProcessUpdate(botID, update)
 }
 
 // Eventually polls cond until it returns true or timeout elapses, then calls t.Fatalf.
@@ -236,9 +241,9 @@ func (h *e2eHarness) Eventually(cond func() bool, timeout time.Duration, msg str
 }
 
 // WaitForMessage polls the store until a message matching pred appears, or times out.
-func (h *e2eHarness) WaitForMessage(botID, chatID int64, pred func(Message) bool) Message {
+func (h *e2eHarness) WaitForMessage(botID, chatID int64, pred func(models.Message) bool) models.Message {
 	h.t.Helper()
-	var found Message
+	var found models.Message
 	h.Eventually(func() bool {
 		msgs, err := h.store.GetMessages(botID, chatID, 50, 0)
 		if err != nil {
@@ -289,10 +294,7 @@ func TestE2EHarness_Smoke(t *testing.T) {
 	if h.bridge == nil {
 		t.Fatal("bridge nil")
 	}
-	if h.proxy.tgAPIBaseURL != h.fake.URL() {
-		t.Errorf("proxy.tgAPIBaseURL=%q, want %q", h.proxy.tgAPIBaseURL, h.fake.URL())
-	}
-	if h.server.tgAPIBaseURL != h.fake.URL() {
-		t.Errorf("server.tgAPIBaseURL=%q, want %q", h.server.tgAPIBaseURL, h.fake.URL())
+	if h.server.TgAPIBaseURL != h.fake.URL() {
+		t.Errorf("server.TgAPIBaseURL=%q, want %q", h.server.TgAPIBaseURL, h.fake.URL())
 	}
 }

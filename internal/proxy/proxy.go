@@ -1,4 +1,4 @@
-package main
+package proxy
 
 import (
 	"bytes"
@@ -17,27 +17,25 @@ import (
 	"time"
 
 	tgbotapi "github.com/OvyFlash/telegram-bot-api"
+	"github.com/skrashevich/botmux/internal/bot"
+	"github.com/skrashevich/botmux/internal/llm"
+	"github.com/skrashevich/botmux/internal/models"
+	"github.com/skrashevich/botmux/internal/store"
 )
 
 // UpdateQueue is an in-memory ring buffer of raw Telegram updates for long-poll consumers.
 type UpdateQueue struct {
 	mu              sync.Mutex
-	updates         []QueuedUpdate
+	updates         []models.QueuedUpdate
 	maxSize         int
 	waiters         []chan struct{}
 	confirmedOffset int64 // highest offset ever confirmed via Get(); prevents re-delivery
 }
 
-// QueuedUpdate holds a single raw Telegram update with its update_id.
-type QueuedUpdate struct {
-	UpdateID int64
-	Data     map[string]any
-}
-
 // NewUpdateQueue creates a queue with the given max capacity.
 func NewUpdateQueue(maxSize int) *UpdateQueue {
 	return &UpdateQueue{
-		updates: make([]QueuedUpdate, 0, maxSize),
+		updates: make([]models.QueuedUpdate, 0, maxSize),
 		maxSize: maxSize,
 	}
 }
@@ -63,7 +61,7 @@ func (q *UpdateQueue) Enqueue(rawUpdate map[string]any) {
 		}
 	}
 
-	q.updates = append(q.updates, QueuedUpdate{
+	q.updates = append(q.updates, models.QueuedUpdate{
 		UpdateID: id,
 		Data:     rawUpdate,
 	})
@@ -84,7 +82,7 @@ func (q *UpdateQueue) Enqueue(rawUpdate map[string]any) {
 // Get returns updates with UpdateID >= offset, up to limit.
 // Like the real Telegram API, calling Get with offset > 0 confirms (purges)
 // all updates with UpdateID < offset — they will never be returned again.
-func (q *UpdateQueue) Get(offset int64, limit int) []QueuedUpdate {
+func (q *UpdateQueue) Get(offset int64, limit int) []models.QueuedUpdate {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -104,7 +102,7 @@ func (q *UpdateQueue) Get(offset int64, limit int) []QueuedUpdate {
 		}
 	}
 
-	var result []QueuedUpdate
+	var result []models.QueuedUpdate
 	for _, u := range q.updates {
 		if u.UpdateID >= offset {
 			result = append(result, u)
@@ -171,17 +169,17 @@ func (e *rateLimitError) Error() string {
 	return fmt.Sprintf("rate limited, retry after %s: %s", e.After, e.Description)
 }
 
-// ProxyManager manages polling and forwarding for all bots
-type ProxyManager struct {
-	store             *Store
+// Manager manages polling and forwarding for all bots
+type Manager struct {
+	store             *store.Store
 	mu                sync.Mutex
 	runners           map[int64]*proxyRunner
-	managedBots       map[int64]*Bot         // botID -> Bot instance for management processing
+	managedBots       map[int64]*bot.Bot     // botID -> Bot instance for management processing
 	webhookBots       map[int64]bool         // bots receiving updates via webhook (skip polling)
 	updateQueues      map[int64]*UpdateQueue // botID -> long-poll update queue (lazy init)
 	client            *http.Client
-	llmRouter         *LLMRouter    // LLM-based routing
-	tgAPIBaseURL      string        // base URL for Telegram API (default = package-level telegramAPIURL)
+	llmRouter         *llm.Router   // LLM-based routing
+	tgAPIBaseURL      string        // base URL for Telegram API
 	retryDelayInitial time.Duration // initial backoff delay for pollLoop (default 1s)
 	retryDelayMax     time.Duration // maximum backoff delay for pollLoop (default 30s)
 }
@@ -191,23 +189,23 @@ type proxyRunner struct {
 	botID  int64
 }
 
-func NewProxyManager(store *Store) *ProxyManager {
-	return &ProxyManager{
-		store:             store,
+func NewManager(s *store.Store, tgAPIBaseURL string) *Manager {
+	return &Manager{
+		store:             s,
 		runners:           make(map[int64]*proxyRunner),
-		managedBots:       make(map[int64]*Bot),
+		managedBots:       make(map[int64]*bot.Bot),
 		webhookBots:       make(map[int64]bool),
 		updateQueues:      make(map[int64]*UpdateQueue),
 		client:            &http.Client{Timeout: 120 * time.Second},
-		llmRouter:         NewLLMRouter(store),
-		tgAPIBaseURL:      telegramAPIURL,
+		llmRouter:         llm.NewRouter(s),
+		tgAPIBaseURL:      tgAPIBaseURL,
 		retryDelayInitial: 1 * time.Second,
 		retryDelayMax:     30 * time.Second,
 	}
 }
 
 // GetOrCreateUpdateQueue returns (or lazily creates) the update queue for a bot.
-func (pm *ProxyManager) GetOrCreateUpdateQueue(botID int64) *UpdateQueue {
+func (pm *Manager) GetOrCreateUpdateQueue(botID int64) *UpdateQueue {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	q, ok := pm.updateQueues[botID]
@@ -219,7 +217,7 @@ func (pm *ProxyManager) GetOrCreateUpdateQueue(botID int64) *UpdateQueue {
 }
 
 // EnqueueUpdate adds a raw update to the bot's long-poll queue (if it exists).
-func (pm *ProxyManager) EnqueueUpdate(botID int64, rawUpdate map[string]any) {
+func (pm *Manager) EnqueueUpdate(botID int64, rawUpdate map[string]any) {
 	pm.mu.Lock()
 	q := pm.updateQueues[botID]
 	pm.mu.Unlock()
@@ -230,7 +228,7 @@ func (pm *ProxyManager) EnqueueUpdate(botID int64, rawUpdate map[string]any) {
 
 // GetQueueStats returns the number of waiting clients and queue depth for a bot.
 // Returns (0, 0) if no queue exists.
-func (pm *ProxyManager) GetQueueStats(botID int64) (waiters int, depth int) {
+func (pm *Manager) GetQueueStats(botID int64) (waiters int, depth int) {
 	pm.mu.Lock()
 	q := pm.updateQueues[botID]
 	pm.mu.Unlock()
@@ -241,22 +239,22 @@ func (pm *ProxyManager) GetQueueStats(botID int64) (waiters int, depth int) {
 }
 
 // RemoveUpdateQueue removes and discards the update queue for a bot.
-func (pm *ProxyManager) RemoveUpdateQueue(botID int64) {
+func (pm *Manager) RemoveUpdateQueue(botID int64) {
 	pm.mu.Lock()
 	delete(pm.updateQueues, botID)
 	pm.mu.Unlock()
 }
 
 // RegisterManagedBot registers a Bot instance for management processing
-func (pm *ProxyManager) RegisterManagedBot(botID int64, bot *Bot) {
+func (pm *Manager) RegisterManagedBot(botID int64, b *bot.Bot) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	pm.managedBots[botID] = bot
+	pm.managedBots[botID] = b
 	log.Printf("[proxy] RegisterManagedBot: botID=%d", botID)
 }
 
 // UnregisterManagedBot removes a Bot instance
-func (pm *ProxyManager) UnregisterManagedBot(botID int64) {
+func (pm *Manager) UnregisterManagedBot(botID int64) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	delete(pm.managedBots, botID)
@@ -264,7 +262,7 @@ func (pm *ProxyManager) UnregisterManagedBot(botID int64) {
 }
 
 // SetWebhookMode marks a bot as using webhook (don't poll it)
-func (pm *ProxyManager) SetWebhookMode(botID int64) {
+func (pm *Manager) SetWebhookMode(botID int64) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	pm.webhookBots[botID] = true
@@ -272,7 +270,7 @@ func (pm *ProxyManager) SetWebhookMode(botID int64) {
 }
 
 // WebhookHandler returns an HTTP handler for webhook updates with proxy support
-func (pm *ProxyManager) WebhookHandler(botID int64) http.HandlerFunc {
+func (pm *Manager) WebhookHandler(botID int64) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", 405)
@@ -297,22 +295,22 @@ func (pm *ProxyManager) WebhookHandler(botID int64) http.HandlerFunc {
 		updateID, _ := rawUpdate["update_id"].(float64)
 		log.Printf("[proxy] WebhookHandler: botID=%d received update_id=%d", botID, int64(updateID))
 
-		pm.processUpdate(botID, rawUpdate)
+		pm.ProcessUpdate(botID, rawUpdate)
 
 		w.WriteHeader(200)
 	}
 }
 
-// processUpdate handles a single update: proxy forwarding + management processing
-func (pm *ProxyManager) processUpdate(botID int64, rawUpdate map[string]any) {
-	bot, err := pm.store.GetBotConfig(botID)
+// ProcessUpdate handles a single update: proxy forwarding + management processing
+func (pm *Manager) ProcessUpdate(botID int64, rawUpdate map[string]any) {
+	b, err := pm.store.GetBotConfig(botID)
 	if err != nil {
-		log.Printf("[proxy] processUpdate: failed to get config for botID=%d: %v", botID, err)
+		log.Printf("[proxy] ProcessUpdate: failed to get config for botID=%d: %v", botID, err)
 		return
 	}
 
 	// Enqueue for long-poll consumers (before any other processing)
-	if bot.LongPollEnabled {
+	if b.LongPollEnabled {
 		pm.EnqueueUpdate(botID, rawUpdate)
 	}
 
@@ -321,22 +319,22 @@ func (pm *ProxyManager) processUpdate(botID int64, rawUpdate map[string]any) {
 
 	// Management: process update for chat/message tracking (before forwarding,
 	// so incoming message is saved to DB before backend's response via /tgapi/)
-	if bot.ManageEnabled {
+	if b.ManageEnabled {
 		pm.processForManagement(botID, rawUpdate)
 	}
 
 	// Proxy: forward to backend (skip if long poll enabled — backend pulls via queue)
-	if bot.ProxyEnabled && bot.BackendURL != "" && !bot.LongPollEnabled {
-		log.Printf("[proxy] forward: botID=%d %s → %s", botID, updateSummary, bot.BackendURL)
-		if err := pm.forwardUpdate(context.Background(), bot, rawUpdate); err != nil {
+	if b.ProxyEnabled && b.BackendURL != "" && !b.LongPollEnabled {
+		log.Printf("[proxy] forward: botID=%d %s → %s", botID, updateSummary, b.BackendURL)
+		if err := pm.forwardUpdate(context.Background(), b, rawUpdate); err != nil {
 			pm.store.UpdateBotStatus(botID, fmt.Sprintf("forward error: %v", err), "")
 			log.Printf("[proxy] forward: botID=%d FAILED: %v", botID, err)
 		} else {
 			log.Printf("[proxy] forward: botID=%d SUCCESS", botID)
 			pm.store.IncrementBotForwarded(botID)
 		}
-	} else if bot.ProxyEnabled {
-		log.Printf("[proxy] processUpdate: botID=%d proxy enabled but no backend_url!", botID)
+	} else if b.ProxyEnabled {
+		log.Printf("[proxy] ProcessUpdate: botID=%d proxy enabled but no backend_url!", botID)
 	}
 
 	// Reverse routing (Source-NAT): check if this is a reply in a routed chat
@@ -361,55 +359,55 @@ func (pm *ProxyManager) processUpdate(botID int64, rawUpdate map[string]any) {
 }
 
 // Start launches goroutines for all active bots
-func (pm *ProxyManager) Start() {
+func (pm *Manager) Start() {
 	bots, err := pm.store.GetBotConfigs()
 	if err != nil {
 		log.Printf("[proxy] Start: failed to load bots: %v", err)
 		return
 	}
 	log.Printf("[proxy] Start: loaded %d bot configs", len(bots))
-	for _, bot := range bots {
+	for _, b := range bots {
 		log.Printf("[proxy] Start: bot id=%d name=%q source=%s manage=%v proxy=%v backend=%q",
-			bot.ID, bot.Name, bot.Source, bot.ManageEnabled, bot.ProxyEnabled, bot.BackendURL)
+			b.ID, b.Name, b.Source, b.ManageEnabled, b.ProxyEnabled, b.BackendURL)
 
 		pm.mu.Lock()
-		isWebhook := pm.webhookBots[bot.ID]
+		isWebhook := pm.webhookBots[b.ID]
 		pm.mu.Unlock()
-		if bot.Disabled {
-			log.Printf("[proxy] Start: bot id=%d is disabled, skipping", bot.ID)
+		if b.Disabled {
+			log.Printf("[proxy] Start: bot id=%d is disabled, skipping", b.ID)
 			continue
 		}
 
 		if isWebhook {
-			log.Printf("[proxy] Start: bot id=%d uses webhook mode, skipping polling", bot.ID)
+			log.Printf("[proxy] Start: bot id=%d uses webhook mode, skipping polling", b.ID)
 			continue
 		}
 
-		if bot.ManageEnabled || bot.ProxyEnabled {
+		if b.ManageEnabled || b.ProxyEnabled {
 			// Create managed Bot instance if needed for management processing
-			if bot.ManageEnabled {
+			if b.ManageEnabled {
 				pm.mu.Lock()
-				_, hasManagedBot := pm.managedBots[bot.ID]
+				_, hasManagedBot := pm.managedBots[b.ID]
 				pm.mu.Unlock()
 				if !hasManagedBot {
-					log.Printf("[proxy] Start: creating managed Bot instance for bot id=%d", bot.ID)
-					managedBot, err := NewBot(bot.Token, pm.store, bot.ID, pm.tgAPIBaseURL)
+					log.Printf("[proxy] Start: creating managed Bot instance for bot id=%d", b.ID)
+					managedBot, err := bot.NewBot(b.Token, pm.store, b.ID, pm.tgAPIBaseURL)
 					if err != nil {
-						log.Printf("[proxy] Start: failed to create Bot instance for bot id=%d: %v", bot.ID, err)
+						log.Printf("[proxy] Start: failed to create Bot instance for bot id=%d: %v", b.ID, err)
 					} else {
-						pm.RegisterManagedBot(bot.ID, managedBot)
+						pm.RegisterManagedBot(b.ID, managedBot)
 					}
 				}
 			}
-			log.Printf("[proxy] Start: starting polling for bot id=%d", bot.ID)
-			pm.startBot(bot.ID)
+			log.Printf("[proxy] Start: starting polling for bot id=%d", b.ID)
+			pm.startBot(b.ID)
 		} else {
-			log.Printf("[proxy] Start: bot id=%d has no manage/proxy enabled, skipping", bot.ID)
+			log.Printf("[proxy] Start: bot id=%d has no manage/proxy enabled, skipping", b.ID)
 		}
 	}
 }
 
-func (pm *ProxyManager) startBot(botID int64) {
+func (pm *Manager) startBot(botID int64) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -426,7 +424,7 @@ func (pm *ProxyManager) startBot(botID int64) {
 	go pm.pollLoop(ctx, botID)
 }
 
-func (pm *ProxyManager) stopBot(botID int64) {
+func (pm *Manager) StopBot(botID int64) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -437,7 +435,7 @@ func (pm *ProxyManager) stopBot(botID int64) {
 	}
 }
 
-func (pm *ProxyManager) StopAll() {
+func (pm *Manager) StopAll() {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -448,7 +446,7 @@ func (pm *ProxyManager) StopAll() {
 	log.Printf("[proxy] StopAll: all runners stopped")
 }
 
-func (pm *ProxyManager) IsRunning(botID int64) bool {
+func (pm *Manager) IsRunning(botID int64) bool {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	if pm.runners[botID] != nil {
@@ -459,19 +457,19 @@ func (pm *ProxyManager) IsRunning(botID int64) bool {
 }
 
 // RestartBot restarts a bot after config changes
-func (pm *ProxyManager) RestartBot(botID int64) error {
-	bot, err := pm.store.GetBotConfig(botID)
+func (pm *Manager) RestartBot(botID int64) error {
+	b, err := pm.store.GetBotConfig(botID)
 	if err != nil {
 		log.Printf("[proxy] RestartBot: failed to get config for botID=%d: %v", botID, err)
 		return err
 	}
 
 	log.Printf("[proxy] RestartBot: botID=%d source=%s manage=%v proxy=%v backend=%q disabled=%v",
-		botID, bot.Source, bot.ManageEnabled, bot.ProxyEnabled, bot.BackendURL, bot.Disabled)
+		botID, b.Source, b.ManageEnabled, b.ProxyEnabled, b.BackendURL, b.Disabled)
 
-	pm.stopBot(botID)
+	pm.StopBot(botID)
 
-	if bot.Disabled {
+	if b.Disabled {
 		pm.UnregisterManagedBot(botID)
 		pm.mu.Lock()
 		delete(pm.webhookBots, botID)
@@ -484,18 +482,18 @@ func (pm *ProxyManager) RestartBot(botID int64) error {
 	isWebhook := pm.webhookBots[botID]
 	pm.mu.Unlock()
 
-	active := bot.ManageEnabled || bot.ProxyEnabled
+	active := b.ManageEnabled || b.ProxyEnabled
 
 	// Create or remove managed Bot instance. This MUST run even for webhook-mode
 	// bots — WebhookHandler → processForManagement needs the Bot instance to
 	// dispatch updates; skipping this leaves incoming webhook updates unprocessed.
-	if bot.ManageEnabled {
+	if b.ManageEnabled {
 		pm.mu.Lock()
 		_, hasManagedBot := pm.managedBots[botID]
 		pm.mu.Unlock()
 		if !hasManagedBot {
 			log.Printf("[proxy] RestartBot: creating managed Bot instance for botID=%d", botID)
-			managedBot, err := NewBot(bot.Token, pm.store, botID, pm.tgAPIBaseURL)
+			managedBot, err := bot.NewBot(b.Token, pm.store, botID, pm.tgAPIBaseURL)
 			if err != nil {
 				log.Printf("[proxy] RestartBot: failed to create bot instance for botID=%d: %v", botID, err)
 				return fmt.Errorf("failed to create bot instance: %w", err)
@@ -516,17 +514,17 @@ func (pm *ProxyManager) RestartBot(botID int64) error {
 
 	if active {
 		// Delete webhook before polling (unless bot has webhook mode set by main.go)
-		if err := pm.DeleteWebhook(bot.Token); err != nil {
+		if err := pm.DeleteWebhook(b.Token); err != nil {
 			log.Printf("[proxy] RestartBot: failed to delete webhook for botID=%d: %v", botID, err)
 		}
 		pm.startBot(botID)
 	} else {
-		log.Printf("[proxy] RestartBot: bot id=%d not active (manage=%v proxy=%v)", botID, bot.ManageEnabled, bot.ProxyEnabled)
+		log.Printf("[proxy] RestartBot: bot id=%d not active (manage=%v proxy=%v)", botID, b.ManageEnabled, b.ProxyEnabled)
 	}
 	return nil
 }
 
-func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
+func (pm *Manager) pollLoop(ctx context.Context, botID int64) {
 	retryDelay := pm.retryDelayInitial
 	maxRetryDelay := pm.retryDelayMax
 	lastHealthCheck := time.Time{}
@@ -543,7 +541,7 @@ func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
 		default:
 		}
 
-		bot, err := pm.store.GetBotConfig(botID)
+		b, err := pm.store.GetBotConfig(botID)
 		if err != nil {
 			// ErrNoRows → bot deleted, exit permanently.
 			// Other errors (SQLite BUSY/LOCKED, disk stall) → transient, retry with backoff.
@@ -560,12 +558,12 @@ func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
 			retryDelay = min(retryDelay*2, maxRetryDelay)
 			continue
 		}
-		if !bot.ManageEnabled && !bot.ProxyEnabled {
+		if !b.ManageEnabled && !b.ProxyEnabled {
 			log.Printf("[proxy] pollLoop: botID=%d has no manage/proxy enabled — exiting", botID)
 			return
 		}
 
-		timeout := bot.PollingTimeout
+		timeout := b.PollingTimeout
 		if timeout <= 0 {
 			timeout = 30
 		}
@@ -573,10 +571,10 @@ func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
 		pollCount++
 		if pollCount <= 3 || pollCount%10 == 0 {
 			log.Printf("[proxy] pollLoop: botID=%d poll #%d (offset=%d, timeout=%ds, proxy=%v, manage=%v, backend=%q)",
-				botID, pollCount, bot.Offset, timeout, bot.ProxyEnabled, bot.ManageEnabled, bot.BackendURL)
+				botID, pollCount, b.Offset, timeout, b.ProxyEnabled, b.ManageEnabled, b.BackendURL)
 		}
 
-		updates, err := pm.getUpdates(ctx, bot.Token, bot.Offset, timeout)
+		updates, err := pm.getUpdates(ctx, b.Token, b.Offset, timeout)
 		if err != nil {
 			pm.store.UpdateBotStatus(botID, fmt.Sprintf("getUpdates error: %v", err), "")
 
@@ -617,7 +615,7 @@ func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
 		}
 
 		// Periodic backend health check for proxy bots
-		if bot.ProxyEnabled && bot.BackendURL != "" && time.Since(lastHealthCheck) >= healthCheckInterval {
+		if b.ProxyEnabled && b.BackendURL != "" && time.Since(lastHealthCheck) >= healthCheckInterval {
 			lastHealthCheck = time.Now()
 			status, err := pm.CheckAndStoreHealth(botID)
 			if err != nil {
@@ -644,14 +642,14 @@ func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
 			log.Printf("[proxy] pollLoop: botID=%d processing %s", botID, updateSummary)
 
 			// Long poll queue: enqueue for pull-based consumers
-			if bot.LongPollEnabled {
+			if b.LongPollEnabled {
 				pm.EnqueueUpdate(botID, update)
 			}
 
 			// Proxy: forward to backend (skip if long poll enabled — backend pulls via queue)
-			if bot.ProxyEnabled && bot.BackendURL != "" && !bot.LongPollEnabled {
-				log.Printf("[proxy] forward: botID=%d %s → %s", botID, updateSummary, bot.BackendURL)
-				err := pm.forwardUpdate(ctx, bot, update)
+			if b.ProxyEnabled && b.BackendURL != "" && !b.LongPollEnabled {
+				log.Printf("[proxy] forward: botID=%d %s → %s", botID, updateSummary, b.BackendURL)
+				err := pm.forwardUpdate(ctx, b, update)
 				if err != nil {
 					pm.store.UpdateBotStatus(botID, fmt.Sprintf("forward error: %v", err), "")
 					log.Printf("[proxy] forward: botID=%d FAILED for %s: %v", botID, updateSummary, err)
@@ -659,12 +657,12 @@ func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
 					log.Printf("[proxy] forward: botID=%d SUCCESS for %s", botID, updateSummary)
 					pm.store.IncrementBotForwarded(botID)
 				}
-			} else if bot.ProxyEnabled {
+			} else if b.ProxyEnabled {
 				log.Printf("[proxy] pollLoop: botID=%d proxy enabled but no backend_url set!", botID)
 			}
 
 			// Management: process update for chat/message tracking
-			if bot.ManageEnabled {
+			if b.ManageEnabled {
 				pm.processForManagement(botID, update)
 			}
 
@@ -675,11 +673,11 @@ func (pm *ProxyManager) pollLoop(ctx context.Context, botID int64) {
 	}
 }
 
-func (pm *ProxyManager) processForManagement(botID int64, rawUpdate map[string]any) {
+func (pm *Manager) processForManagement(botID int64, rawUpdate map[string]any) {
 	pm.mu.Lock()
-	bot := pm.managedBots[botID]
+	b := pm.managedBots[botID]
 	pm.mu.Unlock()
-	if bot == nil {
+	if b == nil {
 		log.Printf("[proxy] processForManagement: botID=%d has no managed Bot instance!", botID)
 		return
 	}
@@ -694,11 +692,11 @@ func (pm *ProxyManager) processForManagement(botID int64, rawUpdate map[string]a
 		log.Printf("[proxy] processForManagement: botID=%d unmarshal to tgbotapi.Update error: %v", botID, err)
 		return
 	}
-	bot.processUpdate(update)
+	b.ProcessUpdate(update)
 }
 
 // applyLLMRoutes uses LLM to decide routing for an incoming update
-func (pm *ProxyManager) applyLLMRoutes(botID int64, rawUpdate map[string]any) {
+func (pm *Manager) applyLLMRoutes(botID int64, rawUpdate map[string]any) {
 	if pm.llmRouter == nil {
 		return
 	}
@@ -796,7 +794,7 @@ func (pm *ProxyManager) applyLLMRoutes(botID int64, rawUpdate map[string]any) {
 	}
 
 	if targetMsgID != 0 && sourceMsgID != 0 {
-		pm.store.SaveRouteMapping(RouteMapping{
+		pm.store.SaveRouteMapping(models.RouteMapping{
 			RouteID:      0,
 			SourceBotID:  botID,
 			SourceChatID: chatID,
@@ -810,7 +808,7 @@ func (pm *ProxyManager) applyLLMRoutes(botID int64, rawUpdate map[string]any) {
 }
 
 // applyRoutes checks routing rules for the source bot and forwards matching updates to target bots
-func (pm *ProxyManager) applyRoutes(sourceBotID int64, rawUpdate map[string]any) {
+func (pm *Manager) applyRoutes(sourceBotID int64, rawUpdate map[string]any) {
 	routes, err := pm.store.GetRoutes(sourceBotID)
 	if err != nil {
 		return
@@ -935,7 +933,7 @@ func (pm *ProxyManager) applyRoutes(sourceBotID int64, rawUpdate map[string]any)
 
 		// Save mapping for reverse routing (Source-NAT)
 		if targetMsgID != 0 && sourceMsgID != 0 {
-			pm.store.SaveRouteMapping(RouteMapping{
+			pm.store.SaveRouteMapping(models.RouteMapping{
 				RouteID:      route.ID,
 				SourceBotID:  sourceBotID,
 				SourceChatID: chatID,
@@ -953,7 +951,7 @@ func (pm *ProxyManager) applyRoutes(sourceBotID int64, rawUpdate map[string]any)
 
 // applyReverseRoutes checks if a message on a target bot is a reply to a routed message,
 // and if so, sends the reply back via the source bot to the original chat (Source-NAT return path)
-func (pm *ProxyManager) applyReverseRoutes(botID int64, rawUpdate map[string]any) {
+func (pm *Manager) applyReverseRoutes(botID int64, rawUpdate map[string]any) {
 	msg, _ := rawUpdate["message"].(map[string]any)
 	if msg == nil {
 		return
@@ -972,7 +970,7 @@ func (pm *ProxyManager) applyReverseRoutes(botID int64, rawUpdate map[string]any
 
 	// Get reply info — if it's a reply to a routed message, we do exact matching
 	// If not a reply, check if there's any mapping for this bot+chat (conversation mode)
-	var mapping *RouteMapping
+	var mapping *models.RouteMapping
 	var err error
 
 	if replyTo, ok := msg["reply_to_message"].(map[string]any); ok {
@@ -1038,7 +1036,7 @@ func (pm *ProxyManager) applyReverseRoutes(botID int64, rawUpdate map[string]any
 		thisMsgID = int(msgIDFloat)
 	}
 	if sentID != 0 && thisMsgID != 0 {
-		pm.store.SaveRouteMapping(RouteMapping{
+		pm.store.SaveRouteMapping(models.RouteMapping{
 			RouteID:      mapping.RouteID,
 			SourceBotID:  mapping.SourceBotID,
 			SourceChatID: mapping.SourceChatID,
@@ -1051,12 +1049,12 @@ func (pm *ProxyManager) applyReverseRoutes(botID int64, rawUpdate map[string]any
 	}
 }
 
-func (pm *ProxyManager) getUpdates(ctx context.Context, token string, offset int64, timeout int) ([]map[string]any, error) {
+func (pm *Manager) getUpdates(ctx context.Context, token string, offset int64, timeout int) ([]map[string]any, error) {
 	reqBody, _ := json.Marshal(map[string]any{
-		"offset":  offset,
-		"timeout": timeout,
-		"limit":   100,
-		"allowed_updates": allowedUpdateTypes,
+		"offset":          offset,
+		"timeout":         timeout,
+		"limit":           100,
+		"allowed_updates": bot.AllowedUpdateTypes,
 	})
 
 	maskedToken := token
@@ -1110,21 +1108,21 @@ func (pm *ProxyManager) getUpdates(ctx context.Context, token string, offset int
 	return result.Result, nil
 }
 
-func (pm *ProxyManager) forwardUpdate(ctx context.Context, bot *BotConfig, update map[string]any) error {
+func (pm *Manager) forwardUpdate(ctx context.Context, b *models.BotConfig, update map[string]any) error {
 	data, err := json.Marshal(update)
 	if err != nil {
 		return err
 	}
 
-	log.Printf("[proxy] forwardUpdate: POST %s (%d bytes)", bot.BackendURL, len(data))
+	log.Printf("[proxy] forwardUpdate: POST %s (%d bytes)", b.BackendURL, len(data))
 
-	req, err := http.NewRequestWithContext(ctx, "POST", bot.BackendURL, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, "POST", b.BackendURL, bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if bot.SecretToken != "" {
-		req.Header.Set("X-Telegram-Bot-Api-Secret-Token", bot.SecretToken)
+	if b.SecretToken != "" {
+		req.Header.Set("X-Telegram-Bot-Api-Secret-Token", b.SecretToken)
 	}
 
 	backendClient := &http.Client{Timeout: 30 * time.Second}
@@ -1143,11 +1141,11 @@ func (pm *ProxyManager) forwardUpdate(ctx context.Context, bot *BotConfig, updat
 		return fmt.Errorf("backend returned %d: %s", resp.StatusCode, truncate(string(respBody), 200))
 	}
 
-	pm.handleWebhookReply(bot.Token, respBody)
+	pm.handleWebhookReply(b.Token, respBody)
 	return nil
 }
 
-func (pm *ProxyManager) handleWebhookReply(token string, body []byte) {
+func (pm *Manager) handleWebhookReply(token string, body []byte) {
 	if len(body) == 0 {
 		log.Printf("[proxy] handleWebhookReply: empty response body, no action")
 		return
@@ -1192,7 +1190,7 @@ func (pm *ProxyManager) handleWebhookReply(token string, body []byte) {
 		method, resp.StatusCode, truncate(string(respBody), 300))
 }
 
-func (pm *ProxyManager) ValidateToken(token string) (string, error) {
+func (pm *Manager) ValidateToken(token string) (string, error) {
 	url := fmt.Sprintf("%s/bot%s/getMe", pm.tgAPIBaseURL, token)
 	resp, err := pm.client.Get(url)
 	if err != nil {
@@ -1216,7 +1214,7 @@ func (pm *ProxyManager) ValidateToken(token string) (string, error) {
 	return result.Result.Username, nil
 }
 
-func (pm *ProxyManager) DeleteWebhook(token string) error {
+func (pm *Manager) DeleteWebhook(token string) error {
 	log.Printf("[proxy] DeleteWebhook: removing webhook")
 	url := fmt.Sprintf("%s/bot%s/deleteWebhook", pm.tgAPIBaseURL, token)
 	resp, err := pm.client.Get(url)
@@ -1240,7 +1238,7 @@ func (pm *ProxyManager) DeleteWebhook(token string) error {
 }
 
 // CheckBackendHealth sends a test POST to the backend URL and returns status
-func (pm *ProxyManager) CheckBackendHealth(backendURL, secretToken string) (string, error) {
+func (pm *Manager) CheckBackendHealth(backendURL, secretToken string) (string, error) {
 	if backendURL == "" {
 		return "no_url", fmt.Errorf("no backend URL configured")
 	}
@@ -1277,12 +1275,12 @@ func (pm *ProxyManager) CheckBackendHealth(backendURL, secretToken string) (stri
 }
 
 // CheckAndStoreHealth runs a health check and stores the result
-func (pm *ProxyManager) CheckAndStoreHealth(botID int64) (string, error) {
-	bot, err := pm.store.GetBotConfig(botID)
+func (pm *Manager) CheckAndStoreHealth(botID int64) (string, error) {
+	b, err := pm.store.GetBotConfig(botID)
 	if err != nil {
 		return "", err
 	}
-	status, checkErr := pm.CheckBackendHealth(bot.BackendURL, bot.SecretToken)
+	status, checkErr := pm.CheckBackendHealth(b.BackendURL, b.SecretToken)
 	now := time.Now().Format(time.RFC3339)
 	if checkErr != nil {
 		pm.store.UpdateBackendHealth(botID, status+": "+checkErr.Error(), now)
@@ -1293,10 +1291,19 @@ func (pm *ProxyManager) CheckAndStoreHealth(botID int64) (string, error) {
 }
 
 // GetManagedBot returns a managed Bot instance by botID
-func (pm *ProxyManager) GetManagedBot(botID int64) *Bot {
+func (pm *Manager) GetManagedBot(botID int64) *bot.Bot {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	return pm.managedBots[botID]
+}
+
+// ForEachManagedBot iterates over all managed bots with the lock held.
+func (pm *Manager) ForEachManagedBot(fn func(botID int64, b *bot.Bot)) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	for id, b := range pm.managedBots {
+		fn(id, b)
+	}
 }
 
 // summarizeUpdate creates a short description of an update for logging
@@ -1360,4 +1367,15 @@ func mapKeys(m map[string]any) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// SetRetryDelays configures backoff delays for testing.
+func (pm *Manager) SetRetryDelays(initial, max time.Duration) {
+	pm.retryDelayInitial = initial
+	pm.retryDelayMax = max
+}
+
+// SetLLMRouter sets the LLM router instance.
+func (pm *Manager) SetLLMRouter(r *llm.Router) {
+	pm.llmRouter = r
 }

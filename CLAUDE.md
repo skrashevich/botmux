@@ -35,21 +35,47 @@ go test -v ./...
 
 ## Architecture
 
-Monolithic Go app (all `package main`), 11 source files + 1 test file + 1 embedded SPA template:
+Multi-package Go app organized into `internal/`, `pkg/`, and root `package main`:
 
-- **main.go** — Entry point. Token is optional — if provided, registers CLI bot; otherwise uses bots from DB. Starts ProxyManager for all bots, BridgeManager for protocol bridges, launches HTTP server. Supports `-demo` flag for demo mode and `-tg-api` for custom Telegram API URL.
-- **demo.go** — `seedDemoData()` for demo mode. Populates a fresh `demo.db` with a `demo:demo` admin user and 3 demo bots on first launch. Skips seeding if bots already exist.
-- **bot.go** — `Bot` struct wrapping `OvyFlash/telegram-bot-api`. All Telegram API calls (send, ban, pin, admin management). `processUpdate()` dispatches to message/chat/member/business/callback handlers (Bot API 9.6 compatible). `onMessageSent` callback notifies bridges of outgoing messages. Messages store `from_is_bot` and `sender_tag` fields.
-- **proxy.go** — `ProxyManager` manages ALL bots uniformly (no CLI vs web distinction). Runs independent `pollLoop` per bot with raw JSON `getUpdates`. Dual-mode per bot: forwards updates to backend URL (proxy) and/or processes them for chat tracking (management). `WebhookHandler()` for bots in webhook mode. Creates managed Bot instances automatically at Start(). Disabled bots are skipped at startup and stopped/unregistered on toggle. Periodic backend health checks every 60s. `UpdateQueue` provides in-memory ring buffer (1000 updates) for long-poll consumers with waiter notification pattern. `EnqueueUpdate` hooks into both `pollLoop` and `processUpdate` paths when `LongPollEnabled` is set.
-- **bridge.go** — `BridgeManager` for multi-protocol bridges. Core infrastructure: translates external messages into Telegram Update JSON format and injects them into `processUpdate()`. Intercepts outgoing bot messages via `onMessageSent` hook. Routes to protocol-specific handlers (Slack, webhook). Maintains chat/message mappings for threading. Synthetic chat/user IDs avoid collision with real Telegram IDs. Generic webhook: incoming/outgoing via callback URL.
-- **slack.go** — Native Slack protocol bridge. Handles Slack Events API (URL verification, HMAC-SHA256 signature validation, event parsing). Resolves Slack user display names via `users.info` API. Sends outgoing messages via `chat.postMessage` with thread support. All Slack-specific types (`SlackConfig`, `SlackEventPayload`, `SlackMessageEvent`) and methods isolated here.
-- **auth.go** — Authentication & authorization. `AuthUser` struct, bcrypt password hashing, session token generation (32 bytes hex). `authMiddleware` checks Bearer API key first, falls back to session cookies. `adminOnly` requires admin role. `checkBotAccess` verifies user has access to specific bot (admin=all, user=assigned only). API keys (bmx_ prefix) use SHA-256 hashing.
-- **server.go** — HTTP server with `embed.FS` for SPA. REST API for all bot/chat/message/admin/bridge operations. Telegram API proxy at `/tgapi/` captures outgoing bot messages. Multi-bot: resolves bot instances via `getBotFromRequest()` / `resolveBot()`. Auth endpoints at `/api/auth/*` for login/logout/user management. Bridge endpoints at `/api/bridges/*` for CRUD and `/bridge/{id}/incoming` for external webhook. Long polling endpoint at `/api/updates/poll` returns raw Telegram updates in getUpdates-compatible format.
-- **llm.go** — `LLMRouter` for AI-based message routing via OpenAI-compatible API. `LLMConfig` (api_url, api_key, model, system_prompt, enabled). `RouteMessage()` builds context from all bots+descriptions+chats, calls LLM Chat Completions, parses JSON routing decision. Works with any OpenAI-compatible endpoint (OpenAI, Ollama, LM Studio, etc.).
-- **store.go** — SQLite with WAL mode. All data models and DB operations. Auto-migrates schema on startup. Includes `llm_config` table, bot `description` and `disabled` columns, auth tables (`auth_users`, `auth_sessions`, `user_bots`, `api_keys`), and bridge tables (`bridges`, `bridge_chat_mappings`, `bridge_msg_mappings`). Auto-creates default admin on first run.
-- **version.go** — Build-time version variables (`version`, `commit`, `buildDate`) injected via ldflags. `VersionChecker` fetches latest release from GitHub API with 6-hour cache. `compareSemver()` for version comparison. Endpoints: `/api/health` (extended with version fields), `/api/version` (version + update check).
-- **server_capture_test.go** — Tests for `captureSentMessage` (copyMessage and sendMessage scenarios). Uses temp DB via `t.TempDir()`.
-- **templates/index.html** — Complete SPA (vanilla JS, no framework). Dark/light theme (Sora + JetBrains Mono, auto-switches via `prefers-color-scheme`). i18n with EN/RU support via `i18n` object and `t(key)` function. Compiled into binary via `//go:embed`.
+### Root (package main)
+- **main.go** — Entry point. Wires up all components: store, proxy, server, bridge. Token is optional. Supports `-demo` flag and `-tg-api` for custom Telegram API URL.
+- **demo.go** — `seedDemoData()` for demo mode. Populates `demo.db` with `demo:demo` admin and 3 demo bots.
+
+### internal/models — Shared data types
+- **models.go** — All shared types: `BotConfig`, `Chat`, `Message`, `AuthUser`, `Route`, `RouteMapping`, `BridgeConfig`, `LLMConfig`, `AdminInfo`, `UserTag`, etc.
+
+### internal/store — Database layer
+- **store.go** — `Store` struct, SQLite with WAL mode. All DB operations. Auto-migrates schema on startup. Auth tables, bridge tables, LLM config. Auto-creates default admin on first run.
+
+### internal/auth — Authentication utilities
+- **auth.go** — Pure functions: `HashPassword`, `CheckPassword`, `GenerateSessionToken`, `GenerateAPIKey`, `HashAPIKey`. Constants: `SessionCookieName`, `SessionDuration`.
+
+### internal/bot — Telegram Bot wrapper
+- **bot.go** — `Bot` struct wrapping `OvyFlash/telegram-bot-api`. All Telegram API calls (send, ban, pin, admin management). `ProcessUpdate()` dispatches to message/chat/member/business/callback handlers (Bot API 9.6 compatible). `OnMessageSent` callback notifies bridges. `AllowedUpdateTypes` defines requested update types.
+
+### internal/llm — LLM-based message routing
+- **llm.go** — `Router` for AI-based message routing via OpenAI-compatible API. `RouteMessage()` builds context from all bots+descriptions+chats, calls LLM Chat Completions, parses JSON routing decision.
+
+### internal/proxy — Bot polling & forwarding manager
+- **proxy.go** — `Manager` manages ALL bots uniformly. Runs independent `pollLoop` per bot with raw JSON `getUpdates`. Dual-mode per bot: forwards updates to backend URL (proxy) and/or processes them for chat tracking (management). `WebhookHandler()` for bots in webhook mode. `UpdateQueue` ring buffer for long-poll consumers.
+
+### internal/bridge — Multi-protocol bridges
+- **bridge.go** — `Manager` for multi-protocol bridges. Translates external messages into Telegram Update JSON format and injects them into `ProcessUpdate()`. Intercepts outgoing bot messages via `OnMessageSent` hook. Maintains chat/message mappings for threading.
+- **slack.go** — Native Slack protocol bridge. Handles Slack Events API (URL verification, HMAC-SHA256 signature validation, event parsing). Slack-specific types (`SlackConfig`, `SlackEventPayload`, `SlackMessageEvent`).
+
+### internal/server — HTTP server
+- **server.go** — HTTP server with `embed.FS` for SPA. REST API for all bot/chat/message/admin/bridge operations. Auth middleware (cookie sessions + Bearer API keys). Telegram API proxy at `/tgapi/`. Long polling at `/api/updates/poll`.
+- **internal/server/templates/index.html** — Complete SPA (vanilla JS). Dark/light theme, i18n (EN/RU). Compiled into binary via `//go:embed`.
+
+### pkg/logbuf — Log buffer utility
+- **logbuf.go** — Thread-safe ring buffer (`LogBuffer`) that captures log output for web UI SSE streaming.
+
+### internal/version — Version checking
+- **version.go** — `Checker` fetches latest release from GitHub API with 6-hour cache. `CompareSemver()` for version comparison.
+
+### Tests (root, package main)
+- **e2e_*_test.go** — End-to-end integration tests with fake Telegram/Slack/LLM servers.
+- **server_capture_test.go, longpoll_test.go, version_test.go** — Unit/integration tests.
 
 ## Key Design Decisions
 
@@ -88,7 +114,7 @@ Monolithic Go app (all `package main`), 11 source files + 1 test file + 1 embedd
 
 ## Language
 
-Frontend supports English and Russian via i18n system in `templates/index.html`. Translations are in the `i18n` object (keys `en`/`ru`). `t(key)` returns the current language string. `applyLang()` re-renders all static and dynamic content. Language preference stored in localStorage. Comments may be in English or Russian. README is English.
+Frontend supports English and Russian via i18n system in `internal/server/templates/index.html`. Translations are in the `i18n` object (keys `en`/`ru`). `t(key)` returns the current language string. `applyLang()` re-renders all static and dynamic content. Language preference stored in localStorage. Comments may be in English or Russian. README is English.
 
 **Version checking**: Build-time variables (`version`, `commit`, `buildDate`) injected via `-ldflags "-X main.version=..."`. CI workflows (release.yml, docker.yml) and Dockerfile pass these automatically. `VersionChecker` queries GitHub Releases API (`/repos/skrashevich/botmux/releases/latest`) with 6-hour in-memory cache. Dev builds (`version=dev`) skip the check. Admin-only update banner in sidebar, dismissible per version (persisted in localStorage). `-version` CLI flag prints build info and exits.
 

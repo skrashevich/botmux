@@ -7,6 +7,13 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	verpkg "github.com/skrashevich/botmux/internal/version"
+
+	"github.com/skrashevich/botmux/internal/auth"
+	"github.com/skrashevich/botmux/internal/models"
+	"github.com/skrashevich/botmux/internal/proxy"
+	"github.com/skrashevich/botmux/internal/server"
 )
 
 func TestCompareSemver(t *testing.T) {
@@ -28,31 +35,31 @@ func TestCompareSemver(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s_vs_%s", tt.a, tt.b), func(t *testing.T) {
-			got := compareSemver(tt.a, tt.b)
+			got := verpkg.CompareSemver(tt.a, tt.b)
 			if got != tt.want {
-				t.Errorf("compareSemver(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
+				t.Errorf("verpkg.CompareSemver(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
 			}
 		})
 	}
 }
 
 func TestVersionCheckerGetVersionInfo(t *testing.T) {
-	vc := NewVersionChecker()
+	vc := verpkg.NewChecker("dev", "unknown", "unknown")
 	info := vc.GetVersionInfo()
 
-	if info.Version != version {
-		t.Errorf("expected version %q, got %q", version, info.Version)
+	if info.Version != "dev" {
+		t.Errorf("expected version %q, got %q", "dev", info.Version)
 	}
-	if info.Commit != commit {
-		t.Errorf("expected commit %q, got %q", commit, info.Commit)
+	if info.Commit != "unknown" {
+		t.Errorf("expected commit %q, got %q", "unknown", info.Commit)
 	}
-	if info.BuildDate != buildDate {
-		t.Errorf("expected buildDate %q, got %q", buildDate, info.BuildDate)
+	if info.BuildDate != "unknown" {
+		t.Errorf("expected buildDate %q, got %q", "unknown", info.BuildDate)
 	}
 }
 
 func TestVersionCheckerSkipsDevBuilds(t *testing.T) {
-	vc := NewVersionChecker()
+	vc := verpkg.NewChecker("dev", "unknown", "unknown")
 	// version is "dev" in tests (no ldflags)
 	result := vc.CheckForUpdate()
 
@@ -68,7 +75,7 @@ func TestVersionCheckerSkipsDevBuilds(t *testing.T) {
 }
 
 func TestVersionCheckerCachesResult(t *testing.T) {
-	vc := NewVersionChecker()
+	vc := verpkg.NewChecker("dev", "unknown", "unknown")
 
 	r1 := vc.CheckForUpdate()
 	r2 := vc.CheckForUpdate()
@@ -81,7 +88,7 @@ func TestVersionCheckerCachesResult(t *testing.T) {
 
 func TestHealthEndpointNoVersionInfo(t *testing.T) {
 	store := newTestStore(t)
-	server := NewServer(store, nil)
+	server := server.NewServer(store, nil)
 
 	mux := server.BuildMux()
 	ts := httptest.NewServer(mux)
@@ -110,8 +117,8 @@ func TestHealthEndpointNoVersionInfo(t *testing.T) {
 
 func TestHealthEndpointDemoMode(t *testing.T) {
 	store := newTestStore(t)
-	server := NewServer(store, nil)
-	server.demoMode = true
+	server := server.NewServer(store, nil)
+	server.DemoMode = true
 
 	mux := server.BuildMux()
 	ts := httptest.NewServer(mux)
@@ -133,7 +140,7 @@ func TestHealthEndpointDemoMode(t *testing.T) {
 
 func TestVersionEndpointRequiresAuth(t *testing.T) {
 	store := newTestStore(t)
-	server := NewServer(store, nil)
+	server := server.NewServer(store, nil)
 
 	mux := server.BuildMux()
 	ts := httptest.NewServer(mux)
@@ -153,7 +160,8 @@ func TestVersionEndpointRequiresAuth(t *testing.T) {
 
 func TestVersionEndpointWithAuth(t *testing.T) {
 	store := newTestStore(t)
-	server := NewServer(store, nil)
+	server := server.NewServer(store, nil)
+	server.VersionChecker = verpkg.NewChecker("dev", "unknown", "unknown")
 
 	session := createTestAuth(t, store)
 
@@ -162,7 +170,7 @@ func TestVersionEndpointWithAuth(t *testing.T) {
 	defer ts.Close()
 
 	req, _ := http.NewRequest("GET", ts.URL+"/api/version", nil)
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session})
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -204,9 +212,9 @@ func TestIsValidHexColor(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := isValidHexColor(tt.input)
+			got := server.IsValidHexColor(tt.input)
 			if got != tt.want {
-				t.Errorf("isValidHexColor(%q) = %v, want %v", tt.input, got, tt.want)
+				t.Errorf("server.IsValidHexColor(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -214,8 +222,8 @@ func TestIsValidHexColor(t *testing.T) {
 
 func TestUserProfileEndpointRequiresAuth(t *testing.T) {
 	store := newTestStore(t)
-	proxy := NewProxyManager(store)
-	server := NewServer(store, proxy)
+	proxy := proxy.NewManager(store, "https://api.telegram.org")
+	server := server.NewServer(store, proxy)
 
 	mux := server.BuildMux()
 	ts := httptest.NewServer(mux)
@@ -234,8 +242,8 @@ func TestUserProfileEndpointRequiresAuth(t *testing.T) {
 
 func TestUserProfileEndpointValidation(t *testing.T) {
 	store := newTestStore(t)
-	proxy := NewProxyManager(store)
-	server := NewServer(store, proxy)
+	proxy := proxy.NewManager(store, "https://api.telegram.org")
+	server := server.NewServer(store, proxy)
 	session := createTestAuth(t, store)
 
 	mux := server.BuildMux()
@@ -244,7 +252,7 @@ func TestUserProfileEndpointValidation(t *testing.T) {
 
 	// Missing chat_id and user_id — should get 400
 	req, _ := http.NewRequest("GET", ts.URL+"/api/users/profile?bot_id=1", nil)
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session})
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -258,12 +266,12 @@ func TestUserProfileEndpointValidation(t *testing.T) {
 
 func TestUserProfileEndpointReturnsData(t *testing.T) {
 	store := newTestStore(t)
-	proxy := NewProxyManager(store)
-	server := NewServer(store, proxy)
+	proxy := proxy.NewManager(store, "https://api.telegram.org")
+	server := server.NewServer(store, proxy)
 	session := createTestAuth(t, store)
 
 	// Create a bot
-	botID, err := store.AddBotConfig(BotConfig{
+	botID, err := store.AddBotConfig(models.BotConfig{
 		Name:        "Profile Bot",
 		Token:       "profile-token",
 		BotUsername: "profilebot",
@@ -277,7 +285,7 @@ func TestUserProfileEndpointReturnsData(t *testing.T) {
 
 	// Save some messages from this user
 	for i := 1; i <= 3; i++ {
-		store.SaveMessage(Message{
+		store.SaveMessage(models.Message{
 			ID:       i,
 			BotID:    botID,
 			ChatID:   123,
@@ -289,7 +297,7 @@ func TestUserProfileEndpointReturnsData(t *testing.T) {
 	}
 
 	// Add a tag
-	store.AddUserTag(UserTag{
+	store.AddUserTag(models.UserTag{
 		ChatID:   123,
 		UserID:   456,
 		Username: "@testuser",
@@ -302,7 +310,7 @@ func TestUserProfileEndpointReturnsData(t *testing.T) {
 	defer ts.Close()
 
 	req, _ := http.NewRequest("GET", fmt.Sprintf("%s/api/users/profile?bot_id=%d&chat_id=123&user_id=456", ts.URL, botID), nil)
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session})
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -332,8 +340,8 @@ func TestUserProfileEndpointReturnsData(t *testing.T) {
 
 func TestUserProfileEndpointBotAccessCheck(t *testing.T) {
 	store := newTestStore(t)
-	proxy := NewProxyManager(store)
-	server := NewServer(store, proxy)
+	proxy := proxy.NewManager(store, "https://api.telegram.org")
+	server := server.NewServer(store, proxy)
 
 	// Create a non-admin user
 	_, err := store.CreateUser("regular", "password123", "Regular User", "user")
@@ -346,11 +354,11 @@ func TestUserProfileEndpointBotAccessCheck(t *testing.T) {
 	}
 
 	// Create session for non-admin user
-	token, _ := GenerateSessionToken()
+	token, _ := auth.GenerateSessionToken()
 	store.CreateSession(token, user.ID, time.Now().Add(24*time.Hour))
 
 	// Create a bot (not assigned to this user)
-	botID, _ := store.AddBotConfig(BotConfig{
+	botID, _ := store.AddBotConfig(models.BotConfig{
 		Name:        "Restricted Bot",
 		Token:       "restricted-token",
 		BotUsername: "restricted",
@@ -361,7 +369,7 @@ func TestUserProfileEndpointBotAccessCheck(t *testing.T) {
 	defer ts.Close()
 
 	req, _ := http.NewRequest("GET", fmt.Sprintf("%s/api/users/profile?bot_id=%d&chat_id=123&user_id=456", ts.URL, botID), nil)
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: token})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

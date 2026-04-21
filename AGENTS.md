@@ -22,14 +22,21 @@ No tests, no linter configured. Single `go build` produces the binary.
 
 ## Architecture
 
-Monolithic Go app (all `package main`), 5 source files + 1 embedded SPA template:
+Multi-package Go app organized into `internal/`, `pkg/`, and root `package main`:
 
-- **main.go** — Entry point. Token is optional — if provided, registers CLI bot; otherwise uses bots from DB. Starts ProxyManager for all bots, launches HTTP server.
-- **bot.go** — `Bot` struct wrapping `OvyFlash/telegram-bot-api`. All Telegram API calls (send, ban, pin, admin management). `processUpdate()` dispatches to message/chat/member handlers.
-- **proxy.go** — `ProxyManager` manages ALL bots uniformly (no CLI vs web distinction). Runs independent `pollLoop` per bot with raw JSON `getUpdates`. Dual-mode per bot: forwards updates to backend URL (proxy) and/or processes them for chat tracking (management). `WebhookHandler()` for bots in webhook mode. Creates managed Bot instances automatically at Start(). Periodic backend health checks every 60s.
-- **server.go** — HTTP server with `embed.FS` for SPA. REST API for all bot/chat/message/admin operations. Telegram API proxy at `/tgapi/` captures outgoing bot messages. Multi-bot: resolves bot instances via `getBotFromRequest()` / `resolveBot()`.
-- **store.go** — SQLite with WAL mode. All data models and DB operations. Auto-migrates schema on startup.
-- **templates/index.html** — Complete SPA (vanilla JS, no framework). Dark/light theme (Sora + JetBrains Mono, auto-switches via `prefers-color-scheme`). i18n with EN/RU support via `i18n` object and `t(key)` function. Compiled into binary via `//go:embed`.
+- **main.go** — Entry point. Wires up store, proxy, server, bridge. Token is optional.
+- **demo.go** — Demo mode seeding with fake bots and `demo:demo` admin.
+- **internal/models/** — Shared data types (`BotConfig`, `Message`, `Chat`, `AuthUser`, `Route`, `BridgeConfig`, `LLMConfig`, etc.)
+- **internal/store/** — `Store` struct, SQLite with WAL mode. All DB operations, schema migrations.
+- **internal/auth/** — Pure auth functions: `HashPassword`, `CheckPassword`, `GenerateSessionToken`, `GenerateAPIKey`, `HashAPIKey`.
+- **internal/bot/** — `Bot` struct wrapping `OvyFlash/telegram-bot-api`. All Telegram API calls. `ProcessUpdate()` dispatches to message/chat/member handlers.
+- **internal/llm/** — `Router` for AI-based message routing via OpenAI-compatible API.
+- **internal/proxy/** — `Manager` manages ALL bots uniformly. Polling, forwarding, health checks, `UpdateQueue` for long-poll.
+- **internal/bridge/** — `Manager` for multi-protocol bridges (generic webhook + Slack). Translates external messages to Telegram format.
+- **internal/server/** — HTTP server with `embed.FS` for SPA. REST API, auth middleware, Telegram API proxy at `/tgapi/`.
+- **internal/server/templates/index.html** — Complete SPA (vanilla JS). Dark/light theme, i18n (EN/RU). Compiled via `//go:embed`.
+- **pkg/logbuf/** — Thread-safe log ring buffer with SSE subscriber support.
+- **internal/version/** — GitHub release version checker with caching.
 
 ## Key Design Decisions
 

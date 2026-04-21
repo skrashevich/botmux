@@ -1,4 +1,4 @@
-package main
+package version
 
 import (
 	"encoding/json"
@@ -8,47 +8,41 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/skrashevich/botmux/internal/models"
 )
 
 const (
-	githubRepo         = "skrashevich/botmux"
+	GithubRepo          = "skrashevich/botmux"
 	updateCheckInterval = 6 * time.Hour
 )
 
-type VersionInfo struct {
-	Version   string `json:"version"`
-	Commit    string `json:"commit"`
-	BuildDate string `json:"build_date"`
-}
-
-type UpdateCheck struct {
-	Current          string `json:"current_version"`
-	Latest           string `json:"latest_version,omitempty"`
-	UpdateAvailable  bool   `json:"update_available"`
-	ReleaseURL       string `json:"release_url,omitempty"`
-	CheckedAt        string `json:"checked_at,omitempty"`
-	Error            string `json:"error,omitempty"`
-}
-
-type VersionChecker struct {
+type Checker struct {
 	mu          sync.Mutex
 	lastCheck   time.Time
-	cachedCheck *UpdateCheck
+	cachedCheck *models.UpdateCheck
+	version     string
+	commit      string
+	buildDate   string
 }
 
-func NewVersionChecker() *VersionChecker {
-	return &VersionChecker{}
-}
-
-func (vc *VersionChecker) GetVersionInfo() VersionInfo {
-	return VersionInfo{
-		Version:   version,
-		Commit:    commit,
-		BuildDate: buildDate,
+func NewChecker(ver, commit, buildDate string) *Checker {
+	return &Checker{
+		version:   ver,
+		commit:    commit,
+		buildDate: buildDate,
 	}
 }
 
-func (vc *VersionChecker) CheckForUpdate() UpdateCheck {
+func (vc *Checker) GetVersionInfo() models.VersionInfo {
+	return models.VersionInfo{
+		Version:   vc.version,
+		Commit:    vc.commit,
+		BuildDate: vc.buildDate,
+	}
+}
+
+func (vc *Checker) CheckForUpdate() models.UpdateCheck {
 	vc.mu.Lock()
 	defer vc.mu.Unlock()
 
@@ -62,18 +56,18 @@ func (vc *VersionChecker) CheckForUpdate() UpdateCheck {
 	return result
 }
 
-func (vc *VersionChecker) fetchLatestRelease() UpdateCheck {
-	result := UpdateCheck{
-		Current: version,
+func (vc *Checker) fetchLatestRelease() models.UpdateCheck {
+	result := models.UpdateCheck{
+		Current: vc.version,
 	}
 
-	if version == "dev" || version == "unknown" {
+	if vc.version == "dev" || vc.version == "unknown" {
 		result.Error = "development build, skipping update check"
 		return result
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get("https://api.github.com/repos/" + githubRepo + "/releases/latest")
+	resp, err := client.Get("https://api.github.com/repos/" + GithubRepo + "/releases/latest")
 	if err != nil {
 		result.Error = "failed to check for updates"
 		log.Printf("Version check failed: %v", err)
@@ -104,20 +98,20 @@ func (vc *VersionChecker) fetchLatestRelease() UpdateCheck {
 	}
 
 	result.Latest = release.TagName
-	if strings.HasPrefix(release.HTMLURL, "https://github.com/"+githubRepo) {
+	if strings.HasPrefix(release.HTMLURL, "https://github.com/"+GithubRepo) {
 		result.ReleaseURL = release.HTMLURL
 	} else {
-		result.ReleaseURL = "https://github.com/" + githubRepo + "/releases"
+		result.ReleaseURL = "https://github.com/" + GithubRepo + "/releases"
 	}
 	result.CheckedAt = time.Now().UTC().Format(time.RFC3339)
-	result.UpdateAvailable = compareSemver(version, release.TagName) < 0
+	result.UpdateAvailable = CompareSemver(vc.version, release.TagName) < 0
 
 	return result
 }
 
-// compareSemver compares two semver strings (with optional "v" prefix).
+// CompareSemver compares two semver strings (with optional "v" prefix).
 // Returns -1 if a < b, 0 if a == b, 1 if a > b.
-func compareSemver(a, b string) int {
+func CompareSemver(a, b string) int {
 	a = strings.TrimPrefix(a, "v")
 	b = strings.TrimPrefix(b, "v")
 
@@ -127,7 +121,6 @@ func compareSemver(a, b string) int {
 	for i := range max(len(partsA), len(partsB)) {
 		var va, vb int
 		if i < len(partsA) {
-			// Strip pre-release suffix (e.g., "1-beta" -> "1")
 			va, _ = strconv.Atoi(strings.SplitN(partsA[i], "-", 2)[0])
 		}
 		if i < len(partsB) {

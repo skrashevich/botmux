@@ -1,4 +1,4 @@
-package main
+package llm
 
 import (
 	"bytes"
@@ -10,40 +10,26 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/skrashevich/botmux/internal/models"
+	"github.com/skrashevich/botmux/internal/store"
 )
 
-// LLMConfig holds configuration for the LLM routing service
-type LLMConfig struct {
-	ID           int64  `json:"id"`
-	APIURL       string `json:"api_url"`
-	APIKey       string `json:"api_key"`
-	Model        string `json:"model"`
-	SystemPrompt string `json:"system_prompt"`
-	Enabled      bool   `json:"enabled"`
-}
-
-// LLMRouter routes messages to the appropriate bot using an LLM
-type LLMRouter struct {
-	store  *Store
-	client *http.Client
-}
-
-// LLMRouteResult holds the routing decision from the LLM
-type LLMRouteResult struct {
-	TargetBotID  int64  `json:"target_bot_id"`
-	TargetChatID int64  `json:"target_chat_id"`
-	Action       string `json:"action"`
-	Reason       string `json:"reason"`
-}
-
-const defaultSystemPrompt = `You are a message router for Telegram bots. Given a message and a list of available bots with their descriptions and chats, decide which bot should handle the message.
+// DefaultSystemPrompt is the default system prompt for the LLM router.
+const DefaultSystemPrompt = `You are a message router for Telegram bots. Given a message and a list of available bots with their descriptions and chats, decide which bot should handle the message.
 Respond with JSON: {"target_bot_id": <id>, "target_chat_id": <chat_id or 0>, "action": "<forward|copy|drop>", "reason": "<brief reason>"}
 If no bot should handle it, respond with: {"target_bot_id": 0, "action": "drop", "reason": "no matching bot"}`
 
-// NewLLMRouter creates a new LLMRouter
-func NewLLMRouter(store *Store) *LLMRouter {
-	return &LLMRouter{
-		store: store,
+// Router routes messages to the appropriate bot using an LLM.
+type Router struct {
+	store  *store.Store
+	client *http.Client
+}
+
+// NewRouter creates a new Router.
+func NewRouter(s *store.Store) *Router {
+	return &Router{
+		store: s,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -51,8 +37,8 @@ func NewLLMRouter(store *Store) *LLMRouter {
 }
 
 // RouteMessage decides which bot/chat should handle the given message.
-// Returns *LLMRouteResult or nil if routing is disabled, and any error.
-func (r *LLMRouter) RouteMessage(ctx context.Context, sourceBotID int64, messageText string, chatID int64, fromID int64, fromUser string) (*LLMRouteResult, error) {
+// Returns *models.LLMRouteResult or nil if routing is disabled, and any error.
+func (r *Router) RouteMessage(ctx context.Context, sourceBotID int64, messageText string, chatID int64, fromID int64, fromUser string) (*models.LLMRouteResult, error) {
 	cfg, err := r.store.GetLLMConfig()
 	if err != nil {
 		return nil, fmt.Errorf("llm-router: failed to load config: %w", err)
@@ -113,7 +99,7 @@ func (r *LLMRouter) RouteMessage(ctx context.Context, sourceBotID int64, message
 
 	systemPrompt := cfg.SystemPrompt
 	if strings.TrimSpace(systemPrompt) == "" {
-		systemPrompt = defaultSystemPrompt
+		systemPrompt = DefaultSystemPrompt
 	}
 
 	result, err := r.callLLM(ctx, cfg, systemPrompt, userContent)
@@ -127,8 +113,8 @@ func (r *LLMRouter) RouteMessage(ctx context.Context, sourceBotID int64, message
 	return result, nil
 }
 
-// callLLM calls the OpenAI-compatible Chat Completions API
-func (r *LLMRouter) callLLM(ctx context.Context, cfg *LLMConfig, systemPrompt, userContent string) (*LLMRouteResult, error) {
+// callLLM calls the OpenAI-compatible Chat Completions API.
+func (r *Router) callLLM(ctx context.Context, cfg *models.LLMConfig, systemPrompt, userContent string) (*models.LLMRouteResult, error) {
 	reqBody, err := json.Marshal(map[string]any{
 		"model": cfg.Model,
 		"messages": []map[string]string{
@@ -180,7 +166,7 @@ func (r *LLMRouter) callLLM(ctx context.Context, cfg *LLMConfig, systemPrompt, u
 	}
 
 	content := apiResp.Choices[0].Message.Content
-	var result LLMRouteResult
+	var result models.LLMRouteResult
 	if err := json.Unmarshal([]byte(content), &result); err != nil {
 		return nil, fmt.Errorf("llm-router: failed to parse routing JSON %q: %w", content, err)
 	}

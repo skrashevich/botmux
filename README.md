@@ -500,13 +500,26 @@ The **API Proxy URL** is displayed in the bot detail view when proxy mode is ena
 
 ```
 botmux/
-├── main.go         Entry point, flag parsing, bot registration
-├── bot.go          Telegram Bot API wrapper (all bot methods)
-├── proxy.go        ProxyManager: polling, forwarding, health checks for all bots
-├── server.go       HTTP server, REST API endpoints
-├── store.go        SQLite storage (bots, chats, messages, admin log, user tags)
-└── templates/
-    └── index.html  Single-page web application (embedded at compile time)
+├── main.go                 Entry point, flag parsing, wiring
+├── demo.go                 Demo mode seeding
+├── internal/
+│   ├── models/models.go    Shared data types (BotConfig, Message, Chat, etc.)
+│   ├── store/store.go      SQLite storage, migrations, all DB operations
+│   ├── auth/auth.go        Password hashing, session/API key generation
+│   ├── bot/bot.go          Telegram Bot API wrapper (all bot methods)
+│   ├── llm/llm.go          LLM-based message routing (OpenAI-compatible)
+│   ├── proxy/proxy.go      Manager: polling, forwarding, health checks
+│   ├── bridge/             Multi-protocol bridges (generic webhook + Slack)
+│   │   ├── bridge.go
+│   │   └── slack.go
+│   └── server/             HTTP server, REST API, auth middleware
+│       ├── server.go
+│       └── templates/
+│           └── index.html  SPA (embedded at compile time)
+├── pkg/
+│   ├── logbuf/logbuf.go    Thread-safe log ring buffer with SSE
+│   └── version/version.go  GitHub release version checker
+└── *_test.go               E2E and unit tests
 ```
 
 ### Data flow

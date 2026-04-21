@@ -11,6 +11,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/skrashevich/botmux/internal/bot"
+	"github.com/skrashevich/botmux/internal/bridge"
+	"github.com/skrashevich/botmux/internal/models"
 )
 
 const testSlackSigningSecret = "test_signing_secret_32byteslong!!"
@@ -66,7 +70,7 @@ func postBridgeIncoming(t *testing.T, serverURL string, bridgeID int64, body []b
 // Returns the assigned bridge ID.
 func addSlackBridge(t *testing.T, h *e2eHarness, botID int64, slackAPIBaseURL, signingSecret string) int64 {
 	t.Helper()
-	cfg := SlackConfig{
+	cfg := bridge.SlackConfig{
 		BotToken:      "xoxb-test-token",
 		SigningSecret: signingSecret,
 		APIBaseURL:    slackAPIBaseURL,
@@ -75,7 +79,7 @@ func addSlackBridge(t *testing.T, h *e2eHarness, botID int64, slackAPIBaseURL, s
 	if err != nil {
 		t.Fatalf("addSlackBridge: marshal config: %v", err)
 	}
-	bridgeID, err := h.store.AddBridge(BridgeConfig{
+	bridgeID, err := h.store.AddBridge(models.BridgeConfig{
 		Name:        "test-slack-bridge",
 		Protocol:    "slack",
 		LinkedBotID: botID,
@@ -105,7 +109,7 @@ func testSlackB01URLVerification(t *testing.T) {
 	h := setupE2E(t, withHTTPServer(), withBridge(), withFakeSlackReal(fs))
 
 	token := "b01bot:1234567890"
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:         token,
 		Name:          "b01bot",
 		BotUsername:   "b01bot",
@@ -150,7 +154,7 @@ func testSlackB02HMACSignature(t *testing.T) {
 	h := setupE2E(t, withHTTPServer(), withBridge(), withFakeSlackReal(fs))
 
 	token := "b02bot:1234567890"
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:         token,
 		Name:          "b02bot",
 		BotUsername:   "b02bot",
@@ -207,7 +211,7 @@ func testSlackB05IncomingEventFlow(t *testing.T) {
 	h := setupE2E(t, withHTTPServer(), withBridge(), withFakeSlackReal(fs))
 
 	token := "b05bot:1234567890"
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:         token,
 		Name:          "b05bot",
 		BotUsername:   "b05bot",
@@ -218,7 +222,7 @@ func testSlackB05IncomingEventFlow(t *testing.T) {
 	bridgeID := addSlackBridge(t, h, botID, fs.URL(), testSlackSigningSecret)
 
 	// Ensure the bridge manager has a managed bot with the outgoing hook installed.
-	managedBot, err := NewBot(token, h.store, botID, h.fake.URL())
+	managedBot, err := bot.NewBot(token, h.store, botID, h.fake.URL())
 	if err != nil {
 		t.Fatalf("B-05: NewBot: %v", err)
 	}
@@ -268,7 +272,7 @@ func testSlackB05IncomingEventFlow(t *testing.T) {
 		t.Fatalf("B-05: bridge chat mapping not found: err=%v chatID=%d", err, tgChatID)
 	}
 
-	var stored Message
+	var stored models.Message
 	h.Eventually(func() bool {
 		msgs, err := h.store.GetMessages(botID, tgChatID, 10, 0)
 		if err != nil {

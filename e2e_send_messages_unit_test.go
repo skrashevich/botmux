@@ -3,14 +3,17 @@ package main
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/skrashevich/botmux/internal/models"
+	"github.com/skrashevich/botmux/internal/server"
 )
 
 // S-08: captureSentMessage with deleteMessage (not in sendMethods) must not write to store.
 func TestUnit_Send_S08_DeleteMessageIsNoOp(t *testing.T) {
 	store := newTestStore(t)
-	server := NewServer(store, nil)
+	server := server.NewServer(store, nil)
 
-	botID, err := store.AddBotConfig(BotConfig{
+	botID, err := store.AddBotConfig(models.BotConfig{
 		Name:        "Del Bot",
 		Token:       "deltoken",
 		BotUsername: "delbot",
@@ -20,7 +23,7 @@ func TestUnit_Send_S08_DeleteMessageIsNoOp(t *testing.T) {
 	}
 
 	// deleteMessage returns {"ok":true,"result":true} — result is bool, not a Message.
-	server.captureSentMessage(
+	server.CaptureSentMessage(
 		"deltoken",
 		"deleteMessage",
 		[]byte(`{"chat_id":100,"message_id":55}`),
@@ -40,9 +43,9 @@ func TestUnit_Send_S08_DeleteMessageIsNoOp(t *testing.T) {
 // S-09: inferTelegramMethod truth-table — body field → expected method name.
 func TestUnit_Send_S09_InferTelegramMethodTruthTable(t *testing.T) {
 	cases := []struct {
-		name   string
-		body   string
-		want   string
+		name string
+		body string
+		want string
 	}{
 		// Known send methods matched by body fields
 		{"photo", `{"photo":"file_id","chat_id":1}`, "sendPhoto"},
@@ -72,23 +75,23 @@ func TestUnit_Send_S09_InferTelegramMethodTruthTable(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := inferTelegramMethod([]byte(tc.body))
+			got := server.InferTelegramMethod([]byte(tc.body))
 			if got != tc.want {
-				t.Errorf("inferTelegramMethod(%q) = %q, want %q", tc.body, got, tc.want)
+				t.Errorf("server.InferTelegramMethod(%q) = %q, want %q", tc.body, got, tc.want)
 			}
 		})
 	}
 }
 
 // S-10: editMessageText / editMessageCaption with result=true (inline message) must not panic;
-// result=Message object must save to store.
+// result=models.Message object must save to store.
 func TestUnit_Send_S10_EditMessageBothResultShapes(t *testing.T) {
 	t.Run("result_is_true_inline_message", func(t *testing.T) {
 		store := newTestStore(t)
-		server := NewServer(store, nil)
+		server := server.NewServer(store, nil)
 
 		// When editing an inline message Telegram returns result:true — must not panic, must not store.
-		server.captureSentMessage(
+		server.CaptureSentMessage(
 			"token",
 			"editMessageText",
 			[]byte(`{"inline_message_id":"abc","text":"updated"}`),
@@ -100,9 +103,9 @@ func TestUnit_Send_S10_EditMessageBothResultShapes(t *testing.T) {
 
 	t.Run("result_is_message_object", func(t *testing.T) {
 		store := newTestStore(t)
-		server := NewServer(store, nil)
+		server := server.NewServer(store, nil)
 
-		botID, err := store.AddBotConfig(BotConfig{
+		botID, err := store.AddBotConfig(models.BotConfig{
 			Name:        "Edit Bot",
 			Token:       "edittoken",
 			BotUsername: "editbot",
@@ -123,7 +126,7 @@ func TestUnit_Send_S10_EditMessageBothResultShapes(t *testing.T) {
 		}
 		respBody, _ := json.Marshal(resp)
 
-		server.captureSentMessage(
+		server.CaptureSentMessage(
 			"edittoken",
 			"editMessageText",
 			[]byte(`{"chat_id":200,"message_id":77,"text":"updated text"}`),
@@ -195,11 +198,11 @@ func TestUnit_Send_S11_CaptureErrorResilience(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newTestStore(t)
-			server := NewServer(store, nil)
+			server := server.NewServer(store, nil)
 
 			// Register a bot so token lookup succeeds; this makes the "save" path reachable
 			// but responses above are all invalid so nothing should be stored.
-			botID, err := store.AddBotConfig(BotConfig{
+			botID, err := store.AddBotConfig(models.BotConfig{
 				Name:        "Resilience Bot",
 				Token:       "restoken",
 				BotUsername: "resbot",
@@ -209,7 +212,7 @@ func TestUnit_Send_S11_CaptureErrorResilience(t *testing.T) {
 			}
 
 			// Must not panic.
-			server.captureSentMessage("restoken", tc.method, tc.reqBody, "application/json", tc.respBody)
+			server.CaptureSentMessage("restoken", tc.method, tc.reqBody, "application/json", tc.respBody)
 
 			msgs, err := store.GetMessages(botID, 1, 10, 0)
 			if err != nil {

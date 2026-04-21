@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"bytes"
@@ -22,61 +22,145 @@ import (
 	"time"
 
 	webp "github.com/skrashevich/go-webp"
+
+	"github.com/skrashevich/botmux/internal/auth"
+	"github.com/skrashevich/botmux/internal/bot"
+	"github.com/skrashevich/botmux/internal/bridge"
+	"github.com/skrashevich/botmux/internal/models"
+	"github.com/skrashevich/botmux/internal/proxy"
+	"github.com/skrashevich/botmux/internal/store"
+	"github.com/skrashevich/botmux/internal/version"
+	"github.com/skrashevich/botmux/pkg/logbuf"
 )
 
 //go:embed templates
 var templateFS embed.FS
 
 type Server struct {
-	store          *Store
-	proxy          *ProxyManager
-	bridge         *BridgeManager
+	store          *store.Store
+	proxy          *proxy.Manager
+	bridge         *bridge.Manager
 	mu             sync.RWMutex
-	bots           map[int64]*Bot // botID -> Bot (for Telegram API calls)
+	bots           map[int64]*bot.Bot // botID -> Bot (for Telegram API calls)
 	webhookPath    string
 	webhookHandler http.HandlerFunc
-	demoMode       bool
-	logBuf         *LogBuffer
-	versionChecker *VersionChecker
-	tgAPIBaseURL   string // override for Telegram API base URL (tests/custom deployments)
+	DemoMode       bool
+	LogBuf         *logbuf.LogBuffer
+	VersionChecker *version.Checker
+	TgAPIBaseURL   string // override for Telegram API base URL (tests/custom deployments)
 }
 
-func NewServer(store *Store, proxy *ProxyManager) *Server {
+func NewServer(s *store.Store, p *proxy.Manager) *Server {
 	return &Server{
-		store:          store,
-		proxy:          proxy,
-		bots:           make(map[int64]*Bot),
-		versionChecker: NewVersionChecker(),
+		store: s,
+		proxy: p,
+		bots:  make(map[int64]*bot.Bot),
 	}
 }
 
 // tgAPIURL returns the effective Telegram API base URL for this server instance.
 // When tgAPIBaseURL is set (e.g. in tests), it takes precedence over the package-level telegramAPIURL.
 func (s *Server) tgAPIURL() string {
-	if s.tgAPIBaseURL != "" {
-		return s.tgAPIBaseURL
+	if s.TgAPIBaseURL != "" {
+		return s.TgAPIBaseURL
 	}
-	return telegramAPIURL
+	return "https://api.telegram.org"
 }
 
-func (s *Server) SetBridgeManager(bm *BridgeManager) {
+func (s *Server) SetBridgeManager(bm *bridge.Manager) {
 	s.bridge = bm
 }
 
-func (s *Server) RegisterBot(botID int64, bot *Bot) {
+func (s *Server) RegisterBot(botID int64, b *bot.Bot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.bots[botID] = bot
+	s.bots[botID] = b
 }
 
-func (s *Server) getBot(botID int64) *Bot {
+func (s *Server) getBot(botID int64) *bot.Bot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.bots[botID]
 }
 
+type contextKey string
+
+const authUserKey contextKey = "auth_user"
+
+// authMiddleware checks Bearer API key or session cookie and adds user to context
+func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var user *models.AuthUser
+
+		// Check Bearer token first
+		if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
+			token := strings.TrimPrefix(authHeader, "Bearer ")
+			keyHash := auth.HashAPIKey(token)
+			u, err := s.store.GetUserByAPIKey(keyHash)
+			if err == nil && u != nil {
+				user = u
+			}
+		}
+
+		// Fall back to session cookie
+		if user == nil {
+			cookie, err := r.Cookie(auth.SessionCookieName)
+			if err != nil || cookie.Value == "" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(401)
+				w.Write([]byte(`{"error":"unauthorized"}`))
+				return
+			}
+			u, err := s.store.GetUserBySession(cookie.Value)
+			if err != nil || u == nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(401)
+				w.Write([]byte(`{"error":"unauthorized"}`))
+				return
+			}
+			user = u
+		}
+
+		ctx := context.WithValue(r.Context(), authUserKey, user)
+		next(w, r.WithContext(ctx))
+	}
+}
+
+// adminOnly requires admin role
+func (s *Server) adminOnly(next http.HandlerFunc) http.HandlerFunc {
+	return s.authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		user := getAuthUser(r)
+		if user == nil || user.Role != "admin" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(403)
+			w.Write([]byte(`{"error":"forbidden"}`))
+			return
+		}
+		next(w, r)
+	})
+}
+
+func getAuthUser(r *http.Request) *models.AuthUser {
+	if u, ok := r.Context().Value(authUserKey).(*models.AuthUser); ok {
+		return u
+	}
+	return nil
+}
+
+// checkBotAccess verifies user has access to the bot (admin = all, user = assigned only)
+func (s *Server) checkBotAccess(r *http.Request, botID int64) bool {
+	user := getAuthUser(r)
+	if user == nil {
+		return false
+	}
+	if user.Role == "admin" {
+		return true
+	}
+	return s.store.UserHasBotAccess(user.ID, botID)
+}
+
 // getBotFromRequest extracts bot_id from query params and returns the Bot instance
-func (s *Server) getBotFromRequest(r *http.Request) (*Bot, int64, error) {
+func (s *Server) getBotFromRequest(r *http.Request) (*bot.Bot, int64, error) {
 	botID, err := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
 	if err != nil {
 		return nil, 0, fmt.Errorf("invalid bot_id")
@@ -113,7 +197,7 @@ func (s *Server) BuildMux() *http.ServeMux {
 	// Health check — no auth (no sensitive info)
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]string{"status": "ok"}
-		if s.demoMode {
+		if s.DemoMode {
 			resp["mode"] = "demo"
 		}
 		writeJSON(w, resp)
@@ -121,8 +205,8 @@ func (s *Server) BuildMux() *http.ServeMux {
 
 	// Version check — auth required (exposes version/commit info)
 	mux.HandleFunc("/api/version", s.authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		info := s.versionChecker.GetVersionInfo()
-		update := s.versionChecker.CheckForUpdate()
+		info := s.VersionChecker.GetVersionInfo()
+		update := s.VersionChecker.CheckForUpdate()
 		writeJSON(w, map[string]any{
 			"version": info,
 			"update":  update,
@@ -168,7 +252,7 @@ func (s *Server) BuildMux() *http.ServeMux {
 	mux.HandleFunc("/api/bots/validate", s.adminOnly(s.handleBotValidate))
 	mux.HandleFunc("/api/bots/health", s.authMiddleware(s.handleBotHealth))
 
-	// Chat management
+	// models.Chat management
 	mux.HandleFunc("/api/chats", s.authMiddleware(s.handleChats))
 	mux.HandleFunc("/api/chats/refresh", s.authMiddleware(s.handleRefreshChat))
 	mux.HandleFunc("/api/chats/delete", s.authMiddleware(s.handleDeleteChat))
@@ -220,7 +304,7 @@ func (s *Server) BuildMux() *http.ServeMux {
 	// Long polling for updates — auth required
 	mux.HandleFunc("/api/updates/poll", s.authMiddleware(s.handleUpdatesPoll))
 
-	// Message stream (SSE) — auth required
+	// models.Message stream (SSE) — auth required
 	mux.HandleFunc("/api/messages/stream", s.authMiddleware(s.handleMessageStream))
 
 	// Application logs — admin only
@@ -305,13 +389,13 @@ func (s *Server) handleI18n(w http.ResponseWriter, r *http.Request) {
 // @Description Returns all bots for admin users, or only assigned bots for regular users. Each entry includes a running status flag.
 // @Tags bots
 // @Produce json
-// @Success 200 {array} BotConfig
+// @Success 200 {array} models.BotConfig
 // @Failure 500 {object} map[string]string
 // @Router /api/bots [get]
 // @Security CookieAuth || BearerAuth
 func (s *Server) handleBotList(w http.ResponseWriter, r *http.Request) {
 	user := getAuthUser(r)
-	var bots []BotConfig
+	var bots []models.BotConfig
 	var err error
 	if user.Role == "admin" {
 		bots, err = s.store.GetBotConfigs()
@@ -323,10 +407,10 @@ func (s *Server) handleBotList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if bots == nil {
-		bots = []BotConfig{}
+		bots = []models.BotConfig{}
 	}
 	type BotStatus struct {
-		BotConfig
+		models.BotConfig
 		Running       bool  `json:"running"`
 		BotTelegramID int64 `json:"bot_telegram_id,omitempty"`
 	}
@@ -350,7 +434,7 @@ func (s *Server) handleBotList(w http.ResponseWriter, r *http.Request) {
 // @Tags bots
 // @Accept json
 // @Produce json
-// @Param bot body BotConfig true "Bot configuration"
+// @Param bot body models.BotConfig true "Bot configuration"
 // @Success 200 {object} map[string]interface{}
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
@@ -361,7 +445,7 @@ func (s *Server) handleBotAdd(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
-	var req BotConfig
+	var req models.BotConfig
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, err)
 		return
@@ -394,7 +478,7 @@ func (s *Server) handleBotAdd(w http.ResponseWriter, r *http.Request) {
 
 	// Create managed Bot instance if needed
 	if req.ManageEnabled {
-		managedBot, err := NewBot(req.Token, s.store, id, s.tgAPIBaseURL)
+		managedBot, err := bot.NewBot(req.Token, s.store, id, s.TgAPIBaseURL)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -417,7 +501,7 @@ func (s *Server) handleBotAdd(w http.ResponseWriter, r *http.Request) {
 // @Tags bots
 // @Accept json
 // @Produce json
-// @Param bot body BotConfig true "Bot configuration (must include id)"
+// @Param bot body models.BotConfig true "Bot configuration (must include id)"
 // @Success 200 {object} map[string]string
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
@@ -428,7 +512,7 @@ func (s *Server) handleBotUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
-	var req BotConfig
+	var req models.BotConfig
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, err)
 		return
@@ -483,7 +567,7 @@ func (s *Server) handleBotDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
 
-	s.proxy.stopBot(id)
+	s.proxy.StopBot(id)
 	s.proxy.UnregisterManagedBot(id)
 	if err := s.store.DeleteBotConfig(id); err != nil {
 		writeError(w, err)
@@ -559,7 +643,7 @@ func (s *Server) handleBotHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"status": status, "checked_at": time.Now().Format(time.RFC3339)})
 }
 
-// Chat handlers
+// models.Chat handlers
 
 // handleChats returns all chats tracked by a given bot.
 // @Summary List chats
@@ -567,7 +651,7 @@ func (s *Server) handleBotHealth(w http.ResponseWriter, r *http.Request) {
 // @Tags chats
 // @Produce json
 // @Param bot_id query int true "Bot ID"
-// @Success 200 {array} Chat
+// @Success 200 {array} models.Chat
 // @Failure 500 {object} map[string]string
 // @Router /api/chats [get]
 // @Security CookieAuth || BearerAuth
@@ -579,7 +663,7 @@ func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if chats == nil {
-		chats = []Chat{}
+		chats = []models.Chat{}
 	}
 	writeJSON(w, chats)
 }
@@ -590,8 +674,8 @@ func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
 // @Tags chats
 // @Produce json
 // @Param bot_id query int true "Bot ID"
-// @Param chat_id query int true "Chat ID"
-// @Success 200 {object} Chat
+// @Param chat_id query int true "models.Chat ID"
+// @Success 200 {object} models.Chat
 // @Failure 500 {object} map[string]string
 // @Router /api/chats/refresh [get]
 // @Security CookieAuth || BearerAuth
@@ -620,7 +704,7 @@ func (s *Server) handleRefreshChat(w http.ResponseWriter, r *http.Request) {
 // @Tags chats
 // @Produce json
 // @Param bot_id query int true "Bot ID"
-// @Param chat_id query int true "Chat ID"
+// @Param chat_id query int true "models.Chat ID"
 // @Success 200 {object} map[string]string
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
@@ -640,17 +724,17 @@ func (s *Server) handleDeleteChat(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
-// Message handlers
+// models.Message handlers
 
 // handleMessages returns paginated messages for a chat.
 // @Summary List messages
 // @Description Returns stored messages for the given chat with pagination support (default limit 50).
 // @Tags messages
 // @Produce json
-// @Param chat_id query int true "Chat ID"
+// @Param chat_id query int true "models.Chat ID"
 // @Param limit query int false "Max number of messages to return (default 50)"
 // @Param offset query int false "Number of messages to skip"
-// @Success 200 {array} Message
+// @Success 200 {array} models.Message
 // @Failure 500 {object} map[string]string
 // @Router /api/messages [get]
 // @Security CookieAuth || BearerAuth
@@ -668,7 +752,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if msgs == nil {
-		msgs = []Message{}
+		msgs = []models.Message{}
 	}
 	writeJSON(w, msgs)
 }
@@ -678,9 +762,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 // @Description Searches stored messages in the given chat by text query. Returns up to 50 results.
 // @Tags messages
 // @Produce json
-// @Param chat_id query int true "Chat ID"
+// @Param chat_id query int true "models.Chat ID"
 // @Param q query string true "Search query"
-// @Success 200 {array} Message
+// @Success 200 {array} models.Message
 // @Failure 500 {object} map[string]string
 // @Router /api/messages/search [get]
 // @Security CookieAuth || BearerAuth
@@ -772,7 +856,7 @@ func (s *Server) handleUpdatesPoll(w http.ResponseWriter, r *http.Request) {
 }
 
 // longPollResponse formats updates in Telegram-compatible getUpdates response format.
-func longPollResponse(updates []QueuedUpdate) map[string]any {
+func longPollResponse(updates []models.QueuedUpdate) map[string]any {
 	result := make([]map[string]any, 0, len(updates))
 	for _, u := range updates {
 		result = append(result, u.Data)
@@ -785,7 +869,7 @@ func longPollResponse(updates []QueuedUpdate) map[string]any {
 
 // handleLongPollGetUpdates serves updates from UpdateQueue for /tgapi/bot{TOKEN}/getUpdates.
 // No auth required — the bot token in the URL is the authorization (same as Telegram API).
-func (s *Server) handleLongPollGetUpdates(w http.ResponseWriter, r *http.Request, botCfg *BotConfig) {
+func (s *Server) handleLongPollGetUpdates(w http.ResponseWriter, r *http.Request, botCfg *models.BotConfig) {
 	// Parse params from query string (GET) or form/JSON body (POST) — Telegram supports all
 	var offset int64
 	var limit, timeout int
@@ -885,7 +969,7 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if msgs == nil {
-		msgs = []Message{}
+		msgs = []models.Message{}
 	}
 	writeJSON(w, msgs)
 }
@@ -942,8 +1026,8 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 // @Tags messages
 // @Produce json
 // @Param bot_id query int true "Bot ID"
-// @Param chat_id query int true "Chat ID"
-// @Param message_id query int true "Message ID to pin"
+// @Param chat_id query int true "models.Chat ID"
+// @Param message_id query int true "models.Message ID to pin"
 // @Success 200 {object} map[string]string
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
@@ -965,9 +1049,9 @@ func (s *Server) handlePinMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	s.store.LogAdminAction(AdminLog{
+	s.store.LogAdminAction(models.AdminLog{
 		ChatID: chatID, Action: "pin_message", ActorName: bot.GetBotName(),
-		Details: "Message ID: " + strconv.Itoa(msgID), CreatedAt: time.Now().Format(time.RFC3339),
+		Details: "models.Message ID: " + strconv.Itoa(msgID), CreatedAt: time.Now().Format(time.RFC3339),
 	})
 	writeJSON(w, map[string]string{"status": "ok"})
 }
@@ -978,8 +1062,8 @@ func (s *Server) handlePinMessage(w http.ResponseWriter, r *http.Request) {
 // @Tags messages
 // @Produce json
 // @Param bot_id query int true "Bot ID"
-// @Param chat_id query int true "Chat ID"
-// @Param message_id query int true "Message ID to unpin"
+// @Param chat_id query int true "models.Chat ID"
+// @Param message_id query int true "models.Message ID to unpin"
 // @Success 200 {object} map[string]string
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
@@ -1010,8 +1094,8 @@ func (s *Server) handleUnpinMessage(w http.ResponseWriter, r *http.Request) {
 // @Tags messages
 // @Produce json
 // @Param bot_id query int true "Bot ID"
-// @Param chat_id query int true "Chat ID"
-// @Param message_id query int true "Message ID to delete"
+// @Param chat_id query int true "models.Chat ID"
+// @Param message_id query int true "models.Message ID to delete"
 // @Success 200 {object} map[string]string
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
@@ -1034,9 +1118,9 @@ func (s *Server) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.store.MarkMessageDeleted(botID, chatID, msgID)
-	s.store.LogAdminAction(AdminLog{
+	s.store.LogAdminAction(models.AdminLog{
 		ChatID: chatID, Action: "delete_message", ActorName: bot.GetBotName(),
-		Details: "Message ID: " + strconv.Itoa(msgID), CreatedAt: time.Now().Format(time.RFC3339),
+		Details: "models.Message ID: " + strconv.Itoa(msgID), CreatedAt: time.Now().Format(time.RFC3339),
 	})
 	writeJSON(w, map[string]string{"status": "ok"})
 }
@@ -1046,8 +1130,8 @@ func (s *Server) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 // @Description Returns total messages, today's messages, active users, top users, and hourly stats for the specified chat.
 // @Tags stats
 // @Produce json
-// @Param chat_id query int true "Chat ID"
-// @Success 200 {object} ChatStats
+// @Param chat_id query int true "models.Chat ID"
+// @Success 200 {object} models.ChatStats
 // @Failure 500 {object} map[string]string
 // @Router /api/stats [get]
 // @Security CookieAuth || BearerAuth
@@ -1067,11 +1151,11 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 // @Description Returns Telegram users who have sent messages in the given chat. Supports text search and pagination.
 // @Tags users
 // @Produce json
-// @Param chat_id query int true "Chat ID"
+// @Param chat_id query int true "models.Chat ID"
 // @Param q query string false "Search query (matches username)"
 // @Param limit query int false "Max results (default 50)"
 // @Param offset query int false "Number of results to skip"
-// @Success 200 {array} ChatUser
+// @Success 200 {array} models.ChatUser
 // @Failure 500 {object} map[string]string
 // @Router /api/users/list [get]
 // @Security CookieAuth || BearerAuth
@@ -1089,7 +1173,7 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if users == nil {
-		users = []ChatUser{}
+		users = []models.ChatUser{}
 	}
 	writeJSON(w, users)
 }
@@ -1119,7 +1203,7 @@ func (s *Server) handleUserProfile(w http.ResponseWriter, r *http.Request) {
 	// Get user info from known_users
 	var username, lastSeen string
 	var msgCount int
-	err := s.store.db.QueryRow(`
+	err := s.store.DB().QueryRow(`
 		SELECT ku.username, ku.first_seen,
 			(SELECT COUNT(*) FROM messages WHERE chat_id = ? AND from_id = ?) as msg_count,
 			(SELECT MAX(date) FROM messages WHERE chat_id = ? AND from_id = ?) as last_msg
@@ -1139,7 +1223,7 @@ func (s *Server) handleUserProfile(w http.ResponseWriter, r *http.Request) {
 
 	// Get first seen
 	var firstSeen string
-	s.store.db.QueryRow(`SELECT first_seen FROM known_users WHERE chat_id = ? AND user_id = ?`, chatID, userID).Scan(&firstSeen)
+	s.store.DB().QueryRow(`SELECT first_seen FROM known_users WHERE chat_id = ? AND user_id = ?`, chatID, userID).Scan(&firstSeen)
 	if firstSeen != "" {
 		profile["first_seen"] = firstSeen
 	}
@@ -1161,7 +1245,7 @@ func (s *Server) handleUserProfile(w http.ResponseWriter, r *http.Request) {
 	// Get admin actions related to this user
 	logs, err := s.store.GetAdminLog(chatID, 50, 0)
 	if err == nil {
-		var userLogs []AdminLog
+		var userLogs []models.AdminLog
 		for _, l := range logs {
 			if l.TargetID == userID {
 				userLogs = append(userLogs, l)
@@ -1182,7 +1266,7 @@ func (s *Server) handleUserProfile(w http.ResponseWriter, r *http.Request) {
 // @Tags users
 // @Produce json
 // @Param bot_id query int true "Bot ID"
-// @Param chat_id query int true "Chat ID"
+// @Param chat_id query int true "models.Chat ID"
 // @Param user_id query int true "Telegram user ID to ban"
 // @Success 200 {object} map[string]string
 // @Failure 405 {string} string "Method not allowed"
@@ -1205,7 +1289,7 @@ func (s *Server) handleBanUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	s.store.LogAdminAction(AdminLog{
+	s.store.LogAdminAction(models.AdminLog{
 		ChatID: chatID, Action: "ban_user", ActorName: bot.GetBotName(),
 		TargetID: userID, CreatedAt: time.Now().Format(time.RFC3339),
 	})
@@ -1218,7 +1302,7 @@ func (s *Server) handleBanUser(w http.ResponseWriter, r *http.Request) {
 // @Tags users
 // @Produce json
 // @Param bot_id query int true "Bot ID"
-// @Param chat_id query int true "Chat ID"
+// @Param chat_id query int true "models.Chat ID"
 // @Param user_id query int true "Telegram user ID to unban"
 // @Success 200 {object} map[string]string
 // @Failure 405 {string} string "Method not allowed"
@@ -1241,7 +1325,7 @@ func (s *Server) handleUnbanUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	s.store.LogAdminAction(AdminLog{
+	s.store.LogAdminAction(models.AdminLog{
 		ChatID: chatID, Action: "unban_user", ActorName: bot.GetBotName(),
 		TargetID: userID, CreatedAt: time.Now().Format(time.RFC3339),
 	})
@@ -1256,8 +1340,8 @@ func (s *Server) handleUnbanUser(w http.ResponseWriter, r *http.Request) {
 // @Tags admins
 // @Produce json
 // @Param bot_id query int true "Bot ID"
-// @Param chat_id query int true "Chat ID"
-// @Success 200 {array} AdminInfo
+// @Param chat_id query int true "models.Chat ID"
+// @Success 200 {array} models.AdminInfo
 // @Failure 500 {object} map[string]string
 // @Router /api/admins [get]
 // @Security CookieAuth || BearerAuth
@@ -1274,7 +1358,7 @@ func (s *Server) handleGetAdmins(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if admins == nil {
-		admins = []AdminInfo{}
+		admins = []models.AdminInfo{}
 	}
 	writeJSON(w, admins)
 }
@@ -1297,10 +1381,10 @@ func (s *Server) handlePromoteAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		BotID  int64     `json:"bot_id"`
-		ChatID int64     `json:"chat_id"`
-		UserID int64     `json:"user_id"`
-		Perms  AdminInfo `json:"perms"`
+		BotID  int64            `json:"bot_id"`
+		ChatID int64            `json:"chat_id"`
+		UserID int64            `json:"user_id"`
+		Perms  models.AdminInfo `json:"perms"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, err)
@@ -1315,7 +1399,7 @@ func (s *Server) handlePromoteAdmin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	s.store.LogAdminAction(AdminLog{
+	s.store.LogAdminAction(models.AdminLog{
 		ChatID: req.ChatID, Action: "promote_admin", ActorName: bot.GetBotName(),
 		TargetID: req.UserID, Details: "Promoted via web UI", CreatedAt: time.Now().Format(time.RFC3339),
 	})
@@ -1328,7 +1412,7 @@ func (s *Server) handlePromoteAdmin(w http.ResponseWriter, r *http.Request) {
 // @Tags admins
 // @Produce json
 // @Param bot_id query int true "Bot ID"
-// @Param chat_id query int true "Chat ID"
+// @Param chat_id query int true "models.Chat ID"
 // @Param user_id query int true "Telegram user ID to demote"
 // @Success 200 {object} map[string]string
 // @Failure 405 {string} string "Method not allowed"
@@ -1351,7 +1435,7 @@ func (s *Server) handleDemoteAdmin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	s.store.LogAdminAction(AdminLog{
+	s.store.LogAdminAction(models.AdminLog{
 		ChatID: chatID, Action: "demote_admin", ActorName: bot.GetBotName(),
 		TargetID: userID, Details: "Demoted via web UI", CreatedAt: time.Now().Format(time.RFC3339),
 	})
@@ -1394,7 +1478,7 @@ func (s *Server) handleSetAdminTitle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	s.store.LogAdminAction(AdminLog{
+	s.store.LogAdminAction(models.AdminLog{
 		ChatID: req.ChatID, Action: "set_admin_title", ActorName: bot.GetBotName(),
 		TargetID: req.UserID, Details: "Title: " + req.Title, CreatedAt: time.Now().Format(time.RFC3339),
 	})
@@ -1406,10 +1490,10 @@ func (s *Server) handleSetAdminTitle(w http.ResponseWriter, r *http.Request) {
 // @Description Returns the history of admin actions (ban, unban, pin, delete, promote, etc.) for the given chat.
 // @Tags admins
 // @Produce json
-// @Param chat_id query int true "Chat ID"
+// @Param chat_id query int true "models.Chat ID"
 // @Param limit query int false "Max results (default 50)"
 // @Param offset query int false "Number of results to skip"
-// @Success 200 {array} AdminLog
+// @Success 200 {array} models.AdminLog
 // @Failure 500 {object} map[string]string
 // @Router /api/adminlog [get]
 // @Security CookieAuth || BearerAuth
@@ -1426,7 +1510,7 @@ func (s *Server) handleAdminLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if logs == nil {
-		logs = []AdminLog{}
+		logs = []models.AdminLog{}
 	}
 	writeJSON(w, logs)
 }
@@ -1438,8 +1522,8 @@ func (s *Server) handleAdminLog(w http.ResponseWriter, r *http.Request) {
 // @Description Returns all user tags assigned within the given chat.
 // @Tags tags
 // @Produce json
-// @Param chat_id query int true "Chat ID"
-// @Success 200 {array} UserTag
+// @Param chat_id query int true "models.Chat ID"
+// @Success 200 {array} models.UserTag
 // @Failure 500 {object} map[string]string
 // @Router /api/tags [get]
 // @Security CookieAuth || BearerAuth
@@ -1451,7 +1535,7 @@ func (s *Server) handleGetTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if tags == nil {
-		tags = []UserTag{}
+		tags = []models.UserTag{}
 	}
 	writeJSON(w, tags)
 }
@@ -1475,13 +1559,13 @@ func (s *Server) handleAddTag(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		BotID int64 `json:"bot_id"`
-		UserTag
+		models.UserTag
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, err)
 		return
 	}
-	if !isValidHexColor(req.Color) {
+	if !IsValidHexColor(req.Color) {
 		req.Color = "#888888"
 	}
 	if err := s.store.AddUserTag(req.UserTag); err != nil {
@@ -1492,7 +1576,7 @@ func (s *Server) handleAddTag(w http.ResponseWriter, r *http.Request) {
 	if bot := s.resolveBot(req.BotID); bot != nil {
 		actorName = bot.GetBotName()
 	}
-	s.store.LogAdminAction(AdminLog{
+	s.store.LogAdminAction(models.AdminLog{
 		ChatID: req.ChatID, Action: "add_tag", ActorName: actorName,
 		TargetID: req.UserID, TargetName: req.Username,
 		Details: "Tag: " + req.Tag, CreatedAt: time.Now().Format(time.RFC3339),
@@ -1529,9 +1613,9 @@ func (s *Server) handleRemoveTag(w http.ResponseWriter, r *http.Request) {
 // @Description Returns tags for the given user within the specified chat.
 // @Tags tags
 // @Produce json
-// @Param chat_id query int true "Chat ID"
+// @Param chat_id query int true "models.Chat ID"
 // @Param user_id query int true "Telegram user ID"
-// @Success 200 {array} UserTag
+// @Success 200 {array} models.UserTag
 // @Failure 500 {object} map[string]string
 // @Router /api/tags/user [get]
 // @Security CookieAuth || BearerAuth
@@ -1544,12 +1628,12 @@ func (s *Server) handleGetUserTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if tags == nil {
-		tags = []UserTag{}
+		tags = []models.UserTag{}
 	}
 	writeJSON(w, tags)
 }
 
-// Route handlers
+// models.Route handlers
 
 // handleGetRoutes returns all routing rules for a bot.
 // @Summary List routes
@@ -1557,7 +1641,7 @@ func (s *Server) handleGetUserTags(w http.ResponseWriter, r *http.Request) {
 // @Tags routes
 // @Produce json
 // @Param bot_id query int true "Source bot ID"
-// @Success 200 {array} Route
+// @Success 200 {array} models.Route
 // @Failure 500 {object} map[string]string
 // @Router /api/routes [get]
 // @Security CookieAuth || BearerAuth
@@ -1569,7 +1653,7 @@ func (s *Server) handleGetRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if routes == nil {
-		routes = []Route{}
+		routes = []models.Route{}
 	}
 	writeJSON(w, routes)
 }
@@ -1580,7 +1664,7 @@ func (s *Server) handleGetRoutes(w http.ResponseWriter, r *http.Request) {
 // @Tags routes
 // @Accept json
 // @Produce json
-// @Param route body Route true "Route definition"
+// @Param route body models.Route true "models.Route definition"
 // @Success 200 {object} map[string]interface{}
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
@@ -1591,7 +1675,7 @@ func (s *Server) handleAddRoute(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
-	var req Route
+	var req models.Route
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, err)
 		return
@@ -1611,7 +1695,7 @@ func (s *Server) handleAddRoute(w http.ResponseWriter, r *http.Request) {
 // @Tags routes
 // @Accept json
 // @Produce json
-// @Param route body Route true "Route definition (must include id)"
+// @Param route body models.Route true "models.Route definition (must include id)"
 // @Success 200 {object} map[string]string
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
@@ -1622,7 +1706,7 @@ func (s *Server) handleUpdateRoute(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
-	var req Route
+	var req models.Route
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, err)
 		return
@@ -1639,7 +1723,7 @@ func (s *Server) handleUpdateRoute(w http.ResponseWriter, r *http.Request) {
 // @Description Removes the specified routing rule. Admin only.
 // @Tags routes
 // @Produce json
-// @Param id query int true "Route ID"
+// @Param id query int true "models.Route ID"
 // @Success 200 {object} map[string]string
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
@@ -1666,7 +1750,7 @@ func (s *Server) handleDeleteRoute(w http.ResponseWriter, r *http.Request) {
 // @Tags bridges
 // @Produce json
 // @Param bot_id query int false "Filter by linked bot ID"
-// @Success 200 {array} BridgeConfig
+// @Success 200 {array} models.BridgeConfig
 // @Router /api/bridges [get]
 // @Security CookieAuth || BearerAuth
 func (s *Server) handleBridgeList(w http.ResponseWriter, r *http.Request) {
@@ -1695,7 +1779,7 @@ func (s *Server) handleBridgeList(w http.ResponseWriter, r *http.Request) {
 // @Tags bridges
 // @Accept json
 // @Produce json
-// @Param bridge body BridgeConfig true "Bridge configuration"
+// @Param bridge body models.BridgeConfig true "Bridge configuration"
 // @Success 200 {object} map[string]interface{}
 // @Failure 400 {object} map[string]string
 // @Failure 405 {string} string "Method not allowed"
@@ -1706,7 +1790,7 @@ func (s *Server) handleBridgeAdd(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
-	var req BridgeConfig
+	var req models.BridgeConfig
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, err)
 		return
@@ -1737,7 +1821,7 @@ func (s *Server) handleBridgeAdd(w http.ResponseWriter, r *http.Request) {
 // @Tags bridges
 // @Accept json
 // @Produce json
-// @Param bridge body BridgeConfig true "Bridge configuration (must include id)"
+// @Param bridge body models.BridgeConfig true "Bridge configuration (must include id)"
 // @Success 200 {object} map[string]string
 // @Failure 405 {string} string "Method not allowed"
 // @Router /api/bridges/update [post]
@@ -1747,7 +1831,7 @@ func (s *Server) handleBridgeUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
-	var req BridgeConfig
+	var req models.BridgeConfig
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, err)
 		return
@@ -1790,7 +1874,7 @@ func (s *Server) handleBridgeDelete(w http.ResponseWriter, r *http.Request) {
 
 // handleBridgeIncoming receives messages from external protocol bridges.
 // @Summary Bridge incoming webhook
-// @Description Receives a message from an external protocol and injects it as a Telegram update. URL format: /bridge/{id}/incoming. No authentication — bridges use the URL as a secret. For Slack bridges, handles Events API payloads (including url_verification challenge) and verifies request signatures. For webhook bridges, expects BridgeIncomingMessage JSON.
+// @Description Receives a message from an external protocol and injects it as a Telegram update. URL format: /bridge/{id}/incoming. No authentication — bridges use the URL as a secret. For Slack bridges, handles Events API payloads (including url_verification challenge) and verifies request signatures. For webhook bridges, expects models.BridgeIncomingMessage JSON.
 // @Tags bridges
 // @Accept json
 // @Produce json
@@ -1840,7 +1924,7 @@ func (s *Server) handleBridgeIncoming(w http.ResponseWriter, r *http.Request) {
 
 	// Check if this is a Slack bridge — route to Slack handler
 	cfg := s.bridge.GetBridge(bridgeID)
-	if cfg != nil && isSlackBridge(cfg) {
+	if cfg != nil && bridge.IsSlackBridge(cfg) {
 		respBody, contentType, status, err := s.bridge.HandleSlackEvent(bridgeID, r.Header, body)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -1854,8 +1938,8 @@ func (s *Server) handleBridgeIncoming(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generic webhook bridge — parse as BridgeIncomingMessage
-	var msg BridgeIncomingMessage
+	// Generic webhook bridge — parse as models.BridgeIncomingMessage
+	var msg models.BridgeIncomingMessage
 	if err := json.Unmarshal(body, &msg); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(400)
@@ -1880,13 +1964,13 @@ func (s *Server) handleBridgeIncoming(w http.ResponseWriter, r *http.Request) {
 // @Description Returns the LLM routing configuration (API URL, model, system prompt, enabled flag). API key is included.
 // @Tags llm
 // @Produce json
-// @Success 200 {object} LLMConfig
+// @Success 200 {object} models.LLMConfig
 // @Router /api/llm-config [get]
 // @Security CookieAuth || BearerAuth
 func (s *Server) handleGetLLMConfig(w http.ResponseWriter, r *http.Request) {
 	cfg, err := s.store.GetLLMConfig()
 	if err != nil {
-		writeJSON(w, LLMConfig{})
+		writeJSON(w, models.LLMConfig{})
 		return
 	}
 	writeJSON(w, cfg)
@@ -1898,7 +1982,7 @@ func (s *Server) handleGetLLMConfig(w http.ResponseWriter, r *http.Request) {
 // @Tags llm
 // @Accept json
 // @Produce json
-// @Param config body LLMConfig true "LLM configuration"
+// @Param config body models.LLMConfig true "LLM configuration"
 // @Success 200 {object} map[string]string
 // @Failure 405 {string} string "Method not allowed"
 // @Failure 500 {object} map[string]string
@@ -1909,7 +1993,7 @@ func (s *Server) handleSaveLLMConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
-	var cfg LLMConfig
+	var cfg models.LLMConfig
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 		writeError(w, err)
 		return
@@ -1994,25 +2078,25 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"error":"invalid credentials"}`))
 		return
 	}
-	if !CheckPassword(user.PasswordHash, req.Password) {
+	if !auth.CheckPassword(user.PasswordHash, req.Password) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(401)
 		w.Write([]byte(`{"error":"invalid credentials"}`))
 		return
 	}
-	token, err := GenerateSessionToken()
+	token, err := auth.GenerateSessionToken()
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	expiresAt := time.Now().Add(sessionDuration)
+	expiresAt := time.Now().Add(auth.SessionDuration)
 	if err := s.store.CreateSession(token, user.ID, expiresAt); err != nil {
 		writeError(w, err)
 		return
 	}
 	s.store.UpdateUserLastLogin(user.ID)
 	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
+		Name:     auth.SessionCookieName,
 		Value:    token,
 		Path:     "/",
 		Expires:  expiresAt,
@@ -2034,11 +2118,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} map[string]string
 // @Router /api/auth/logout [post]
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie(sessionCookieName); err == nil {
+	if cookie, err := r.Cookie(auth.SessionCookieName); err == nil {
 		s.store.DeleteSession(cookie.Value)
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
+		Name:     auth.SessionCookieName,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
@@ -2052,7 +2136,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // @Description Returns the authenticated user's ID, username, display name, role, and other profile fields.
 // @Tags auth
 // @Produce json
-// @Success 200 {object} AuthUser
+// @Success 200 {object} models.AuthUser
 // @Failure 401 {object} map[string]string
 // @Router /api/auth/me [get]
 // @Security CookieAuth || BearerAuth
@@ -2103,14 +2187,14 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	// For must_change_password, skip old password check
 	if !user.MustChangePassword {
 		dbUser, _ := s.store.GetUserByID(user.ID)
-		if dbUser == nil || !CheckPassword(dbUser.PasswordHash, req.OldPassword) {
+		if dbUser == nil || !auth.CheckPassword(dbUser.PasswordHash, req.OldPassword) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(401)
 			w.Write([]byte(`{"error":"invalid old password"}`))
 			return
 		}
 	}
-	hash, err := HashPassword(req.NewPassword)
+	hash, err := auth.HashPassword(req.NewPassword)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -2140,11 +2224,11 @@ func (s *Server) handleUserList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if users == nil {
-		users = []AuthUser{}
+		users = []models.AuthUser{}
 	}
 	// Add bot IDs for each user
 	type UserWithBots struct {
-		AuthUser
+		models.AuthUser
 		BotIDs []int64 `json:"bot_ids"`
 	}
 	var result []UserWithBots
@@ -2205,7 +2289,7 @@ func (s *Server) handleUserAdd(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"error":"role must be admin or user"}`))
 		return
 	}
-	hash, err := HashPassword(req.Password)
+	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -2332,7 +2416,7 @@ func (s *Server) handleUserResetPassword(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
-	hash, err := HashPassword(req.Password)
+	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -2438,7 +2522,7 @@ func (s *Server) handleRevokeBot(w http.ResponseWriter, r *http.Request) {
 // @Description Returns all API keys across all users (admin only)
 // @Tags auth
 // @Produce json
-// @Success 200 {array} APIKey
+// @Success 200 {array} store.APIKey
 // @Failure 403 {object} map[string]string
 // @Router /api/auth/api-keys [get]
 // @Security CookieAuth || BearerAuth
@@ -2449,7 +2533,7 @@ func (s *Server) handleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if keys == nil {
-		keys = []APIKey{}
+		keys = []store.APIKey{}
 	}
 	writeJSON(w, keys)
 }
@@ -2484,12 +2568,12 @@ func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"error":"user_id required"}`))
 		return
 	}
-	rawKey, err := GenerateAPIKey()
+	rawKey, err := auth.GenerateAPIKey()
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	keyHash := HashAPIKey(rawKey)
+	keyHash := auth.HashAPIKey(rawKey)
 	id, err := s.store.CreateAPIKey(req.UserID, keyHash, req.Name)
 	if err != nil {
 		writeError(w, err)
@@ -2551,7 +2635,7 @@ func (s *Server) handleToggleAPIKey(w http.ResponseWriter, r *http.Request) {
 }
 
 // resolveBot finds a Bot instance from either registered bots or proxy manager
-func (s *Server) resolveBot(botID int64) *Bot {
+func (s *Server) resolveBot(botID int64) *bot.Bot {
 	bot := s.getBot(botID)
 	if bot != nil {
 		return bot
@@ -2570,7 +2654,7 @@ func writeError(w http.ResponseWriter, err error) {
 	json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 }
 
-func isValidHexColor(s string) bool {
+func IsValidHexColor(s string) bool {
 	if len(s) == 0 || s[0] != '#' {
 		return false
 	}
@@ -2737,7 +2821,7 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if method == "" {
-		method = inferTelegramMethod(reqBody)
+		method = InferTelegramMethod(reqBody)
 	}
 
 	// Log incoming request
@@ -2782,7 +2866,7 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 
 	// Capture sent messages from the response
 	if resp.StatusCode == 200 {
-		s.captureSentMessage(botToken, method, reqBody, r.Header.Get("Content-Type"), respBody)
+		s.CaptureSentMessage(botToken, method, reqBody, r.Header.Get("Content-Type"), respBody)
 	}
 }
 
@@ -2821,7 +2905,7 @@ func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
 		// Try CLI bot
 		s.mu.RLock()
 		for _, bot := range s.bots {
-			token = bot.api.Token
+			token = bot.GetToken()
 			break
 		}
 		s.mu.RUnlock()
@@ -2871,7 +2955,7 @@ func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
 
 	// Step 2: Download and stream the file (with WebP→PNG conversion)
 	downloadURL := fmt.Sprintf("%s/file/bot%s/%s", s.tgAPIURL(), token, fileResp.Result.FilePath)
-	proxyFileDownload(w, downloadURL, fileResp.Result.FilePath)
+	proxyFileDownload(w, r, downloadURL, fileResp.Result.FilePath, fileResp.Result.FileSize)
 }
 
 // handleInterceptSetWebhook intercepts setWebhook calls and configures botmux to proxy updates
@@ -3087,7 +3171,7 @@ func (s *Server) handleInterceptGetWebhookInfo(w http.ResponseWriter, botToken s
 }
 
 // autoRegisterBot validates a bot token via getMe and registers it in the database.
-func (s *Server) autoRegisterBot(token string) (*BotConfig, error) {
+func (s *Server) autoRegisterBot(token string) (*models.BotConfig, error) {
 	if !validBotToken(token) {
 		return nil, fmt.Errorf("invalid bot token")
 	}
@@ -3113,10 +3197,10 @@ func (s *Server) autoRegisterBot(token string) (*BotConfig, error) {
 		return nil, fmt.Errorf("getMe failed or token invalid")
 	}
 
-	botCfg := BotConfig{
+	botCfg := models.BotConfig{
 		Name:        getMeResp.Result.FirstName,
 		Token:       token,
-		BotUsername:  getMeResp.Result.Username,
+		BotUsername: getMeResp.Result.Username,
 		Source:      "web",
 	}
 	id, err := s.store.AddBotConfig(botCfg)
@@ -3134,19 +3218,28 @@ func (s *Server) autoRegisterBot(token string) (*BotConfig, error) {
 }
 
 // proxyFileDownload downloads a file from the upstream Telegram API and streams it to w.
-// Handles WebP→PNG conversion for stickers and Content-Type detection.
-func proxyFileDownload(w http.ResponseWriter, downloadURL string, filePath string) {
+// Handles WebP→PNG conversion for stickers, Content-Type detection, and Range requests
+// (required by Safari for <audio>/<video> playback).
+// fileSize may be 0 if unknown — in that case Content-Length is taken from upstream.
+func proxyFileDownload(w http.ResponseWriter, r *http.Request, downloadURL string, filePath string, fileSize int64) {
 	// 60s total client timeout — covers large media downloads but bounds the
 	// goroutine lifetime if upstream stalls.
 	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Get(downloadURL)
+	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, downloadURL, nil)
+
+	// Forward Range header for browser media seeking support.
+	if rangeH := r.Header.Get("Range"); rangeH != "" {
+		req.Header.Set("Range", rangeH)
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, "download failed", 502)
 		return
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != 200 && resp.StatusCode != 206 {
 		w.WriteHeader(resp.StatusCode)
 		io.Copy(w, resp.Body)
 		return
@@ -3193,8 +3286,22 @@ func proxyFileDownload(w http.ResponseWriter, downloadURL string, filePath strin
 			return
 		}
 	}
+
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Accept-Ranges", "bytes")
+
+	// Forward range-related headers from upstream for proper 206 responses.
+	if cr := resp.Header.Get("Content-Range"); cr != "" {
+		w.Header().Set("Content-Range", cr)
+	}
+	if cl := resp.Header.Get("Content-Length"); cl != "" {
+		w.Header().Set("Content-Length", cl)
+	} else if fileSize > 0 && resp.StatusCode == 200 {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", fileSize))
+	}
+
+	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
 }
 
@@ -3228,11 +3335,11 @@ func (s *Server) handleTelegramFileProxy(w http.ResponseWriter, r *http.Request)
 	log.Printf("[tgapi-file] GET bot=%s path=%s", maskedToken, remotePath)
 
 	downloadURL := fmt.Sprintf("%s/file/bot%s/%s", s.tgAPIURL(), botToken, remotePath)
-	proxyFileDownload(w, downloadURL, remotePath)
+	proxyFileDownload(w, r, downloadURL, remotePath, 0)
 }
 
 // inferTelegramMethod tries to guess the Telegram API method from request body fields.
-func inferTelegramMethod(body []byte) string {
+func InferTelegramMethod(body []byte) string {
 	var params map[string]any
 	if err := json.Unmarshal(body, &params); err != nil {
 		return ""
@@ -3274,22 +3381,22 @@ func inferTelegramMethod(body []byte) string {
 	return ""
 }
 
-// sendMethods lists Telegram API methods that return a Message in the result
+// sendMethods lists Telegram API methods that return a models.Message in the result
 var sendMethods = map[string]bool{
-	"sendMessage":     true,
-	"sendPhoto":       true,
-	"sendAudio":       true,
-	"sendDocument":    true,
-	"sendVideo":       true,
-	"sendAnimation":   true,
-	"sendVoice":       true,
-	"sendVideoNote":   true,
-	"sendSticker":     true,
-	"sendLocation":    true,
-	"sendVenue":       true,
-	"sendContact":     true,
-	"sendPoll":        true,
-	"sendDice":        true,
+	"sendMessage":        true,
+	"sendPhoto":          true,
+	"sendAudio":          true,
+	"sendDocument":       true,
+	"sendVideo":          true,
+	"sendAnimation":      true,
+	"sendVoice":          true,
+	"sendVideoNote":      true,
+	"sendSticker":        true,
+	"sendLocation":       true,
+	"sendVenue":          true,
+	"sendContact":        true,
+	"sendPoll":           true,
+	"sendDice":           true,
 	"forwardMessage":     true,
 	"editMessageText":    true,
 	"editMessageCaption": true,
@@ -3304,9 +3411,9 @@ type telegramRequestParams struct {
 	RemoveCaption bool
 }
 
-func (s *Server) captureSentMessage(token, method string, reqBody []byte, contentType string, respBody []byte) {
+func (s *Server) CaptureSentMessage(token, method string, reqBody []byte, contentType string, respBody []byte) {
 	if method == "copyMessage" {
-		s.captureCopiedMessage(token, reqBody, contentType, respBody)
+		s.CaptureCopiedMessage(token, reqBody, contentType, respBody)
 		return
 	}
 
@@ -3405,7 +3512,7 @@ func (s *Server) captureSentMessage(token, method string, reqBody []byte, conten
 		msgBotID = botCfg.ID
 	}
 
-	m := Message{
+	m := models.Message{
 		ID:        msg.MessageID,
 		BotID:     msgBotID,
 		ChatID:    msg.Chat.ID,
@@ -3425,7 +3532,7 @@ func (s *Server) captureSentMessage(token, method string, reqBody []byte, conten
 
 	// Also track the chat if we have a bot for this token
 	if botCfg != nil {
-		s.store.UpsertChat(botCfg.ID, Chat{
+		s.store.UpsertChat(botCfg.ID, models.Chat{
 			ID:        msg.Chat.ID,
 			Type:      msg.Chat.Type,
 			Title:     msg.Chat.Title,
@@ -3434,7 +3541,7 @@ func (s *Server) captureSentMessage(token, method string, reqBody []byte, conten
 	}
 }
 
-func (s *Server) captureCopiedMessage(token string, reqBody []byte, contentType string, respBody []byte) {
+func (s *Server) CaptureCopiedMessage(token string, reqBody []byte, contentType string, respBody []byte) {
 	var resp struct {
 		OK     bool `json:"ok"`
 		Result struct {
@@ -3470,7 +3577,7 @@ func (s *Server) captureCopiedMessage(token string, reqBody []byte, contentType 
 	}
 
 	fromUser, fromID := s.findBotSenderByToken(token)
-	msg := Message{
+	msg := models.Message{
 		ID:        resp.Result.MessageID,
 		BotID:     copyBotID,
 		ChatID:    params.ChatID,
@@ -3490,7 +3597,7 @@ func (s *Server) captureCopiedMessage(token string, reqBody []byte, contentType 
 		resp.Result.MessageID, params.ChatID, params.FromChatID, params.MessageID, truncateStr(text, 80))
 }
 
-func (s *Server) findBotByToken(token string) *BotConfig {
+func (s *Server) findBotByToken(token string) *models.BotConfig {
 	bots, err := s.store.GetBotConfigs()
 	if err != nil {
 		return nil
@@ -3511,10 +3618,10 @@ func (s *Server) findBotSenderByToken(token string) (string, int64) {
 
 	if s.proxy != nil {
 		if bot := s.resolveBot(botCfg.ID); bot != nil {
-			if bot.api.Self.UserName != "" {
-				return "@" + bot.api.Self.UserName, bot.api.Self.ID
+			if bot.GetSelfUserName() != "" {
+				return "@" + bot.GetSelfUserName(), bot.GetSelfID()
 			}
-			return bot.GetBotName(), bot.api.Self.ID
+			return bot.GetBotName(), bot.GetSelfID()
 		}
 	}
 
@@ -3646,7 +3753,7 @@ func truncateStr(s string, maxLen int) string {
 
 // handleLogs returns recent application log entries
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
-	if s.logBuf == nil {
+	if s.LogBuf == nil {
 		writeJSON(w, []struct{}{})
 		return
 	}
@@ -3656,12 +3763,12 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 			n = parsed
 		}
 	}
-	writeJSON(w, s.logBuf.Recent(n))
+	writeJSON(w, s.LogBuf.Recent(n))
 }
 
 // handleLogStream streams application logs via SSE
 func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
-	if s.logBuf == nil {
+	if s.LogBuf == nil {
 		http.Error(w, "logging not available", 500)
 		return
 	}
@@ -3678,8 +3785,8 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	flusher.Flush()
 
-	ch := s.logBuf.Subscribe()
-	defer s.logBuf.Unsubscribe(ch)
+	ch := s.LogBuf.Subscribe()
+	defer s.LogBuf.Unsubscribe(ch)
 
 	ctx := r.Context()
 	for {

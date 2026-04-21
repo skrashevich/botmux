@@ -7,10 +7,16 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/skrashevich/botmux/internal/auth"
+	"github.com/skrashevich/botmux/internal/models"
+	"github.com/skrashevich/botmux/internal/proxy"
+	"github.com/skrashevich/botmux/internal/server"
+	"github.com/skrashevich/botmux/internal/store"
 )
 
 func TestUpdateQueueEnqueueAndGet(t *testing.T) {
-	q := NewUpdateQueue(5)
+	q := proxy.NewUpdateQueue(5)
 
 	// Enqueue 3 updates
 	for i := 1; i <= 3; i++ {
@@ -49,7 +55,7 @@ func TestUpdateQueueEnqueueAndGet(t *testing.T) {
 }
 
 func TestUpdateQueueEviction(t *testing.T) {
-	q := NewUpdateQueue(3) // max 3
+	q := proxy.NewUpdateQueue(3) // max 3
 
 	for i := 1; i <= 5; i++ {
 		q.Enqueue(map[string]any{"update_id": float64(i)})
@@ -66,7 +72,7 @@ func TestUpdateQueueEviction(t *testing.T) {
 }
 
 func TestUpdateQueueWaitNotify(t *testing.T) {
-	q := NewUpdateQueue(10)
+	q := proxy.NewUpdateQueue(10)
 
 	ctx := t.Context()
 	ch := q.Wait(ctx)
@@ -91,7 +97,7 @@ func TestUpdateQueueWaitNotify(t *testing.T) {
 }
 
 func TestUpdateQueueDepthAndWaiterCount(t *testing.T) {
-	q := NewUpdateQueue(10)
+	q := proxy.NewUpdateQueue(10)
 	if q.QueueDepth() != 0 {
 		t.Fatalf("expected depth 0, got %d", q.QueueDepth())
 	}
@@ -109,10 +115,10 @@ func TestUpdateQueueDepthAndWaiterCount(t *testing.T) {
 
 // createTestAuth creates a session for the default admin user (auto-created by NewStore).
 // Returns the session token string.
-func createTestAuth(t *testing.T, store *Store) string {
+func createTestAuth(t *testing.T, store *store.Store) string {
 	t.Helper()
 	// Default admin is auto-created by NewStore with username "admin" and ID 1
-	token, err := GenerateSessionToken()
+	token, err := auth.GenerateSessionToken()
 	if err != nil {
 		t.Fatalf("GenerateSessionToken error: %v", err)
 	}
@@ -125,8 +131,8 @@ func createTestAuth(t *testing.T, store *Store) string {
 
 func TestHandleUpdatesPollMissingBotID(t *testing.T) {
 	store := newTestStore(t)
-	proxy := NewProxyManager(store)
-	server := NewServer(store, proxy)
+	proxy := proxy.NewManager(store, "https://api.telegram.org")
+	server := server.NewServer(store, proxy)
 
 	session := createTestAuth(t, store)
 
@@ -135,7 +141,7 @@ func TestHandleUpdatesPollMissingBotID(t *testing.T) {
 	defer ts.Close()
 
 	req, _ := http.NewRequest("GET", ts.URL+"/api/updates/poll", nil)
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session})
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -149,11 +155,11 @@ func TestHandleUpdatesPollMissingBotID(t *testing.T) {
 
 func TestHandleUpdatesPollDisabledLongPoll(t *testing.T) {
 	store := newTestStore(t)
-	proxy := NewProxyManager(store)
-	server := NewServer(store, proxy)
+	proxy := proxy.NewManager(store, "https://api.telegram.org")
+	server := server.NewServer(store, proxy)
 
 	// Create a bot with long_poll_enabled=false
-	botID, _ := store.AddBotConfig(BotConfig{
+	botID, _ := store.AddBotConfig(models.BotConfig{
 		Name:            "Test Bot",
 		Token:           "123:ABC",
 		LongPollEnabled: false,
@@ -166,7 +172,7 @@ func TestHandleUpdatesPollDisabledLongPoll(t *testing.T) {
 	defer ts.Close()
 
 	req, _ := http.NewRequest("GET", ts.URL+fmt.Sprintf("/api/updates/poll?bot_id=%d", botID), nil)
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session})
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -180,11 +186,11 @@ func TestHandleUpdatesPollDisabledLongPoll(t *testing.T) {
 
 func TestHandleUpdatesPollImmediateReturn(t *testing.T) {
 	store := newTestStore(t)
-	proxy := NewProxyManager(store)
-	server := NewServer(store, proxy)
+	proxy := proxy.NewManager(store, "https://api.telegram.org")
+	server := server.NewServer(store, proxy)
 
 	// Create a bot with long_poll_enabled=true
-	botID, _ := store.AddBotConfig(BotConfig{
+	botID, _ := store.AddBotConfig(models.BotConfig{
 		Name:            "Poll Bot",
 		Token:           "123:ABC",
 		LongPollEnabled: true,
@@ -204,7 +210,7 @@ func TestHandleUpdatesPollImmediateReturn(t *testing.T) {
 	defer ts.Close()
 
 	req, _ := http.NewRequest("GET", ts.URL+fmt.Sprintf("/api/updates/poll?bot_id=%d&timeout=0", botID), nil)
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session})
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -228,11 +234,11 @@ func TestHandleUpdatesPollImmediateReturn(t *testing.T) {
 
 func TestHandleUpdatesPollEmptyTimeout0(t *testing.T) {
 	store := newTestStore(t)
-	proxy := NewProxyManager(store)
-	server := NewServer(store, proxy)
+	proxy := proxy.NewManager(store, "https://api.telegram.org")
+	server := server.NewServer(store, proxy)
 
 	// Create a bot with long_poll_enabled=true
-	botID, _ := store.AddBotConfig(BotConfig{
+	botID, _ := store.AddBotConfig(models.BotConfig{
 		Name:            "Poll Bot",
 		Token:           "123:ABC",
 		LongPollEnabled: true,
@@ -247,7 +253,7 @@ func TestHandleUpdatesPollEmptyTimeout0(t *testing.T) {
 	defer ts.Close()
 
 	req, _ := http.NewRequest("GET", ts.URL+fmt.Sprintf("/api/updates/poll?bot_id=%d&timeout=0", botID), nil)
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session})
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -273,11 +279,11 @@ func TestHandleUpdatesPollEmptyTimeout0(t *testing.T) {
 // serves from UpdateQueue when long_poll_enabled=true (no auth required).
 func TestTgapiGetUpdatesLongPoll(t *testing.T) {
 	store := newTestStore(t)
-	proxy := NewProxyManager(store)
-	server := NewServer(store, proxy)
+	proxy := proxy.NewManager(store, "https://api.telegram.org")
+	server := server.NewServer(store, proxy)
 
 	token := "123456:ABC-DEF"
-	botID, _ := store.AddBotConfig(BotConfig{
+	botID, _ := store.AddBotConfig(models.BotConfig{
 		Name:            "LP Bot",
 		Token:           token,
 		LongPollEnabled: true,
@@ -321,11 +327,11 @@ func TestTgapiGetUpdatesLongPoll(t *testing.T) {
 // falls through to normal Telegram proxy when long_poll_enabled=false.
 func TestTgapiGetUpdatesDisabledFallsThrough(t *testing.T) {
 	store := newTestStore(t)
-	proxy := NewProxyManager(store)
-	server := NewServer(store, proxy)
+	proxy := proxy.NewManager(store, "https://api.telegram.org")
+	server := server.NewServer(store, proxy)
 
 	token := "123456:XYZ"
-	store.AddBotConfig(BotConfig{
+	store.AddBotConfig(models.BotConfig{
 		Name:            "Normal Bot",
 		Token:           token,
 		LongPollEnabled: false,

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/skrashevich/botmux/internal/models"
 )
 
 // TestE2E_Smoke is the final Phase 0 sanity test.
@@ -17,7 +19,7 @@ func TestE2E_Smoke(t *testing.T) {
 	h := setupE2E(t, withFastBackoff(), withStartedProxy())
 
 	token := "smoke:1234567890"
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:         token,
 		Name:          "smokebot",
 		BotUsername:   "smokebot",
@@ -50,7 +52,7 @@ func TestE2E_Smoke(t *testing.T) {
 	chatID := int64(chat["id"].(float64))
 
 	// Wait for the message to appear in the store
-	h.WaitForMessage(botID, chatID, func(m Message) bool {
+	h.WaitForMessage(botID, chatID, func(m models.Message) bool {
 		return m.Text != ""
 	})
 }

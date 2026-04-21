@@ -5,6 +5,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/skrashevich/botmux/internal/bot"
+	llmpkg "github.com/skrashevich/botmux/internal/llm"
+	"github.com/skrashevich/botmux/internal/models"
 )
 
 // makeTextUpdate builds a minimal raw Telegram message update for injection.
@@ -34,15 +38,15 @@ func makeTextUpdate(updateID int, chatID, userID int64, username, text string) m
 // It temporarily sets the package-level telegramAPIURL to point at the fake TG server.
 func registerAndManage(h *e2eHarness, token, username string) int64 {
 	h.t.Helper()
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:         token,
 		Name:          username,
 		BotUsername:   username,
 		ManageEnabled: true,
 	})
-	managedBot, err := NewBot(token, h.store, botID, h.fake.URL())
+	managedBot, err := bot.NewBot(token, h.store, botID, h.fake.URL())
 	if err != nil {
-		h.t.Fatalf("registerAndManage: NewBot(%s): %v", username, err)
+		h.t.Fatalf("registerAndManage: bot.NewBot(%s): %v", username, err)
 	}
 	h.proxy.RegisterManagedBot(botID, managedBot)
 	return botID
@@ -60,7 +64,7 @@ func TestE2E_Routing(t *testing.T) {
 
 		// Create route: source_bot=srcBot, source_chat=100, target_bot=tgtBot,
 		// target_chat=200, condition_type="text", condition_value="hello", action="forward"
-		_, err := h.store.AddRoute(Route{
+		_, err := h.store.AddRoute(models.Route{
 			SourceBotID:    srcBot,
 			TargetBotID:    tgtBot,
 			SourceChatID:   100,
@@ -96,7 +100,7 @@ func TestE2E_Routing(t *testing.T) {
 		srcBot := registerAndManage(h, "src02:token", "srcbot02")
 		tgtBot := registerAndManage(h, "tgt02:token", "tgtbot02")
 
-		_, err := h.store.AddRoute(Route{
+		_, err := h.store.AddRoute(models.Route{
 			SourceBotID:    srcBot,
 			TargetBotID:    tgtBot,
 			ConditionType:  "user_id",
@@ -110,13 +114,13 @@ func TestE2E_Routing(t *testing.T) {
 			t.Fatalf("AddRoute: %v", err)
 		}
 
-		// Message from a different user — must NOT be routed.
+		// models.Message from a different user — must NOT be routed.
 		h.InjectUpdate(srcBot, makeTextUpdate(1, 50, 99, "other", "hello"))
 		if cnt := h.fake.RequestsCountFor("sendMessage"); cnt != 0 {
 			t.Fatalf("R02: expected 0 sendMessage for non-matching user, got %d", cnt)
 		}
 
-		// Message from user_id=42 — must be routed.
+		// models.Message from user_id=42 — must be routed.
 		h.InjectUpdate(srcBot, makeTextUpdate(2, 50, 42, "alice", "hello"))
 		sends := h.fake.RequestsFor("sendMessage")
 		if len(sends) != 1 {
@@ -135,7 +139,7 @@ func TestE2E_Routing(t *testing.T) {
 		srcBot := registerAndManage(h, "src03:token", "srcbot03")
 		tgtBot := registerAndManage(h, "tgt03:token", "tgtbot03")
 
-		routeID, err := h.store.AddRoute(Route{
+		routeID, err := h.store.AddRoute(models.Route{
 			SourceBotID:    srcBot,
 			TargetBotID:    tgtBot,
 			SourceChatID:   100,
@@ -223,7 +227,7 @@ func TestE2E_Routing(t *testing.T) {
 		})
 
 		// Persist LLM config pointing at the fake server.
-		if err := h.store.SaveLLMConfig(LLMConfig{
+		if err := h.store.SaveLLMConfig(models.LLMConfig{
 			APIURL:  llm.URL(),
 			APIKey:  "test-key",
 			Model:   "test-model",
@@ -233,7 +237,7 @@ func TestE2E_Routing(t *testing.T) {
 		}
 
 		// Reload the LLM router so it picks up the saved config.
-		h.proxy.llmRouter = NewLLMRouter(h.store)
+		h.proxy.SetLLMRouter(llmpkg.NewRouter(h.store))
 
 		// Inject a message — applyLLMRoutes should call the fake LLM.
 		h.InjectUpdate(srcBot, makeTextUpdate(1, 100, 7, "alice", "please route this"))

@@ -6,18 +6,20 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/skrashevich/botmux/internal/models"
 )
 
 // TestE2E_Callback_C01_Tracking is a BLOCKING gate (§6 Rule 4 / §11 Pre-mortem S3a).
 //
-// bot.processUpdate handles only Message, ChannelPost, MyChatMember, ChatMember.
+// bot.processUpdate handles only models.Message, ChannelPost, MyChatMember, ChatMember.
 // There is no callback_query branch. Until a decision is made (add handler OR
 // formalise as §6 Rule 3 intercept), this test is intentionally skipped with an
 // expiry date so check-stale-skips.sh fails in CI when the deadline passes.
 func TestE2E_Callback_C01_Tracking(t *testing.T) {
 	h := setupE2E(t, withStartedProxy())
 	token := "cb:T"
-	botID := h.AddBot(BotConfig{Token: token, Name: "cb_bot", ManageEnabled: true})
+	botID := h.AddBot(models.BotConfig{Token: token, Name: "cb_bot", ManageEnabled: true})
 
 	// Bot must be registered as a managed Bot instance before processForManagement works.
 	if err := h.proxy.RestartBot(botID); err != nil {
@@ -31,7 +33,7 @@ func TestE2E_Callback_C01_Tracking(t *testing.T) {
 
 	// callback_query.from.id = 987654321, chat.id = 987654321, data = "option_a".
 	const callerID = int64(987654321)
-	h.WaitForMessage(botID, callerID, func(m Message) bool {
+	h.WaitForMessage(botID, callerID, func(m models.Message) bool {
 		return m.MediaType == "callback" && m.Text == "option_a" && m.FromID == callerID
 	})
 }
@@ -52,7 +54,7 @@ func TestE2E_Callback_C02_ForwardViaProxy(t *testing.T) {
 	h := setupE2E(t, withHTTPServer())
 
 	token := "cb02:proxy"
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:         token,
 		Name:          "cb02_bot",
 		ManageEnabled: false,
@@ -89,7 +91,7 @@ func TestE2E_Callback_C03_SendMessageWithInlineKeyboard(t *testing.T) {
 	h := setupE2E(t, withHTTPServer())
 
 	token := "cb03:inline"
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:         token,
 		Name:          "cb03_bot",
 		ManageEnabled: true,
@@ -129,7 +131,7 @@ func TestE2E_Callback_C03_SendMessageWithInlineKeyboard(t *testing.T) {
 	}
 
 	// captureSentMessage must have persisted the message to the store.
-	h.WaitForMessage(botID, chatID, func(m Message) bool {
+	h.WaitForMessage(botID, chatID, func(m models.Message) bool {
 		return m.Text == "Pick an option:"
 	})
 

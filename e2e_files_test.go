@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/skrashevich/botmux/internal/models"
 )
 
 // TestE2E_Files covers F-01..F-05: getFile forwarding, /api/media passthrough,
@@ -15,7 +17,7 @@ func TestE2E_Files(t *testing.T) {
 	h := setupE2E(t, withHTTPServer())
 
 	token := "files:test1234567"
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:         token,
 		Name:          "filesbot",
 		BotUsername:   "filesbot",

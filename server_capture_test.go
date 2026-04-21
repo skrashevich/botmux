@@ -4,14 +4,18 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/skrashevich/botmux/internal/models"
+	"github.com/skrashevich/botmux/internal/server"
+	"github.com/skrashevich/botmux/internal/store"
 )
 
-func newTestStore(t *testing.T) *Store {
+func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
 
-	store, err := NewStore(filepath.Join(t.TempDir(), "botmux-test.db"))
+	store, err := store.NewStore(filepath.Join(t.TempDir(), "botmux-test.db"))
 	if err != nil {
-		t.Fatalf("NewStore() error = %v", err)
+		t.Fatalf("store.NewStore() error = %v", err)
 	}
 
 	t.Cleanup(func() {
@@ -25,9 +29,9 @@ func newTestStore(t *testing.T) *Store {
 
 func TestCaptureSentMessageStoresCopiedMessageUsingRequestAndSourceMessage(t *testing.T) {
 	store := newTestStore(t)
-	server := NewServer(store, nil)
+	server := server.NewServer(store, nil)
 
-	botID, err := store.AddBotConfig(BotConfig{
+	botID, err := store.AddBotConfig(models.BotConfig{
 		Name:        "Copy Bot",
 		Token:       "token",
 		BotUsername: "copybot",
@@ -36,7 +40,7 @@ func TestCaptureSentMessageStoresCopiedMessageUsingRequestAndSourceMessage(t *te
 		t.Fatalf("AddBotConfig() error = %v", err)
 	}
 
-	if err := store.SaveMessage(Message{
+	if err := store.SaveMessage(models.Message{
 		ID:        50,
 		BotID:     botID,
 		ChatID:    555,
@@ -50,7 +54,7 @@ func TestCaptureSentMessageStoresCopiedMessageUsingRequestAndSourceMessage(t *te
 		t.Fatalf("SaveMessage() error = %v", err)
 	}
 
-	server.captureSentMessage(
+	server.CaptureSentMessage(
 		"token",
 		"copyMessage",
 		[]byte(`{"chat_id":777,"from_chat_id":555,"message_id":50}`),
@@ -78,9 +82,9 @@ func TestCaptureSentMessageStoresCopiedMessageUsingRequestAndSourceMessage(t *te
 
 func TestCaptureSentMessageStoresFullSendMessageResults(t *testing.T) {
 	store := newTestStore(t)
-	server := NewServer(store, nil)
+	server := server.NewServer(store, nil)
 
-	botID, err := store.AddBotConfig(BotConfig{
+	botID, err := store.AddBotConfig(models.BotConfig{
 		Name:        "Send Bot",
 		Token:       "token",
 		BotUsername: "sendbot",
@@ -90,7 +94,7 @@ func TestCaptureSentMessageStoresFullSendMessageResults(t *testing.T) {
 	}
 	_ = botID
 
-	server.captureSentMessage("token", "sendMessage", nil, "", []byte(`{
+	server.CaptureSentMessage("token", "sendMessage", nil, "", []byte(`{
 		"ok": true,
 		"result": {
 			"message_id": 321,
@@ -120,7 +124,7 @@ func TestCaptureSentMessageStoresFullSendMessageResults(t *testing.T) {
 func TestSaveMessageUpsertUpdatesTextOnEdit(t *testing.T) {
 	store := newTestStore(t)
 
-	base := Message{
+	base := models.Message{
 		ID:       100,
 		BotID:    1,
 		ChatID:   42,
@@ -157,7 +161,7 @@ func TestSaveMessageUpsertUpdatesTextOnEdit(t *testing.T) {
 func TestSaveMessageUpsertPreservesDeletedTombstone(t *testing.T) {
 	store := newTestStore(t)
 
-	m := Message{
+	m := models.Message{
 		ID:       200,
 		BotID:    1,
 		ChatID:   99,
@@ -199,7 +203,7 @@ func TestSaveMessageUpsertNotifiesSubscribersOnEdit(t *testing.T) {
 	ch := store.Subscribe()
 	defer store.Unsubscribe(ch)
 
-	m := Message{
+	m := models.Message{
 		ID:       300,
 		BotID:    1,
 		ChatID:   5,
@@ -242,9 +246,9 @@ func TestSaveMessageUpsertNotifiesSubscribersOnEdit(t *testing.T) {
 // editMessageText with new text must overwrite the stored text.
 func TestCaptureSentMessageEditMessageTextUpdatesDB(t *testing.T) {
 	store := newTestStore(t)
-	server := NewServer(store, nil)
+	server := server.NewServer(store, nil)
 
-	botID, err := store.AddBotConfig(BotConfig{
+	botID, err := store.AddBotConfig(models.BotConfig{
 		Name:        "Stream Bot",
 		Token:       "streamtoken",
 		BotUsername: "streambot",
@@ -254,7 +258,7 @@ func TestCaptureSentMessageEditMessageTextUpdatesDB(t *testing.T) {
 	}
 	_ = botID
 
-	server.captureSentMessage("streamtoken", "sendMessage", nil, "", []byte(`{
+	server.CaptureSentMessage("streamtoken", "sendMessage", nil, "", []byte(`{
 		"ok": true,
 		"result": {
 			"message_id": 1001,
@@ -265,7 +269,7 @@ func TestCaptureSentMessageEditMessageTextUpdatesDB(t *testing.T) {
 		}
 	}`))
 
-	server.captureSentMessage("streamtoken", "editMessageText", nil, "", []byte(`{
+	server.CaptureSentMessage("streamtoken", "editMessageText", nil, "", []byte(`{
 		"ok": true,
 		"result": {
 			"message_id": 1001,
@@ -290,9 +294,9 @@ func TestCaptureSentMessageEditMessageTextUpdatesDB(t *testing.T) {
 // edits are routed through the send-methods map and update the stored text.
 func TestCaptureSentMessageEditMessageCaptionCaptured(t *testing.T) {
 	store := newTestStore(t)
-	server := NewServer(store, nil)
+	server := server.NewServer(store, nil)
 
-	botID, err := store.AddBotConfig(BotConfig{
+	botID, err := store.AddBotConfig(models.BotConfig{
 		Name:        "Caption Bot",
 		Token:       "captiontoken",
 		BotUsername: "captionbot",
@@ -302,7 +306,7 @@ func TestCaptureSentMessageEditMessageCaptionCaptured(t *testing.T) {
 	}
 	_ = botID
 
-	server.captureSentMessage("captiontoken", "sendPhoto", nil, "", []byte(`{
+	server.CaptureSentMessage("captiontoken", "sendPhoto", nil, "", []byte(`{
 		"ok": true,
 		"result": {
 			"message_id": 2002,
@@ -314,7 +318,7 @@ func TestCaptureSentMessageEditMessageCaptionCaptured(t *testing.T) {
 		}
 	}`))
 
-	server.captureSentMessage("captiontoken", "editMessageCaption", nil, "", []byte(`{
+	server.CaptureSentMessage("captiontoken", "editMessageCaption", nil, "", []byte(`{
 		"ok": true,
 		"result": {
 			"message_id": 2002,

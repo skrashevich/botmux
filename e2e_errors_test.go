@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/skrashevich/botmux/internal/models"
 )
 
 // TestE2E_Errors covers error paths in pollLoop and the /tgapi/ proxy handler.
@@ -28,7 +30,7 @@ func TestE2E_Errors(t *testing.T) {
 
 		token := "err01:T"
 		h.fake.RegisterBot(token, "errbot01", 10001)
-		botID := h.AddBot(BotConfig{
+		botID := h.AddBot(models.BotConfig{
 			Token:         token,
 			Name:          "errbot01",
 			BotUsername:   "errbot01",
@@ -65,7 +67,7 @@ func TestE2E_Errors(t *testing.T) {
 
 		token := "err02:T"
 		h.fake.RegisterBot(token, "errbot02", 10002)
-		botID := h.AddBot(BotConfig{
+		botID := h.AddBot(models.BotConfig{
 			Token:         token,
 			Name:          "errbot02",
 			BotUsername:   "errbot02",
@@ -101,7 +103,7 @@ func TestE2E_Errors(t *testing.T) {
 
 		token := "err03:T"
 		h.fake.RegisterBot(token, "errbot03", 10003)
-		h.AddBot(BotConfig{
+		h.AddBot(models.BotConfig{
 			Token:       token,
 			Name:        "errbot03",
 			BotUsername: "errbot03",
@@ -146,7 +148,7 @@ func TestE2E_Errors(t *testing.T) {
 
 		token := "err04:T"
 		h.fake.RegisterBot(token, "errbot04", 10004)
-		h.AddBot(BotConfig{
+		h.AddBot(models.BotConfig{
 			Token:       token,
 			Name:        "errbot04",
 			BotUsername: "errbot04",
@@ -190,7 +192,7 @@ func TestE2E_Errors(t *testing.T) {
 
 		token := "err05:T"
 		h.fake.RegisterBot(token, "errbot05", 10005)
-		h.AddBot(BotConfig{
+		h.AddBot(models.BotConfig{
 			Token:       token,
 			Name:        "errbot05",
 			BotUsername: "errbot05",
@@ -222,7 +224,7 @@ func TestE2E_Errors(t *testing.T) {
 
 		token := "err06:T"
 		h.fake.RegisterBot(token, "errbot06", 10006)
-		botID := h.AddBot(BotConfig{
+		botID := h.AddBot(models.BotConfig{
 			Token:         token,
 			Name:          "errbot06",
 			BotUsername:   "errbot06",
@@ -264,7 +266,7 @@ func TestE2E_Errors(t *testing.T) {
 
 		token := "err07:T"
 		h.fake.RegisterBot(token, "errbot07", 10007)
-		h.AddBot(BotConfig{
+		h.AddBot(models.BotConfig{
 			Token:       token,
 			Name:        "errbot07",
 			BotUsername: "errbot07",
@@ -302,7 +304,7 @@ func TestE2E_Errors(t *testing.T) {
 
 		token := "err08:T"
 		h.fake.RegisterBot(token, "errbot08", 10008)
-		botID := h.AddBot(BotConfig{
+		botID := h.AddBot(models.BotConfig{
 			Token:         token,
 			Name:          "errbot08",
 			BotUsername:   "errbot08",

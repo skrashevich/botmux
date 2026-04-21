@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/skrashevich/botmux/internal/models"
 )
 
 // TestE2E_Webhook covers §2.2 W-01..W-08: webhook lifecycle and /tgapi/ intercepts.
@@ -29,7 +31,7 @@ const (
 func TestE2E_Webhook_W01_SetWebhookIntercept(t *testing.T) {
 	h := setupE2E(t, withHTTPServer())
 
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:         wToken,
 		Name:          "webhookbot",
 		BotUsername:   "webhookbot",
@@ -76,7 +78,7 @@ func TestE2E_Webhook_W01_SetWebhookIntercept(t *testing.T) {
 func TestE2E_Webhook_W02_DeleteWebhookIntercept(t *testing.T) {
 	h := setupE2E(t, withHTTPServer())
 
-	h.AddBot(BotConfig{
+	h.AddBot(models.BotConfig{
 		Token:         wToken,
 		Name:          "webhookbot",
 		BotUsername:   "webhookbot",
@@ -132,7 +134,7 @@ func TestE2E_Webhook_W03_GetWebhookInfoIntercept(t *testing.T) {
 
 	h := setupE2E(t, withHTTPServer())
 
-	h.AddBot(BotConfig{
+	h.AddBot(models.BotConfig{
 		Token:         wToken,
 		Name:          "webhookbot",
 		BotUsername:   "webhookbot",
@@ -169,7 +171,7 @@ func TestE2E_Webhook_W03_GetWebhookInfoIntercept(t *testing.T) {
 func TestE2E_Webhook_W04_LogOutIntercept(t *testing.T) {
 	h := setupE2E(t, withHTTPServer())
 
-	h.AddBot(BotConfig{
+	h.AddBot(models.BotConfig{
 		Token:         wToken,
 		Name:          "webhookbot",
 		BotUsername:   "webhookbot",
@@ -195,7 +197,7 @@ func TestE2E_Webhook_W04_LogOutIntercept(t *testing.T) {
 func TestE2E_Webhook_W05_CloseIntercept(t *testing.T) {
 	h := setupE2E(t, withHTTPServer())
 
-	h.AddBot(BotConfig{
+	h.AddBot(models.BotConfig{
 		Token:         wToken,
 		Name:          "webhookbot",
 		BotUsername:   "webhookbot",
@@ -225,7 +227,7 @@ func TestE2E_Webhook_W06_GetUpdatesIntercept(t *testing.T) {
 	// the store.
 	h := setupE2E(t, withHTTPServer())
 
-	h.AddBot(BotConfig{
+	h.AddBot(models.BotConfig{
 		Token:         wToken,
 		Name:          "webhookbot",
 		BotUsername:   "webhookbot",
@@ -261,7 +263,7 @@ func TestE2E_Webhook_W07_WebhookModeActivation(t *testing.T) {
 	token := "whmode:9876543210"
 	h.fake.RegisterBot(token, "whbot", 999)
 
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:         token,
 		Name:          "whbot",
 		BotUsername:   "whbot",
@@ -327,8 +329,8 @@ func TestE2E_Webhook_W07_WebhookModeActivation(t *testing.T) {
 		t.Fatalf("webhook POST: expected 200, got %d", resp.StatusCode)
 	}
 
-	// Message should now appear in store
-	h.WaitForMessage(botID, whChatID, func(m Message) bool {
+	// models.Message should now appear in store
+	h.WaitForMessage(botID, whChatID, func(m models.Message) bool {
 		return m.Text == "webhook-delivered-message"
 	})
 }
@@ -338,7 +340,7 @@ func TestE2E_Webhook_W07_WebhookModeActivation(t *testing.T) {
 func TestE2E_Webhook_W08_SendMessageNotIntercepted(t *testing.T) {
 	h := setupE2E(t, withHTTPServer())
 
-	h.AddBot(BotConfig{
+	h.AddBot(models.BotConfig{
 		Token:         wToken,
 		Name:          "webhookbot",
 		BotUsername:   "webhookbot",

@@ -1,4 +1,4 @@
-package main
+package bridge
 
 import (
 	"bytes"
@@ -13,18 +13,20 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/skrashevich/botmux/internal/models"
 )
 
 // SlackConfig holds Slack-specific bridge configuration (stored as JSON in BridgeConfig.Config)
 type SlackConfig struct {
-	BotToken      string `json:"bot_token"`               // xoxb-... Slack bot token
-	SigningSecret string `json:"signing_secret"`          // Slack app signing secret for request verification
-	APIBaseURL    string `json:"api_base_url,omitempty"`  // base URL for Slack API calls; defaults to https://slack.com/api
+	BotToken      string `json:"bot_token"`              // xoxb-... Slack bot token
+	SigningSecret string `json:"signing_secret"`         // Slack app signing secret for request verification
+	APIBaseURL    string `json:"api_base_url,omitempty"` // base URL for Slack API calls; defaults to https://slack.com/api
 }
 
 // SlackEventPayload is the outer envelope Slack sends for all Events API requests
 type SlackEventPayload struct {
-	Type      string          `json:"type"`      // "url_verification" or "event_callback"
+	Type      string          `json:"type"` // "url_verification" or "event_callback"
 	Token     string          `json:"token"`
 	Challenge string          `json:"challenge"` // only for url_verification
 	TeamID    string          `json:"team_id"`
@@ -33,10 +35,10 @@ type SlackEventPayload struct {
 
 // SlackMessageEvent represents a Slack message event
 type SlackMessageEvent struct {
-	Type     string `json:"type"`      // "message"
-	SubType  string `json:"subtype"`   // "" for normal messages, "bot_message", etc.
-	Channel  string `json:"channel"`   // channel ID
-	User     string `json:"user"`      // user ID
+	Type     string `json:"type"`    // "message"
+	SubType  string `json:"subtype"` // "" for normal messages, "bot_message", etc.
+	Channel  string `json:"channel"` // channel ID
+	User     string `json:"user"`    // user ID
 	Text     string `json:"text"`
 	TS       string `json:"ts"`        // message timestamp (serves as message ID)
 	ThreadTS string `json:"thread_ts"` // thread parent timestamp (for replies)
@@ -93,7 +95,7 @@ func abs64(n int64) int64 {
 
 // HandleSlackEvent processes an incoming Slack Events API request.
 // Returns (response body, content-type, http status, error).
-func (bm *BridgeManager) HandleSlackEvent(bridgeID int64, header http.Header, body []byte) ([]byte, string, int, error) {
+func (bm *Manager) HandleSlackEvent(bridgeID int64, header http.Header, body []byte) ([]byte, string, int, error) {
 	bm.mu.RLock()
 	cfg, ok := bm.bridges[bridgeID]
 	bm.mu.RUnlock()
@@ -150,7 +152,7 @@ func (bm *BridgeManager) HandleSlackEvent(bridgeID int64, header http.Header, bo
 	username := bm.resolveSlackUsername(slackCfg, msgEvent.User)
 
 	// Build bridge incoming message
-	incoming := BridgeIncomingMessage{
+	incoming := models.BridgeIncomingMessage{
 		ExternalChatID: msgEvent.Channel,
 		ExternalUserID: msgEvent.User,
 		Username:       username,
@@ -171,7 +173,7 @@ func (bm *BridgeManager) HandleSlackEvent(bridgeID int64, header http.Header, bo
 }
 
 // resolveSlackUsername fetches user info from Slack API. Falls back to user ID.
-func (bm *BridgeManager) resolveSlackUsername(cfg *SlackConfig, userID string) string {
+func (bm *Manager) resolveSlackUsername(cfg *SlackConfig, userID string) string {
 	if cfg.BotToken == "" || userID == "" {
 		return userID
 	}
@@ -220,7 +222,7 @@ func (bm *BridgeManager) resolveSlackUsername(cfg *SlackConfig, userID string) s
 }
 
 // postSlackMessage sends a message to Slack using chat.postMessage API
-func (bm *BridgeManager) postSlackMessage(slackCfg *SlackConfig, channel, text, threadTS string) error {
+func (bm *Manager) postSlackMessage(slackCfg *SlackConfig, channel, text, threadTS string) error {
 	payload := map[string]string{
 		"channel": channel,
 		"text":    text,
@@ -266,7 +268,7 @@ func (bm *BridgeManager) postSlackMessage(slackCfg *SlackConfig, channel, text, 
 }
 
 // notifySlackOutgoing sends an outgoing bot message directly to Slack via API
-func (bm *BridgeManager) notifySlackOutgoing(cfg *BridgeConfig, extChatID string, text string, replyToMsgID int) {
+func (bm *Manager) notifySlackOutgoing(cfg *models.BridgeConfig, extChatID string, text string, replyToMsgID int) {
 	slackCfg, err := parseSlackConfig(cfg.Config)
 	if err != nil {
 		log.Printf("[bridge] id=%d slack config error for outgoing: %v", cfg.ID, err)
@@ -293,6 +295,6 @@ func (bm *BridgeManager) notifySlackOutgoing(cfg *BridgeConfig, extChatID string
 }
 
 // isSlackBridge checks if a bridge uses the Slack protocol
-func isSlackBridge(cfg *BridgeConfig) bool {
+func IsSlackBridge(cfg *models.BridgeConfig) bool {
 	return strings.EqualFold(cfg.Protocol, "slack")
 }

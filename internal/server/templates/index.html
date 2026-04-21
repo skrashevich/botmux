@@ -2621,7 +2621,7 @@ function renderMsgContent(m) {
     } else if (m.media_type === 'voice' || m.media_type === 'audio') {
       html += `<div class="msg-media msg-media-audio">
         <span class="msg-media-badge">${icon} ${label}</span>
-        <audio src="${mediaUrl}" controls preload="metadata"></audio>
+        <audio src="${mediaUrl}" controls preload="none"></audio>
       </div>`;
     } else {
       html += `<a href="${mediaUrl}" target="_blank" class="msg-media-link">${icon} ${label}</a>`;

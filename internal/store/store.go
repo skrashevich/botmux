@@ -1,4 +1,4 @@
-package main
+package store
 
 import (
 	"database/sql"
@@ -6,157 +6,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/skrashevich/botmux/internal/auth"
+	"github.com/skrashevich/botmux/internal/models"
 	_ "modernc.org/sqlite"
 )
 
 type Store struct {
 	db     *sql.DB
 	subsMu sync.RWMutex
-	subs   map[chan Message]struct{}
-}
-
-// BotConfig represents a bot in the unified bots table
-type BotConfig struct {
-	ID               int64  `json:"id"`
-	Name             string `json:"name"`
-	Token            string `json:"token"`
-	BotUsername      string `json:"bot_username"`
-	ManageEnabled    bool   `json:"manage_enabled"`
-	ProxyEnabled     bool   `json:"proxy_enabled"`
-	BackendURL       string `json:"backend_url"`
-	SecretToken      string `json:"secret_token"`
-	PollingTimeout   int    `json:"polling_timeout"`
-	Offset           int64  `json:"offset"`
-	LastError        string `json:"last_error,omitempty"`
-	LastActivity     string `json:"last_activity,omitempty"`
-	UpdatesForwarded int64  `json:"updates_forwarded"`
-	Source           string `json:"source"` // "cli" or "web"
-	BackendStatus    string `json:"backend_status"`
-	BackendCheckedAt string `json:"backend_checked_at"`
-	LongPollEnabled  bool   `json:"long_poll_enabled"`
-	Disabled         bool   `json:"disabled"`
-}
-
-type Chat struct {
-	ID          int64  `json:"id"`
-	Type        string `json:"type"`
-	Title       string `json:"title"`
-	Username    string `json:"username"`
-	MemberCount int    `json:"member_count"`
-	Description string `json:"description"`
-	IsAdmin     bool   `json:"is_admin"`
-	UpdatedAt   string `json:"updated_at"`
-	LastMsgText string `json:"last_msg_text,omitempty"`
-	LastMsgFrom string `json:"last_msg_from,omitempty"`
-	LastMsgDate int64  `json:"last_msg_date,omitempty"`
-}
-
-type Message struct {
-	ID        int    `json:"id"`
-	BotID     int64  `json:"bot_id"`
-	ChatID    int64  `json:"chat_id"`
-	FromUser  string `json:"from_user"`
-	FromID    int64  `json:"from_id"`
-	Text      string `json:"text"`
-	Date      int64  `json:"date"`
-	DateStr   string `json:"date_str"`
-	ReplyToID int    `json:"reply_to_id,omitempty"`
-	Deleted   bool   `json:"deleted"`
-	MediaType string `json:"media_type,omitempty"` // photo, video, animation, sticker, voice, audio, document, video_note
-	FileID    string `json:"file_id,omitempty"`
-	FromIsBot bool   `json:"from_is_bot,omitempty"`
-	SenderTag string `json:"sender_tag,omitempty"`
-}
-
-type ChatStats struct {
-	ChatID        int64          `json:"chat_id"`
-	Title         string         `json:"title"`
-	TotalMessages int            `json:"total_messages"`
-	TodayMessages int            `json:"today_messages"`
-	ActiveUsers   int            `json:"active_users"`
-	TopUsers      []UserActivity `json:"top_users"`
-	HourlyStats   []HourlyStat   `json:"hourly_stats"`
-}
-
-type UserActivity struct {
-	UserID   int64  `json:"user_id"`
-	Username string `json:"username"`
-	Count    int    `json:"count"`
-}
-
-type HourlyStat struct {
-	Hour  int `json:"hour"`
-	Count int `json:"count"`
-}
-
-type AdminLog struct {
-	ID         int64  `json:"id"`
-	ChatID     int64  `json:"chat_id"`
-	Action     string `json:"action"`
-	ActorName  string `json:"actor_name"`
-	TargetID   int64  `json:"target_id,omitempty"`
-	TargetName string `json:"target_name,omitempty"`
-	Details    string `json:"details,omitempty"`
-	CreatedAt  string `json:"created_at"`
-}
-
-type UserTag struct {
-	ID       int64  `json:"id"`
-	ChatID   int64  `json:"chat_id"`
-	UserID   int64  `json:"user_id"`
-	Username string `json:"username"`
-	Tag      string `json:"tag"`
-	Color    string `json:"color"`
-}
-
-type ChatUser struct {
-	UserID       int64     `json:"user_id"`
-	Username     string    `json:"username"`
-	MessageCount int       `json:"message_count"`
-	LastSeen     string    `json:"last_seen"`
-	Tags         []UserTag `json:"tags"`
-}
-
-// RouteMapping tracks source↔target message pairs for reverse routing (Source-NAT)
-type RouteMapping struct {
-	ID           int64  `json:"id"`
-	RouteID      int64  `json:"route_id"`
-	SourceBotID  int64  `json:"source_bot_id"`
-	SourceChatID int64  `json:"source_chat_id"`
-	SourceMsgID  int    `json:"source_msg_id"`
-	TargetBotID  int64  `json:"target_bot_id"`
-	TargetChatID int64  `json:"target_chat_id"`
-	TargetMsgID  int    `json:"target_msg_id"`
-	CreatedAt    string `json:"created_at"`
-}
-
-// Route defines a routing rule: updates matching conditions on source bot get forwarded to target bot
-type Route struct {
-	ID             int64  `json:"id"`
-	SourceBotID    int64  `json:"source_bot_id"`
-	TargetBotID    int64  `json:"target_bot_id"`
-	SourceChatID   int64  `json:"source_chat_id"`  // filter by source chat (0 = any chat)
-	ConditionType  string `json:"condition_type"`  // "text", "user_id", "chat_id"
-	ConditionValue string `json:"condition_value"` // regex pattern for text, ID for user/chat
-	Action         string `json:"action"`          // "forward", "copy", or "drop" (ignore message)
-	TargetChatID   int64  `json:"target_chat_id"`  // chat to forward/copy to (0 = same chat)
-	Enabled        bool   `json:"enabled"`
-	Description    string `json:"description"`
-	CreatedAt      string `json:"created_at"`
-}
-
-type AdminInfo struct {
-	UserID             int64  `json:"user_id"`
-	Username           string `json:"username"`
-	Status             string `json:"status"`
-	CustomTitle        string `json:"custom_title"`
-	CanDeleteMessages  bool   `json:"can_delete_messages"`
-	CanRestrictMembers bool   `json:"can_restrict_members"`
-	CanPromoteMembers  bool   `json:"can_promote_members"`
-	CanChangeInfo      bool   `json:"can_change_info"`
-	CanInviteUsers     bool   `json:"can_invite_users"`
-	CanPinMessages     bool   `json:"can_pin_messages"`
-	CanManageChat      bool   `json:"can_manage_chat"`
+	subs   map[chan models.Message]struct{}
 }
 
 func NewStore(path string) (*Store, error) {
@@ -165,7 +23,7 @@ func NewStore(path string) (*Store, error) {
 		return nil, err
 	}
 
-	s := &Store{db: db, subs: make(map[chan Message]struct{})}
+	s := &Store{db: db, subs: make(map[chan models.Message]struct{})}
 	if err := s.migrate(); err != nil {
 		return nil, err
 	}
@@ -173,8 +31,8 @@ func NewStore(path string) (*Store, error) {
 }
 
 // Subscribe returns a channel that receives all saved messages
-func (s *Store) Subscribe() chan Message {
-	ch := make(chan Message, 64)
+func (s *Store) Subscribe() chan models.Message {
+	ch := make(chan models.Message, 64)
 	s.subsMu.Lock()
 	s.subs[ch] = struct{}{}
 	s.subsMu.Unlock()
@@ -182,13 +40,13 @@ func (s *Store) Subscribe() chan Message {
 }
 
 // Unsubscribe removes a subscriber channel
-func (s *Store) Unsubscribe(ch chan Message) {
+func (s *Store) Unsubscribe(ch chan models.Message) {
 	s.subsMu.Lock()
 	delete(s.subs, ch)
 	s.subsMu.Unlock()
 }
 
-func (s *Store) notifySubscribers(m Message) {
+func (s *Store) notifySubscribers(m models.Message) {
 	s.subsMu.RLock()
 	defer s.subsMu.RUnlock()
 	for ch := range s.subs {
@@ -546,7 +404,7 @@ func (s *Store) migrate() error {
 	var userCount int
 	s.db.QueryRow(`SELECT COUNT(*) FROM auth_users`).Scan(&userCount)
 	if userCount == 0 {
-		hash, err := HashPassword("admin")
+		hash, err := auth.HashPassword("admin")
 		if err != nil {
 			return err
 		}
@@ -579,7 +437,7 @@ func (s *Store) MigrateLegacyChats(botID int64) {
 	s.db.Exec(`UPDATE chats SET bot_id=? WHERE bot_id=0`, botID)
 }
 
-func (s *Store) AddBotConfig(b BotConfig) (int64, error) {
+func (s *Store) AddBotConfig(b models.BotConfig) (int64, error) {
 	res, err := s.db.Exec(`
 		INSERT INTO bots (name, token, bot_username, manage_enabled, proxy_enabled, backend_url, secret_token, polling_timeout, long_poll_enabled, source)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'web')
@@ -590,7 +448,7 @@ func (s *Store) AddBotConfig(b BotConfig) (int64, error) {
 	return res.LastInsertId()
 }
 
-func (s *Store) UpdateBotConfig(b BotConfig) error {
+func (s *Store) UpdateBotConfig(b models.BotConfig) error {
 	_, err := s.db.Exec(`
 		UPDATE bots SET name=?, token=?, bot_username=?, manage_enabled=?, proxy_enabled=?, backend_url=?, secret_token=?, polling_timeout=?, long_poll_enabled=?
 		WHERE id=?
@@ -603,16 +461,16 @@ func (s *Store) DeleteBotConfig(id int64) error {
 	return err
 }
 
-func (s *Store) GetBotConfigs() ([]BotConfig, error) {
+func (s *Store) GetBotConfigs() ([]models.BotConfig, error) {
 	rows, err := s.db.Query(`SELECT id, name, token, bot_username, manage_enabled, proxy_enabled, backend_url, secret_token, polling_timeout, offset_id, last_error, last_activity, updates_forwarded, source, backend_status, backend_checked_at, long_poll_enabled, disabled FROM bots ORDER BY source DESC, name`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var bots []BotConfig
+	var bots []models.BotConfig
 	for rows.Next() {
-		var b BotConfig
+		var b models.BotConfig
 		if err := rows.Scan(&b.ID, &b.Name, &b.Token, &b.BotUsername, &b.ManageEnabled, &b.ProxyEnabled, &b.BackendURL, &b.SecretToken, &b.PollingTimeout, &b.Offset, &b.LastError, &b.LastActivity, &b.UpdatesForwarded, &b.Source, &b.BackendStatus, &b.BackendCheckedAt, &b.LongPollEnabled, &b.Disabled); err != nil {
 			return nil, err
 		}
@@ -621,8 +479,8 @@ func (s *Store) GetBotConfigs() ([]BotConfig, error) {
 	return bots, nil
 }
 
-func (s *Store) GetBotConfig(id int64) (*BotConfig, error) {
-	var b BotConfig
+func (s *Store) GetBotConfig(id int64) (*models.BotConfig, error) {
+	var b models.BotConfig
 	err := s.db.QueryRow(`SELECT id, name, token, bot_username, manage_enabled, proxy_enabled, backend_url, secret_token, polling_timeout, offset_id, last_error, last_activity, updates_forwarded, source, backend_status, backend_checked_at, long_poll_enabled, disabled FROM bots WHERE id=?`, id).
 		Scan(&b.ID, &b.Name, &b.Token, &b.BotUsername, &b.ManageEnabled, &b.ProxyEnabled, &b.BackendURL, &b.SecretToken, &b.PollingTimeout, &b.Offset, &b.LastError, &b.LastActivity, &b.UpdatesForwarded, &b.Source, &b.BackendStatus, &b.BackendCheckedAt, &b.LongPollEnabled, &b.Disabled)
 	if err != nil {
@@ -631,8 +489,8 @@ func (s *Store) GetBotConfig(id int64) (*BotConfig, error) {
 	return &b, nil
 }
 
-func (s *Store) GetBotConfigByToken(token string) (*BotConfig, error) {
-	var b BotConfig
+func (s *Store) GetBotConfigByToken(token string) (*models.BotConfig, error) {
+	var b models.BotConfig
 	err := s.db.QueryRow(`SELECT id, name, token, bot_username, manage_enabled, proxy_enabled, backend_url, secret_token, polling_timeout, offset_id, last_error, last_activity, updates_forwarded, source, backend_status, backend_checked_at, long_poll_enabled, disabled FROM bots WHERE token=?`, token).
 		Scan(&b.ID, &b.Name, &b.Token, &b.BotUsername, &b.ManageEnabled, &b.ProxyEnabled, &b.BackendURL, &b.SecretToken, &b.PollingTimeout, &b.Offset, &b.LastError, &b.LastActivity, &b.UpdatesForwarded, &b.Source, &b.BackendStatus, &b.BackendCheckedAt, &b.LongPollEnabled, &b.Disabled)
 	if err != nil {
@@ -667,9 +525,9 @@ func (s *Store) SetBotDisabled(id int64, disabled bool) error {
 	return err
 }
 
-// Chat methods (now with botID)
+// models.Chat methods (now with botID)
 
-func (s *Store) UpsertChat(botID int64, c Chat) error {
+func (s *Store) UpsertChat(botID int64, c models.Chat) error {
 	_, err := s.db.Exec(`
 		INSERT INTO chats (bot_id, id, type, title, username, member_count, description, is_admin, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -681,7 +539,7 @@ func (s *Store) UpsertChat(botID int64, c Chat) error {
 	return err
 }
 
-func (s *Store) GetChats(botID int64) ([]Chat, error) {
+func (s *Store) GetChats(botID int64) ([]models.Chat, error) {
 	rows, err := s.db.Query(`
 		SELECT c.id, c.type, c.title, c.username, c.member_count, c.description, c.is_admin, c.updated_at,
 			COALESCE(m.text, ''), COALESCE(m.from_user, ''), COALESCE(m.date, 0)
@@ -697,9 +555,9 @@ func (s *Store) GetChats(botID int64) ([]Chat, error) {
 	}
 	defer rows.Close()
 
-	var chats []Chat
+	var chats []models.Chat
 	for rows.Next() {
-		var c Chat
+		var c models.Chat
 		if err := rows.Scan(&c.ID, &c.Type, &c.Title, &c.Username, &c.MemberCount, &c.Description, &c.IsAdmin, &c.UpdatedAt,
 			&c.LastMsgText, &c.LastMsgFrom, &c.LastMsgDate); err != nil {
 			return nil, err
@@ -721,7 +579,7 @@ func (s *Store) DeleteChat(botID int64, chatID int64) error {
 // SaveMessage upserts by (bot_id, chat_id, id). On conflict it refreshes only
 // text/media so streaming bot edits (editMessageText, EditedMessage) surface
 // in the UI; identity fields and the deleted tombstone are preserved.
-func (s *Store) SaveMessage(m Message) error {
+func (s *Store) SaveMessage(m models.Message) error {
 	fromIsBot := 0
 	if m.FromIsBot {
 		fromIsBot = 1
@@ -748,7 +606,7 @@ func (s *Store) SaveMessage(m Message) error {
 	return nil
 }
 
-func (s *Store) GetMessages(botID, chatID int64, limit, offset int) ([]Message, error) {
+func (s *Store) GetMessages(botID, chatID int64, limit, offset int) ([]models.Message, error) {
 	rows, err := s.db.Query(`
 		SELECT id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id, from_is_bot, sender_tag
 		FROM messages WHERE bot_id = ? AND chat_id = ? ORDER BY id DESC LIMIT ? OFFSET ?
@@ -758,9 +616,9 @@ func (s *Store) GetMessages(botID, chatID int64, limit, offset int) ([]Message, 
 	}
 	defer rows.Close()
 
-	var msgs []Message
+	var msgs []models.Message
 	for rows.Next() {
-		var m Message
+		var m models.Message
 		if err := rows.Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID, &m.FromIsBot, &m.SenderTag); err != nil {
 			return nil, err
 		}
@@ -770,8 +628,8 @@ func (s *Store) GetMessages(botID, chatID int64, limit, offset int) ([]Message, 
 	return msgs, nil
 }
 
-func (s *Store) GetMessage(botID, chatID int64, messageID int) (*Message, error) {
-	var m Message
+func (s *Store) GetMessage(botID, chatID int64, messageID int) (*models.Message, error) {
+	var m models.Message
 	err := s.db.QueryRow(`
 		SELECT id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id, from_is_bot, sender_tag
 		FROM messages WHERE bot_id = ? AND chat_id = ? AND id = ?
@@ -783,8 +641,8 @@ func (s *Store) GetMessage(botID, chatID int64, messageID int) (*Message, error)
 	return &m, nil
 }
 
-func (s *Store) GetChatStats(botID, chatID int64) (*ChatStats, error) {
-	stats := &ChatStats{ChatID: chatID}
+func (s *Store) GetChatStats(botID, chatID int64) (*models.ChatStats, error) {
+	stats := &models.ChatStats{ChatID: chatID}
 	s.db.QueryRow(`SELECT title FROM chats WHERE bot_id = ? AND id = ?`, botID, chatID).Scan(&stats.Title)
 	s.db.QueryRow(`SELECT COUNT(*) FROM messages WHERE bot_id = ? AND chat_id = ?`, botID, chatID).Scan(&stats.TotalMessages)
 
@@ -802,7 +660,7 @@ func (s *Store) GetChatStats(botID, chatID int64) (*ChatStats, error) {
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
-			var u UserActivity
+			var u models.UserActivity
 			rows.Scan(&u.UserID, &u.Username, &u.Count)
 			stats.TopUsers = append(stats.TopUsers, u)
 		}
@@ -822,14 +680,14 @@ func (s *Store) GetChatStats(botID, chatID int64) (*ChatStats, error) {
 			hourMap[h] = c
 		}
 		for h := range 24 {
-			stats.HourlyStats = append(stats.HourlyStats, HourlyStat{Hour: h, Count: hourMap[h]})
+			stats.HourlyStats = append(stats.HourlyStats, models.HourlyStat{Hour: h, Count: hourMap[h]})
 		}
 	}
 
 	return stats, nil
 }
 
-func (s *Store) SearchMessages(botID, chatID int64, query string, limit int) ([]Message, error) {
+func (s *Store) SearchMessages(botID, chatID int64, query string, limit int) ([]models.Message, error) {
 	rows, err := s.db.Query(`
 		SELECT id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id, from_is_bot, sender_tag
 		FROM messages WHERE bot_id = ? AND chat_id = ? AND text LIKE ?
@@ -840,9 +698,9 @@ func (s *Store) SearchMessages(botID, chatID int64, query string, limit int) ([]
 	}
 	defer rows.Close()
 
-	var msgs []Message
+	var msgs []models.Message
 	for rows.Next() {
-		var m Message
+		var m models.Message
 		rows.Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID, &m.FromIsBot, &m.SenderTag)
 		m.DateStr = time.UnixMilli(m.Date).Format("2006-01-02 15:04:05")
 		msgs = append(msgs, m)
@@ -857,7 +715,7 @@ func (s *Store) MarkMessageDeleted(botID, chatID int64, messageID int) error {
 
 // Admin log
 
-func (s *Store) LogAdminAction(l AdminLog) error {
+func (s *Store) LogAdminAction(l models.AdminLog) error {
 	_, err := s.db.Exec(`
 		INSERT INTO admin_log (chat_id, action, actor_name, target_id, target_name, details, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -865,7 +723,7 @@ func (s *Store) LogAdminAction(l AdminLog) error {
 	return err
 }
 
-func (s *Store) GetAdminLog(chatID int64, limit, offset int) ([]AdminLog, error) {
+func (s *Store) GetAdminLog(chatID int64, limit, offset int) ([]models.AdminLog, error) {
 	rows, err := s.db.Query(`
 		SELECT id, chat_id, action, actor_name, target_id, target_name, details, created_at
 		FROM admin_log WHERE chat_id = ? ORDER BY id DESC LIMIT ? OFFSET ?
@@ -875,9 +733,9 @@ func (s *Store) GetAdminLog(chatID int64, limit, offset int) ([]AdminLog, error)
 	}
 	defer rows.Close()
 
-	var logs []AdminLog
+	var logs []models.AdminLog
 	for rows.Next() {
-		var l AdminLog
+		var l models.AdminLog
 		if err := rows.Scan(&l.ID, &l.ChatID, &l.Action, &l.ActorName, &l.TargetID, &l.TargetName, &l.Details, &l.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -888,7 +746,7 @@ func (s *Store) GetAdminLog(chatID int64, limit, offset int) ([]AdminLog, error)
 
 // User tags
 
-func (s *Store) AddUserTag(t UserTag) error {
+func (s *Store) AddUserTag(t models.UserTag) error {
 	_, err := s.db.Exec(`
 		INSERT OR REPLACE INTO user_tags (chat_id, user_id, username, tag, color)
 		VALUES (?, ?, ?, ?, ?)
@@ -901,7 +759,7 @@ func (s *Store) RemoveUserTag(id int64) error {
 	return err
 }
 
-func (s *Store) GetUserTags(chatID int64) ([]UserTag, error) {
+func (s *Store) GetUserTags(chatID int64) ([]models.UserTag, error) {
 	rows, err := s.db.Query(`
 		SELECT id, chat_id, user_id, username, tag, color
 		FROM user_tags WHERE chat_id = ? ORDER BY username, tag
@@ -911,9 +769,9 @@ func (s *Store) GetUserTags(chatID int64) ([]UserTag, error) {
 	}
 	defer rows.Close()
 
-	var tags []UserTag
+	var tags []models.UserTag
 	for rows.Next() {
-		var t UserTag
+		var t models.UserTag
 		if err := rows.Scan(&t.ID, &t.ChatID, &t.UserID, &t.Username, &t.Tag, &t.Color); err != nil {
 			return nil, err
 		}
@@ -922,7 +780,7 @@ func (s *Store) GetUserTags(chatID int64) ([]UserTag, error) {
 	return tags, nil
 }
 
-func (s *Store) GetUserTagsByUser(chatID int64, userID int64) ([]UserTag, error) {
+func (s *Store) GetUserTagsByUser(chatID int64, userID int64) ([]models.UserTag, error) {
 	rows, err := s.db.Query(`
 		SELECT id, chat_id, user_id, username, tag, color
 		FROM user_tags WHERE chat_id = ? AND user_id = ? ORDER BY tag
@@ -932,9 +790,9 @@ func (s *Store) GetUserTagsByUser(chatID int64, userID int64) ([]UserTag, error)
 	}
 	defer rows.Close()
 
-	var tags []UserTag
+	var tags []models.UserTag
 	for rows.Next() {
-		var t UserTag
+		var t models.UserTag
 		if err := rows.Scan(&t.ID, &t.ChatID, &t.UserID, &t.Username, &t.Tag, &t.Color); err != nil {
 			return nil, err
 		}
@@ -954,7 +812,7 @@ func (s *Store) TrackUser(chatID int64, userID int64, username string) {
 	`, chatID, userID, username, time.Now().Format(time.RFC3339))
 }
 
-func (s *Store) GetChatUsers(chatID int64, search string, limit, offset int) ([]ChatUser, error) {
+func (s *Store) GetChatUsers(chatID int64, search string, limit, offset int) ([]models.ChatUser, error) {
 	q := `
 		SELECT ku.user_id, ku.username,
 			COALESCE(m.cnt, 0) as message_count,
@@ -982,9 +840,9 @@ func (s *Store) GetChatUsers(chatID int64, search string, limit, offset int) ([]
 	}
 	defer rows.Close()
 
-	var users []ChatUser
+	var users []models.ChatUser
 	for rows.Next() {
-		var u ChatUser
+		var u models.ChatUser
 		if err := rows.Scan(&u.UserID, &u.Username, &u.MessageCount, &u.LastSeen); err != nil {
 			return nil, err
 		}
@@ -997,16 +855,16 @@ func (s *Store) GetChatUsers(chatID int64, search string, limit, offset int) ([]
 			users[i].Tags = tags
 		}
 		if users[i].Tags == nil {
-			users[i].Tags = []UserTag{}
+			users[i].Tags = []models.UserTag{}
 		}
 	}
 
 	return users, nil
 }
 
-// Route methods
+// models.Route methods
 
-func (s *Store) AddRoute(r Route) (int64, error) {
+func (s *Store) AddRoute(r models.Route) (int64, error) {
 	res, err := s.db.Exec(`
 		INSERT INTO routes (source_bot_id, target_bot_id, source_chat_id, condition_type, condition_value, action, target_chat_id, enabled, description, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1017,7 +875,7 @@ func (s *Store) AddRoute(r Route) (int64, error) {
 	return res.LastInsertId()
 }
 
-func (s *Store) UpdateRoute(r Route) error {
+func (s *Store) UpdateRoute(r models.Route) error {
 	_, err := s.db.Exec(`
 		UPDATE routes SET target_bot_id=?, source_chat_id=?, condition_type=?, condition_value=?, action=?, target_chat_id=?, enabled=?, description=?
 		WHERE id=?
@@ -1030,7 +888,7 @@ func (s *Store) DeleteRoute(id int64) error {
 	return err
 }
 
-func (s *Store) GetRoutes(sourceBotID int64) ([]Route, error) {
+func (s *Store) GetRoutes(sourceBotID int64) ([]models.Route, error) {
 	rows, err := s.db.Query(`
 		SELECT id, source_bot_id, target_bot_id, source_chat_id, condition_type, condition_value, action, target_chat_id, enabled, description, created_at
 		FROM routes WHERE source_bot_id=? ORDER BY id
@@ -1040,9 +898,9 @@ func (s *Store) GetRoutes(sourceBotID int64) ([]Route, error) {
 	}
 	defer rows.Close()
 
-	var routes []Route
+	var routes []models.Route
 	for rows.Next() {
-		var r Route
+		var r models.Route
 		if err := rows.Scan(&r.ID, &r.SourceBotID, &r.TargetBotID, &r.SourceChatID, &r.ConditionType, &r.ConditionValue, &r.Action, &r.TargetChatID, &r.Enabled, &r.Description, &r.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -1051,7 +909,7 @@ func (s *Store) GetRoutes(sourceBotID int64) ([]Route, error) {
 	return routes, nil
 }
 
-func (s *Store) GetAllEnabledRoutes() ([]Route, error) {
+func (s *Store) GetAllEnabledRoutes() ([]models.Route, error) {
 	rows, err := s.db.Query(`
 		SELECT id, source_bot_id, target_bot_id, source_chat_id, condition_type, condition_value, action, target_chat_id, enabled, description, created_at
 		FROM routes WHERE enabled=1 ORDER BY source_bot_id, id
@@ -1061,9 +919,9 @@ func (s *Store) GetAllEnabledRoutes() ([]Route, error) {
 	}
 	defer rows.Close()
 
-	var routes []Route
+	var routes []models.Route
 	for rows.Next() {
-		var r Route
+		var r models.Route
 		if err := rows.Scan(&r.ID, &r.SourceBotID, &r.TargetBotID, &r.SourceChatID, &r.ConditionType, &r.ConditionValue, &r.Action, &r.TargetChatID, &r.Enabled, &r.Description, &r.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -1072,9 +930,9 @@ func (s *Store) GetAllEnabledRoutes() ([]Route, error) {
 	return routes, nil
 }
 
-// Route mapping methods (Source-NAT tracking)
+// models.Route mapping methods (Source-NAT tracking)
 
-func (s *Store) SaveRouteMapping(m RouteMapping) (int64, error) {
+func (s *Store) SaveRouteMapping(m models.RouteMapping) (int64, error) {
 	res, err := s.db.Exec(`
 		INSERT INTO route_mappings (route_id, source_bot_id, source_chat_id, source_msg_id, target_bot_id, target_chat_id, target_msg_id, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -1087,8 +945,8 @@ func (s *Store) SaveRouteMapping(m RouteMapping) (int64, error) {
 
 // FindReverseMapping looks up a mapping by target bot+chat to find the source bot+chat for reverse routing.
 // It finds the most recent mapping for this target bot+chat combination.
-func (s *Store) FindReverseMapping(targetBotID, targetChatID int64) (*RouteMapping, error) {
-	var m RouteMapping
+func (s *Store) FindReverseMapping(targetBotID, targetChatID int64) (*models.RouteMapping, error) {
+	var m models.RouteMapping
 	err := s.db.QueryRow(`
 		SELECT id, route_id, source_bot_id, source_chat_id, source_msg_id, target_bot_id, target_chat_id, target_msg_id, created_at
 		FROM route_mappings WHERE target_bot_id=? AND target_chat_id=?
@@ -1101,8 +959,8 @@ func (s *Store) FindReverseMapping(targetBotID, targetChatID int64) (*RouteMappi
 }
 
 // FindReverseMappingByReply finds a mapping where the target message matches the reply_to_message_id
-func (s *Store) FindReverseMappingByReply(targetBotID, targetChatID int64, targetMsgID int) (*RouteMapping, error) {
-	var m RouteMapping
+func (s *Store) FindReverseMappingByReply(targetBotID, targetChatID int64, targetMsgID int) (*models.RouteMapping, error) {
+	var m models.RouteMapping
 	err := s.db.QueryRow(`
 		SELECT id, route_id, source_bot_id, source_chat_id, source_msg_id, target_bot_id, target_chat_id, target_msg_id, created_at
 		FROM route_mappings WHERE target_bot_id=? AND target_chat_id=? AND target_msg_id=?
@@ -1130,8 +988,8 @@ func (s *Store) CreateUser(username, passwordHash, displayName, role string) (in
 	return res.LastInsertId()
 }
 
-func (s *Store) GetUserByUsername(username string) (*AuthUser, error) {
-	var u AuthUser
+func (s *Store) GetUserByUsername(username string) (*models.AuthUser, error) {
+	var u models.AuthUser
 	var mustChange int
 	err := s.db.QueryRow(`SELECT id, username, password_hash, display_name, role, must_change_password, created_at, last_login
 		FROM auth_users WHERE username=?`, username).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &u.Role, &mustChange, &u.CreatedAt, &u.LastLogin)
@@ -1142,8 +1000,8 @@ func (s *Store) GetUserByUsername(username string) (*AuthUser, error) {
 	return &u, nil
 }
 
-func (s *Store) GetUserByID(id int64) (*AuthUser, error) {
-	var u AuthUser
+func (s *Store) GetUserByID(id int64) (*models.AuthUser, error) {
+	var u models.AuthUser
 	var mustChange int
 	err := s.db.QueryRow(`SELECT id, username, password_hash, display_name, role, must_change_password, created_at, last_login
 		FROM auth_users WHERE id=?`, id).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &u.Role, &mustChange, &u.CreatedAt, &u.LastLogin)
@@ -1154,16 +1012,16 @@ func (s *Store) GetUserByID(id int64) (*AuthUser, error) {
 	return &u, nil
 }
 
-func (s *Store) GetAllUsers() ([]AuthUser, error) {
+func (s *Store) GetAllUsers() ([]models.AuthUser, error) {
 	rows, err := s.db.Query(`SELECT id, username, password_hash, display_name, role, must_change_password, created_at, last_login
 		FROM auth_users ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var users []AuthUser
+	var users []models.AuthUser
 	for rows.Next() {
-		var u AuthUser
+		var u models.AuthUser
 		var mustChange int
 		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &u.Role, &mustChange, &u.CreatedAt, &u.LastLogin); err != nil {
 			return nil, err
@@ -1203,7 +1061,7 @@ func (s *Store) CreateSession(token string, userID int64, expiresAt time.Time) e
 	return err
 }
 
-func (s *Store) GetUserBySession(token string) (*AuthUser, error) {
+func (s *Store) GetUserBySession(token string) (*models.AuthUser, error) {
 	var userID int64
 	var expiresAt string
 	err := s.db.QueryRow(`SELECT user_id, expires_at FROM auth_sessions WHERE token=?`, token).Scan(&userID, &expiresAt)
@@ -1278,7 +1136,7 @@ func (s *Store) UserHasBotAccess(userID, botID int64) bool {
 	return count > 0
 }
 
-func (s *Store) GetBotConfigsForUser(userID int64) ([]BotConfig, error) {
+func (s *Store) GetBotConfigsForUser(userID int64) ([]models.BotConfig, error) {
 	rows, err := s.db.Query(`
 		SELECT b.id, b.name, b.token, b.bot_username, b.manage_enabled, b.proxy_enabled, b.backend_url, b.secret_token, b.polling_timeout, b.offset_id, b.last_error, b.last_activity, b.updates_forwarded, b.source, b.backend_status, b.backend_checked_at, b.long_poll_enabled, b.disabled
 		FROM bots b
@@ -1289,9 +1147,9 @@ func (s *Store) GetBotConfigsForUser(userID int64) ([]BotConfig, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var bots []BotConfig
+	var bots []models.BotConfig
 	for rows.Next() {
-		var b BotConfig
+		var b models.BotConfig
 		if err := rows.Scan(&b.ID, &b.Name, &b.Token, &b.BotUsername, &b.ManageEnabled, &b.ProxyEnabled, &b.BackendURL, &b.SecretToken, &b.PollingTimeout, &b.Offset, &b.LastError, &b.LastActivity, &b.UpdatesForwarded, &b.Source, &b.BackendStatus, &b.BackendCheckedAt, &b.LongPollEnabled, &b.Disabled); err != nil {
 			return nil, err
 		}
@@ -1372,7 +1230,7 @@ func (s *Store) ToggleAPIKey(id int64, enabled bool) error {
 	return err
 }
 
-func (s *Store) GetUserByAPIKey(keyHash string) (*AuthUser, error) {
+func (s *Store) GetUserByAPIKey(keyHash string) (*models.AuthUser, error) {
 	var userID int64
 	var enabled int
 	err := s.db.QueryRow(`SELECT user_id, enabled FROM api_keys WHERE key_hash=?`, keyHash).Scan(&userID, &enabled)
@@ -1392,8 +1250,8 @@ func (s *Store) Close() error {
 
 // LLM config methods
 
-func (s *Store) GetLLMConfig() (*LLMConfig, error) {
-	var cfg LLMConfig
+func (s *Store) GetLLMConfig() (*models.LLMConfig, error) {
+	var cfg models.LLMConfig
 	var enabled int
 	err := s.db.QueryRow(`SELECT id, api_url, api_key, model, system_prompt, enabled FROM llm_config ORDER BY id LIMIT 1`).
 		Scan(&cfg.ID, &cfg.APIURL, &cfg.APIKey, &cfg.Model, &cfg.SystemPrompt, &enabled)
@@ -1407,7 +1265,7 @@ func (s *Store) GetLLMConfig() (*LLMConfig, error) {
 	return &cfg, nil
 }
 
-func (s *Store) SaveLLMConfig(cfg LLMConfig) error {
+func (s *Store) SaveLLMConfig(cfg models.LLMConfig) error {
 	var existing int64
 	s.db.QueryRow(`SELECT id FROM llm_config ORDER BY id LIMIT 1`).Scan(&existing)
 	if existing == 0 {
@@ -1420,7 +1278,7 @@ func (s *Store) SaveLLMConfig(cfg LLMConfig) error {
 	return err
 }
 
-// Bot description methods (separate from BotConfig to avoid struct conflicts)
+// Bot description methods (separate from models.BotConfig to avoid struct conflicts)
 
 func (s *Store) UpdateBotDescription(botID int64, description string) error {
 	_, err := s.db.Exec(`UPDATE bots SET description=? WHERE id=?`, description, botID)
@@ -1438,15 +1296,15 @@ func (s *Store) GetBotDescription(botID int64) (string, error) {
 
 // Bridge methods
 
-func (s *Store) GetBridges() ([]BridgeConfig, error) {
+func (s *Store) GetBridges() ([]models.BridgeConfig, error) {
 	rows, err := s.db.Query(`SELECT id, name, protocol, linked_bot_id, config, callback_url, enabled, created_at, last_activity, last_error FROM bridges ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var result []BridgeConfig
+	var result []models.BridgeConfig
 	for rows.Next() {
-		var b BridgeConfig
+		var b models.BridgeConfig
 		if err := rows.Scan(&b.ID, &b.Name, &b.Protocol, &b.LinkedBotID, &b.Config, &b.CallbackURL, &b.Enabled, &b.CreatedAt, &b.LastActivity, &b.LastError); err != nil {
 			return nil, err
 		}
@@ -1455,8 +1313,8 @@ func (s *Store) GetBridges() ([]BridgeConfig, error) {
 	return result, nil
 }
 
-func (s *Store) GetBridge(id int64) (*BridgeConfig, error) {
-	var b BridgeConfig
+func (s *Store) GetBridge(id int64) (*models.BridgeConfig, error) {
+	var b models.BridgeConfig
 	err := s.db.QueryRow(`SELECT id, name, protocol, linked_bot_id, config, callback_url, enabled, created_at, last_activity, last_error FROM bridges WHERE id=?`, id).
 		Scan(&b.ID, &b.Name, &b.Protocol, &b.LinkedBotID, &b.Config, &b.CallbackURL, &b.Enabled, &b.CreatedAt, &b.LastActivity, &b.LastError)
 	if err != nil {
@@ -1465,15 +1323,15 @@ func (s *Store) GetBridge(id int64) (*BridgeConfig, error) {
 	return &b, nil
 }
 
-func (s *Store) GetBridgesForBot(botID int64) ([]BridgeConfig, error) {
+func (s *Store) GetBridgesForBot(botID int64) ([]models.BridgeConfig, error) {
 	rows, err := s.db.Query(`SELECT id, name, protocol, linked_bot_id, config, callback_url, enabled, created_at, last_activity, last_error FROM bridges WHERE linked_bot_id=? ORDER BY id`, botID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var result []BridgeConfig
+	var result []models.BridgeConfig
 	for rows.Next() {
-		var b BridgeConfig
+		var b models.BridgeConfig
 		if err := rows.Scan(&b.ID, &b.Name, &b.Protocol, &b.LinkedBotID, &b.Config, &b.CallbackURL, &b.Enabled, &b.CreatedAt, &b.LastActivity, &b.LastError); err != nil {
 			return nil, err
 		}
@@ -1482,7 +1340,7 @@ func (s *Store) GetBridgesForBot(botID int64) ([]BridgeConfig, error) {
 	return result, nil
 }
 
-func (s *Store) AddBridge(b BridgeConfig) (int64, error) {
+func (s *Store) AddBridge(b models.BridgeConfig) (int64, error) {
 	res, err := s.db.Exec(`INSERT INTO bridges (name, protocol, linked_bot_id, config, callback_url, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		b.Name, b.Protocol, b.LinkedBotID, b.Config, b.CallbackURL, b.Enabled, time.Now().Format(time.RFC3339))
 	if err != nil {
@@ -1491,7 +1349,7 @@ func (s *Store) AddBridge(b BridgeConfig) (int64, error) {
 	return res.LastInsertId()
 }
 
-func (s *Store) UpdateBridge(b BridgeConfig) error {
+func (s *Store) UpdateBridge(b models.BridgeConfig) error {
 	_, err := s.db.Exec(`UPDATE bridges SET name=?, protocol=?, linked_bot_id=?, config=?, callback_url=?, enabled=? WHERE id=?`,
 		b.Name, b.Protocol, b.LinkedBotID, b.Config, b.CallbackURL, b.Enabled, b.ID)
 	return err
@@ -1543,8 +1401,8 @@ func (s *Store) SaveBridgeMsgMapping(bridgeID int64, externalMsgID string, teleg
 		bridgeID, externalMsgID, telegramMsgID, telegramChatID)
 }
 
-func (s *Store) GetBridgeMsgMapping(bridgeID int64, externalMsgID string) (*BridgeMsgMapping, error) {
-	var m BridgeMsgMapping
+func (s *Store) GetBridgeMsgMapping(bridgeID int64, externalMsgID string) (*models.BridgeMsgMapping, error) {
+	var m models.BridgeMsgMapping
 	err := s.db.QueryRow(`SELECT bridge_id, external_msg_id, telegram_msg_id, telegram_chat_id FROM bridge_msg_mappings WHERE bridge_id=? AND external_msg_id=?`,
 		bridgeID, externalMsgID).Scan(&m.BridgeID, &m.ExternalMsgID, &m.TelegramMsgID, &m.TelegramChatID)
 	if err != nil {
@@ -1558,4 +1416,15 @@ func (s *Store) GetBridgeMsgMappingReverse(bridgeID int64, telegramMsgID int) (s
 	err := s.db.QueryRow(`SELECT external_msg_id FROM bridge_msg_mappings WHERE bridge_id=? AND telegram_msg_id=?`,
 		bridgeID, telegramMsgID).Scan(&extMsgID)
 	return extMsgID, err
+}
+
+// DB returns the underlying database connection for advanced queries.
+func (s *Store) DB() *sql.DB {
+	return s.db
+}
+
+// UpdateDemoAdmin updates the default admin user for demo mode.
+func (s *Store) UpdateDemoAdmin(passwordHash string) error {
+	_, err := s.db.Exec(`UPDATE auth_users SET username='demo', password_hash=?, display_name='Demo User', must_change_password=0 WHERE id=1`, passwordHash)
+	return err
 }

@@ -10,6 +10,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/skrashevich/botmux/internal/auth"
+	"github.com/skrashevich/botmux/internal/models"
 )
 
 // pollAPI sends a GET to /api/updates/poll with the given query params and returns the decoded body.
@@ -24,7 +27,7 @@ func pollAPI(t *testing.T, h *e2eHarness, botID int64, offset, limit, timeout in
 	if err != nil {
 		t.Fatalf("pollAPI: NewRequest: %v", err)
 	}
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: h.session})
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: h.session})
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -55,7 +58,7 @@ func TestE2E_Updates_G01_OffsetManagement(t *testing.T) {
 	const token = "1001:g01token"
 	h.fake.RegisterBot(token, "g01bot", 1001)
 
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Name:          "G01 Bot",
 		Token:         token,
 		BotUsername:   "g01bot",
@@ -147,7 +150,7 @@ func TestE2E_Updates_G02_PollLoopProcessesUpdate(t *testing.T) {
 	const token = "1002:g02token"
 	h.fake.RegisterBot(token, "g02bot", 1002)
 
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Name:          "G02 Bot",
 		Token:         token,
 		BotUsername:   "g02bot",
@@ -165,7 +168,7 @@ func TestE2E_Updates_G02_PollLoopProcessesUpdate(t *testing.T) {
 	// Enqueue AFTER proxy is running so pollLoop has to fetch it.
 	h.fake.EnqueueUpdate(token, upd)
 
-	msg := h.WaitForMessage(botID, chatID, func(m Message) bool {
+	msg := h.WaitForMessage(botID, chatID, func(m models.Message) bool {
 		return m.Text == wantText
 	})
 
@@ -189,7 +192,7 @@ func TestE2E_Updates_G03_LongPollEndpoint(t *testing.T) {
 	const token = "1003:g03token"
 	h.fake.RegisterBot(token, "g03bot", 1003)
 
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Name:            "G03 Bot",
 		Token:           token,
 		BotUsername:     "g03bot",
@@ -262,7 +265,7 @@ func TestE2E_Updates_G04_MultiClientConcurrentPoll(t *testing.T) {
 	const token = "1004:g04token"
 	h.fake.RegisterBot(token, "g04bot", 1004)
 
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Name:            "G04 Bot",
 		Token:           token,
 		BotUsername:     "g04bot",
@@ -289,7 +292,7 @@ func TestE2E_Updates_G04_MultiClientConcurrentPoll(t *testing.T) {
 			if err != nil {
 				return
 			}
-			req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: h.session})
+			req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: h.session})
 
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {

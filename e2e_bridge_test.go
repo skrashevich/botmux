@@ -8,6 +8,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/skrashevich/botmux/internal/bot"
+	"github.com/skrashevich/botmux/internal/models"
 )
 
 // TestE2E_Bridge runs generic webhook bridge subtests (B-03, B-04, B-06).
@@ -22,7 +25,7 @@ func TestE2E_Bridge(t *testing.T) {
 // the in-memory BridgeManager. Returns the new bridge ID.
 func addWebhookBridge(t *testing.T, h *e2eHarness, botID int64, callbackURL string) int64 {
 	t.Helper()
-	bridgeID, err := h.store.AddBridge(BridgeConfig{
+	bridgeID, err := h.store.AddBridge(models.BridgeConfig{
 		Name:        "test-webhook",
 		Protocol:    "webhook",
 		LinkedBotID: botID,
@@ -42,9 +45,9 @@ func addWebhookBridge(t *testing.T, h *e2eHarness, botID int64, callbackURL stri
 // registers it with the ProxyManager so that ensureManagedBot short-circuits.
 func registerManagedBot(t *testing.T, h *e2eHarness, token string, botID int64) {
 	t.Helper()
-	managedBot, err := NewBot(token, h.store, botID, h.fake.URL())
+	managedBot, err := bot.NewBot(token, h.store, botID, h.fake.URL())
 	if err != nil {
-		t.Fatalf("registerManagedBot: NewBot(%s): %v", token, err)
+		t.Fatalf("registerManagedBot: bot.NewBot(%s): %v", token, err)
 	}
 	h.proxy.RegisterManagedBot(botID, managedBot)
 }
@@ -57,7 +60,7 @@ func testBridgeB03IncomingWebhook(t *testing.T) {
 
 	// Register a bot with management enabled so processUpdate saves messages.
 	h.fake.RegisterBot(token, "bridgebot_b03", 1001)
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:         token,
 		Name:          "bridgebot-b03",
 		BotUsername:   "bridgebot_b03",
@@ -70,7 +73,7 @@ func testBridgeB03IncomingWebhook(t *testing.T) {
 	bridgeID := addWebhookBridge(t, h, botID, "")
 
 	// Build the incoming message payload.
-	msg := BridgeIncomingMessage{
+	msg := models.BridgeIncomingMessage{
 		ExternalChatID: "channel-42",
 		ExternalUserID: "alice",
 		Username:       "Alice",
@@ -97,7 +100,7 @@ func testBridgeB03IncomingWebhook(t *testing.T) {
 	wantChatID := syntheticChatIDFor(bridgeID, "channel-42")
 
 	// Wait for processUpdate → processForManagement → store.SaveMessage to complete.
-	h.WaitForMessage(botID, wantChatID, func(m Message) bool {
+	h.WaitForMessage(botID, wantChatID, func(m models.Message) bool {
 		return m.Text == "hello from bridge"
 	})
 
@@ -121,10 +124,10 @@ func testBridgeB04OutgoingCallback(t *testing.T) {
 	// Capture outgoing callback POSTs.
 	var (
 		cbMu   sync.Mutex
-		cbReqs []BridgeOutgoingMessage
+		cbReqs []models.BridgeOutgoingMessage
 	)
 	callbackSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var out BridgeOutgoingMessage
+		var out models.BridgeOutgoingMessage
 		if err := json.NewDecoder(r.Body).Decode(&out); err == nil {
 			cbMu.Lock()
 			cbReqs = append(cbReqs, out)
@@ -138,7 +141,7 @@ func testBridgeB04OutgoingCallback(t *testing.T) {
 	h := setupE2E(t, withHTTPServer(), withBridge())
 
 	h.fake.RegisterBot(token, "bridgebot_b04", 1002)
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:         token,
 		Name:          "bridgebot-b04",
 		BotUsername:   "bridgebot_b04",
@@ -152,7 +155,7 @@ func testBridgeB04OutgoingCallback(t *testing.T) {
 
 	// Send an incoming message to establish the chat mapping.
 	// NotifyOutgoing needs GetBridgeChatMappingReverse to resolve the ext chat ID.
-	inMsg := BridgeIncomingMessage{
+	inMsg := models.BridgeIncomingMessage{
 		ExternalChatID: "channel-b04",
 		ExternalUserID: "bob",
 		Username:       "Bob",
@@ -176,7 +179,7 @@ func testBridgeB04OutgoingCallback(t *testing.T) {
 	tgChatID := syntheticChatIDFor(bridgeID, "channel-b04")
 
 	// Wait for the incoming message to be processed before firing outgoing.
-	h.WaitForMessage(botID, tgChatID, func(m Message) bool {
+	h.WaitForMessage(botID, tgChatID, func(m models.Message) bool {
 		return m.Text == "trigger mapping creation"
 	})
 
@@ -185,7 +188,7 @@ func testBridgeB04OutgoingCallback(t *testing.T) {
 	h.bridge.NotifyOutgoing(botID, tgChatID, "reply from bot", 9001, 0)
 
 	// Wait for the async HTTP POST to the callback server.
-	var got BridgeOutgoingMessage
+	var got models.BridgeOutgoingMessage
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		cbMu.Lock()
@@ -227,7 +230,7 @@ func testBridgeB06MappingPersistence(t *testing.T) {
 	h := setupE2E(t, withHTTPServer(), withBridge())
 
 	h.fake.RegisterBot(token, "bridgebot_b06", 1003)
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:         token,
 		Name:          "bridgebot-b06",
 		BotUsername:   "bridgebot_b06",
@@ -241,7 +244,7 @@ func testBridgeB06MappingPersistence(t *testing.T) {
 
 	sendMsg := func(extMsgID, text string) {
 		t.Helper()
-		msg := BridgeIncomingMessage{
+		msg := models.BridgeIncomingMessage{
 			ExternalChatID: "channel-sticky",
 			ExternalUserID: "carol",
 			Username:       "Carol",

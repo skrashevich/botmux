@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"testing"
+
+	"github.com/skrashevich/botmux/internal/models"
 )
 
 // TestE2E_Send covers S-01..S-07: send-method calls through the /tgapi/ proxy
@@ -22,7 +24,7 @@ func TestE2E_Send_S01_SendMessageText(t *testing.T) {
 	h := setupE2E(t, withHTTPServer())
 
 	token := "s01:sendmsg"
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:       token,
 		Name:        "s01bot",
 		BotUsername: "s01bot",
@@ -51,7 +53,7 @@ func TestE2E_Send_S01_SendMessageText(t *testing.T) {
 		t.Fatalf("expected non-zero message_id, got %v", result)
 	}
 
-	msg := h.WaitForMessage(botID, chatID, func(m Message) bool {
+	msg := h.WaitForMessage(botID, chatID, func(m models.Message) bool {
 		return m.Text == text
 	})
 
@@ -72,7 +74,7 @@ func TestE2E_Send_S02_SendMessageWithParseMode(t *testing.T) {
 	h := setupE2E(t, withHTTPServer())
 
 	token := "s02:parsemodebot"
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:       token,
 		Name:        "s02bot",
 		BotUsername: "s02bot",
@@ -82,10 +84,10 @@ func TestE2E_Send_S02_SendMessageWithParseMode(t *testing.T) {
 	const text = "<b>bold</b>"
 
 	status, resp := h.CallTgapi("sendMessage", token, map[string]any{
-		"chat_id":              chatID,
-		"text":                 text,
-		"parse_mode":           "HTML",
-		"reply_to_message_id":  42,
+		"chat_id":             chatID,
+		"text":                text,
+		"parse_mode":          "HTML",
+		"reply_to_message_id": 42,
 	})
 
 	if status != 200 {
@@ -98,7 +100,7 @@ func TestE2E_Send_S02_SendMessageWithParseMode(t *testing.T) {
 	// captureSentMessage parses the TG *response* (which doesn't echo reply_to),
 	// so ReplyToID will be 0 in the store. We verify the message is stored at all
 	// and the text round-trips correctly.
-	msg := h.WaitForMessage(botID, chatID, func(m Message) bool {
+	msg := h.WaitForMessage(botID, chatID, func(m models.Message) bool {
 		return m.Text == text
 	})
 
@@ -118,7 +120,7 @@ func TestE2E_Send_S03_SendPhoto(t *testing.T) {
 	h := setupE2E(t, withHTTPServer())
 
 	token := "s03:photobot"
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:       token,
 		Name:        "s03bot",
 		BotUsername: "s03bot",
@@ -139,7 +141,7 @@ func TestE2E_Send_S03_SendPhoto(t *testing.T) {
 		t.Fatalf("expected ok:true, got %v", resp)
 	}
 
-	msg := h.WaitForMessage(botID, chatID, func(m Message) bool {
+	msg := h.WaitForMessage(botID, chatID, func(m models.Message) bool {
 		return m.MediaType == "photo"
 	})
 
@@ -157,7 +159,7 @@ func TestE2E_Send_S04_SendVideoAndAnimation(t *testing.T) {
 	h := setupE2E(t, withHTTPServer())
 
 	token := "s04:videobot"
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:       token,
 		Name:        "s04bot",
 		BotUsername: "s04bot",
@@ -175,7 +177,7 @@ func TestE2E_Send_S04_SendVideoAndAnimation(t *testing.T) {
 		if ok, _ := resp["ok"].(bool); !ok {
 			t.Fatalf("expected ok:true, got %v", resp)
 		}
-		msg := h.WaitForMessage(botID, chatID, func(m Message) bool {
+		msg := h.WaitForMessage(botID, chatID, func(m models.Message) bool {
 			return m.MediaType == "video"
 		})
 		if msg.MediaType != "video" {
@@ -198,7 +200,7 @@ func TestE2E_Send_S04_SendVideoAndAnimation(t *testing.T) {
 		if ok, _ := resp["ok"].(bool); !ok {
 			t.Fatalf("expected ok:true, got %v", resp)
 		}
-		msg := h.WaitForMessage(botID, chatID, func(m Message) bool {
+		msg := h.WaitForMessage(botID, chatID, func(m models.Message) bool {
 			return m.MediaType == "animation"
 		})
 		if msg.MediaType != "animation" {
@@ -216,7 +218,7 @@ func TestE2E_Send_S05_SendSticker(t *testing.T) {
 	h := setupE2E(t, withHTTPServer())
 
 	token := "s05:stickerbot"
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:       token,
 		Name:        "s05bot",
 		BotUsername: "s05bot",
@@ -277,7 +279,7 @@ func TestE2E_Send_S05_SendSticker(t *testing.T) {
 		t.Fatalf("expected ok:true, got %v", resp)
 	}
 
-	msg := h.WaitForMessage(botID, chatID, func(m Message) bool {
+	msg := h.WaitForMessage(botID, chatID, func(m models.Message) bool {
 		return m.MediaType == "sticker"
 	})
 
@@ -298,7 +300,7 @@ func TestE2E_Send_S06_TableDrivenMediaTypes(t *testing.T) {
 	h := setupE2E(t, withHTTPServer())
 
 	token := "s06:mediabot"
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:       token,
 		Name:        "s06bot",
 		BotUsername: "s06bot",
@@ -331,7 +333,7 @@ func TestE2E_Send_S06_TableDrivenMediaTypes(t *testing.T) {
 				t.Fatalf("expected ok:true, got %v", resp)
 			}
 
-			msg := h.WaitForMessage(botID, tc.chatID, func(m Message) bool {
+			msg := h.WaitForMessage(botID, tc.chatID, func(m models.Message) bool {
 				return m.MediaType == tc.mediaType
 			})
 
@@ -351,7 +353,7 @@ func TestE2E_Send_S07_CopyMessage(t *testing.T) {
 	h := setupE2E(t, withHTTPServer())
 
 	token := "s07:copybot"
-	botID := h.AddBot(BotConfig{
+	botID := h.AddBot(models.BotConfig{
 		Token:       token,
 		Name:        "s07bot",
 		BotUsername: "s07bot",
@@ -364,7 +366,7 @@ func TestE2E_Send_S07_CopyMessage(t *testing.T) {
 	const destChatID int64 = 100071
 	const srcText = "original text"
 
-	sourceMsg := Message{
+	sourceMsg := models.Message{
 		ID:       srcMsgID,
 		BotID:    botID,
 		ChatID:   fromChatID,
@@ -399,7 +401,7 @@ func TestE2E_Send_S07_CopyMessage(t *testing.T) {
 	}
 
 	// The copied message must appear in store at destChatID.
-	msg := h.WaitForMessage(botID, destChatID, func(m Message) bool {
+	msg := h.WaitForMessage(botID, destChatID, func(m models.Message) bool {
 		return m.ID == int(newMsgID)
 	})
 

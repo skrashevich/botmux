@@ -1,4 +1,4 @@
-package main
+package bridge
 
 import (
 	"bytes"
@@ -10,79 +10,38 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/skrashevich/botmux/internal/bot"
+	"github.com/skrashevich/botmux/internal/models"
+	"github.com/skrashevich/botmux/internal/proxy"
+	"github.com/skrashevich/botmux/internal/store"
 )
 
-// BridgeConfig represents a protocol bridge in the database
-type BridgeConfig struct {
-	ID           int64  `json:"id"`
-	Name         string `json:"name"`
-	Protocol     string `json:"protocol"`      // "webhook", "slack", "discord", "meshtastic"
-	LinkedBotID  int64  `json:"linked_bot_id"` // Telegram bot that this bridge is linked to
-	Config       string `json:"config"`        // JSON protocol-specific configuration
-	CallbackURL  string `json:"callback_url"`  // URL to POST outgoing messages to
-	Enabled      bool   `json:"enabled"`
-	CreatedAt    string `json:"created_at"`
-	LastActivity string `json:"last_activity,omitempty"`
-	LastError    string `json:"last_error,omitempty"`
+// Manager manages all active protocol bridges
+type Manager struct {
+	store        *store.Store
+	proxy        *proxy.Manager
+	mu           sync.RWMutex
+	bridges      map[int64]*models.BridgeConfig
+	client       *http.Client
+	updateIDSeq  atomic.Int64 // synthetic update_id generator
+	tgAPIBaseURL string
 }
 
-// BridgeIncomingMessage is the simple format external sources POST to us
-type BridgeIncomingMessage struct {
-	ExternalChatID string `json:"chat_id"`    // external chat/channel ID (string for flexibility)
-	ExternalUserID string `json:"user_id"`    // external user ID
-	Username       string `json:"username"`   // display name
-	Text           string `json:"text"`       // message text
-	ExternalMsgID  string `json:"message_id"` // external message ID
-	ReplyToMsgID   string `json:"reply_to"`   // external reply-to message ID
-}
-
-// BridgeOutgoingMessage is what we POST back to the bridge callback
-type BridgeOutgoingMessage struct {
-	BridgeID       int64  `json:"bridge_id"`
-	ExternalChatID string `json:"chat_id"` // mapped back to external chat ID
-	Text           string `json:"text"`
-	TelegramMsgID  int    `json:"telegram_msg_id"`
-	ReplyToExtID   string `json:"reply_to,omitempty"` // external msg ID being replied to
-}
-
-// BridgeChatMapping tracks external_chat_id <-> telegram_chat_id
-type BridgeChatMapping struct {
-	BridgeID       int64  `json:"bridge_id"`
-	ExternalChatID string `json:"external_chat_id"`
-	TelegramChatID int64  `json:"telegram_chat_id"`
-}
-
-// BridgeMsgMapping tracks external_msg_id <-> telegram_msg_id for reply threading
-type BridgeMsgMapping struct {
-	BridgeID       int64  `json:"bridge_id"`
-	ExternalMsgID  string `json:"external_msg_id"`
-	TelegramMsgID  int    `json:"telegram_msg_id"`
-	TelegramChatID int64  `json:"telegram_chat_id"`
-}
-
-// BridgeManager manages all active protocol bridges
-type BridgeManager struct {
-	store       *Store
-	proxy       *ProxyManager
-	mu          sync.RWMutex
-	bridges     map[int64]*BridgeConfig
-	client      *http.Client
-	updateIDSeq atomic.Int64 // synthetic update_id generator
-}
-
-func NewBridgeManager(store *Store, proxy *ProxyManager) *BridgeManager {
-	bm := &BridgeManager{
-		store:   store,
-		proxy:   proxy,
-		bridges: make(map[int64]*BridgeConfig),
-		client:  &http.Client{Timeout: 15 * time.Second},
+func NewManager(store *store.Store, proxy *proxy.Manager, tgAPIBaseURL string) *Manager {
+	bm := &Manager{
+		store:        store,
+		proxy:        proxy,
+		bridges:      make(map[int64]*models.BridgeConfig),
+		client:       &http.Client{Timeout: 15 * time.Second},
+		tgAPIBaseURL: tgAPIBaseURL,
 	}
 	bm.updateIDSeq.Store(time.Now().Unix())
 	return bm
 }
 
 // Start loads all enabled bridges
-func (bm *BridgeManager) Start() {
+func (bm *Manager) Start() {
 	configs, err := bm.store.GetBridges()
 	if err != nil {
 		log.Printf("[bridge] Start: failed to load bridges: %v", err)
@@ -101,7 +60,7 @@ func (bm *BridgeManager) Start() {
 }
 
 // Reload reloads a single bridge config (after update)
-func (bm *BridgeManager) Reload(bridgeID int64) {
+func (bm *Manager) Reload(bridgeID int64) {
 	cfg, err := bm.store.GetBridge(bridgeID)
 	if err != nil {
 		log.Printf("[bridge] Reload: bridge %d not found: %v", bridgeID, err)
@@ -120,14 +79,14 @@ func (bm *BridgeManager) Reload(bridgeID int64) {
 }
 
 // Remove stops and removes a bridge
-func (bm *BridgeManager) Remove(bridgeID int64) {
+func (bm *Manager) Remove(bridgeID int64) {
 	bm.mu.Lock()
 	delete(bm.bridges, bridgeID)
 	bm.mu.Unlock()
 }
 
 // HandleIncoming processes an incoming message from a bridge and injects it as a Telegram update
-func (bm *BridgeManager) HandleIncoming(bridgeID int64, msg BridgeIncomingMessage) error {
+func (bm *Manager) HandleIncoming(bridgeID int64, msg models.BridgeIncomingMessage) error {
 	bm.mu.RLock()
 	cfg, ok := bm.bridges[bridgeID]
 	bm.mu.RUnlock()
@@ -195,7 +154,7 @@ func (bm *BridgeManager) HandleIncoming(bridgeID int64, msg BridgeIncomingMessag
 	log.Printf("[bridge] id=%d injecting update for bot %d: chat=%d from=%q text=%q",
 		bridgeID, cfg.LinkedBotID, tgChatID, msg.Username, truncate(msg.Text, 80))
 
-	bm.proxy.processUpdate(cfg.LinkedBotID, update)
+	bm.proxy.ProcessUpdate(cfg.LinkedBotID, update)
 
 	// Update activity
 	bm.store.UpdateBridgeActivity(bridgeID, "")
@@ -203,7 +162,7 @@ func (bm *BridgeManager) HandleIncoming(bridgeID int64, msg BridgeIncomingMessag
 }
 
 // NotifyOutgoing sends an outgoing bot message to the appropriate bridge callback
-func (bm *BridgeManager) NotifyOutgoing(botID int64, chatID int64, text string, telegramMsgID int, replyToMsgID int) {
+func (bm *Manager) NotifyOutgoing(botID int64, chatID int64, text string, telegramMsgID int, replyToMsgID int) {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
 
@@ -219,7 +178,7 @@ func (bm *BridgeManager) NotifyOutgoing(botID int64, chatID int64, text string, 
 		}
 
 		// Slack bridges: send directly via Slack API
-		if isSlackBridge(cfg) {
+		if IsSlackBridge(cfg) {
 			go bm.notifySlackOutgoing(cfg, extChatID, text, replyToMsgID)
 			continue
 		}
@@ -229,7 +188,7 @@ func (bm *BridgeManager) NotifyOutgoing(botID int64, chatID int64, text string, 
 			continue
 		}
 
-		outMsg := BridgeOutgoingMessage{
+		outMsg := models.BridgeOutgoingMessage{
 			BridgeID:       cfg.ID,
 			ExternalChatID: extChatID,
 			Text:           text,
@@ -247,7 +206,7 @@ func (bm *BridgeManager) NotifyOutgoing(botID int64, chatID int64, text string, 
 	}
 }
 
-func (bm *BridgeManager) postCallback(cfg *BridgeConfig, msg BridgeOutgoingMessage) {
+func (bm *Manager) postCallback(cfg *models.BridgeConfig, msg models.BridgeOutgoingMessage) {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		log.Printf("[bridge] id=%d callback marshal error: %v", cfg.ID, err)
@@ -271,15 +230,15 @@ func (bm *BridgeManager) postCallback(cfg *BridgeConfig, msg BridgeOutgoingMessa
 	}
 }
 
-func (bm *BridgeManager) ensureManagedBot(botID int64) {
+func (bm *Manager) ensureManagedBot(botID int64) {
 	if bm.proxy.GetManagedBot(botID) != nil {
 		return
 	}
-	bot, err := bm.store.GetBotConfig(botID)
+	cfg, err := bm.store.GetBotConfig(botID)
 	if err != nil {
 		return
 	}
-	managedBot, err := NewBot(bot.Token, bm.store, botID, telegramAPIURL)
+	managedBot, err := bot.NewBot(cfg.Token, bm.store, botID, bm.tgAPIBaseURL)
 	if err != nil {
 		log.Printf("[bridge] ensureManagedBot: failed for bot %d: %v", botID, err)
 		return
@@ -288,7 +247,7 @@ func (bm *BridgeManager) ensureManagedBot(botID int64) {
 }
 
 // syntheticChatID generates a deterministic negative chat ID for a bridge+external chat
-func (bm *BridgeManager) syntheticChatID(bridgeID int64, externalChatID string) int64 {
+func (bm *Manager) syntheticChatID(bridgeID int64, externalChatID string) int64 {
 	// Use negative IDs to avoid collision with real Telegram chat IDs
 	// Telegram uses negative IDs for groups/channels, but our synthetic range is distinct
 	h := int64(0)
@@ -302,7 +261,7 @@ func (bm *BridgeManager) syntheticChatID(bridgeID int64, externalChatID string) 
 }
 
 // syntheticUserID generates a deterministic user ID from external user ID
-func (bm *BridgeManager) syntheticUserID(externalUserID string) int64 {
+func (bm *Manager) syntheticUserID(externalUserID string) int64 {
 	h := int64(9000000000) // base to avoid collision with real Telegram user IDs
 	for _, c := range externalUserID {
 		h = h*31 + int64(c)
@@ -314,36 +273,43 @@ func (bm *BridgeManager) syntheticUserID(externalUserID string) int64 {
 }
 
 // InstallHooks sets the onMessageSent callback on all currently managed bots
-func (bm *BridgeManager) InstallHooks() {
-	bm.proxy.mu.Lock()
-	defer bm.proxy.mu.Unlock()
-	for botID, bot := range bm.proxy.managedBots {
-		bot.onMessageSent = bm.NotifyOutgoing
+func (bm *Manager) InstallHooks() {
+	bm.proxy.ForEachManagedBot(func(botID int64, b *bot.Bot) {
+		b.SetOnMessageSent(bm.NotifyOutgoing)
 		log.Printf("[bridge] installed outgoing hook on bot %d", botID)
-	}
+	})
 }
 
 // InstallHookOnBot sets the onMessageSent callback on a specific bot
-func (bm *BridgeManager) InstallHookOnBot(bot *Bot) {
-	bot.onMessageSent = bm.NotifyOutgoing
+func (bm *Manager) InstallHookOnBot(b *bot.Bot) {
+	b.SetOnMessageSent(bm.NotifyOutgoing)
 }
 
 // GetBridge returns a bridge config by ID (from in-memory cache)
-func (bm *BridgeManager) GetBridge(bridgeID int64) *BridgeConfig {
+func (bm *Manager) GetBridge(bridgeID int64) *models.BridgeConfig {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
 	return bm.bridges[bridgeID]
 }
 
 // GetBridgesForBot returns all bridges linked to a specific bot
-func (bm *BridgeManager) GetBridgesForBot(botID int64) []*BridgeConfig {
+func (bm *Manager) GetBridgesForBot(botID int64) []*models.BridgeConfig {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
-	var result []*BridgeConfig
+	var result []*models.BridgeConfig
 	for _, cfg := range bm.bridges {
 		if cfg.LinkedBotID == botID {
 			result = append(result, cfg)
 		}
 	}
 	return result
+}
+
+// truncate shortens s to at most maxLen runes, appending "..." if truncated.
+func truncate(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
 }

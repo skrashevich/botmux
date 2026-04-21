@@ -1,4 +1,4 @@
-package main
+package logbuf
 
 import (
 	"fmt"
@@ -25,8 +25,8 @@ type LogBuffer struct {
 	subs   map[chan LogEntry]struct{}
 }
 
-// NewLogBuffer creates a ring buffer that holds up to `size` log entries
-func NewLogBuffer(size int) *LogBuffer {
+// New creates a ring buffer that holds up to `size` log entries
+func New(size int) *LogBuffer {
 	return &LogBuffer{
 		entries: make([]LogEntry, size),
 		size:    size,
