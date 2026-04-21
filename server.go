@@ -3552,7 +3552,7 @@ func parseTelegramRequestParams(body []byte, contentType string) (telegramReques
 		params := telegramRequestParams{
 			ChatID:        valueInt64(values.Get("chat_id")),
 			FromChatID:    valueInt64(values.Get("from_chat_id")),
-			MessageID:     int(valueInt64(values.Get("message_id"))),
+			MessageID:     valueInt(values.Get("message_id")),
 			Caption:       values.Get("caption"),
 			RemoveCaption: valueBool(values.Get("remove_caption")),
 		}
@@ -3594,6 +3594,14 @@ func rawBool(value json.RawMessage) bool {
 		return valueBool(s)
 	}
 	return false
+}
+
+func valueInt(value string) int {
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func valueInt64(value string) int64 {
