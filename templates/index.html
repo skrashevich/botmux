@@ -305,6 +305,8 @@ body::before {
 .msg-row.msg-deleted { opacity: 0.45; border-left-color: var(--magenta) !important; }
 .msg-row.msg-deleted .msg-text { text-decoration: line-through; color: var(--text3); }
 .msg-deleted-badge { font-family: var(--ff-mono); font-size: 9px; font-weight: 600; color: var(--magenta); background: rgba(255,51,102,0.1); border: 1px solid rgba(255,51,102,0.2); padding: 1px 6px; border-radius: 2px; text-transform: uppercase; white-space: nowrap; }
+.msg-bot-badge { font-family: var(--ff-mono); font-size: 9px; font-weight: 600; color: var(--blue, #60a5fa); background: rgba(96,165,250,0.1); border: 1px solid rgba(96,165,250,0.2); padding: 1px 5px; border-radius: 2px; text-transform: uppercase; white-space: nowrap; margin-left: 4px; }
+.msg-sender-tag { font-family: var(--ff-mono); font-size: 10px; color: var(--green, #34d399); opacity: 0.8; margin-left: 4px; white-space: nowrap; }
 
 /* Media in messages */
 .msg-media { margin: 4px 0; }
@@ -785,6 +787,7 @@ body::before {
 [data-theme="light"] .badge-proxy { background: rgba(219,39,119,0.1); border-color: rgba(219,39,119,0.3); }
 [data-theme="light"] .msg-row:hover { background: var(--surface2); }
 [data-theme="light"] .msg-deleted-badge { background: rgba(219,39,119,0.08); border-color: rgba(219,39,119,0.2); }
+[data-theme="light"] .msg-bot-badge { background: rgba(37,99,235,0.08); border-color: rgba(37,99,235,0.2); color: #2563eb; }
 [data-theme="light"] .stat-card { background: var(--surface); }
 [data-theme="light"] .stat-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
 [data-theme="light"] .stat-card::before { opacity: 0.7; }
@@ -3352,7 +3355,7 @@ let messageEventSource = null;
 function renderMsgRow(m, msgMap) {
   return `<div class="msg-row ${m.deleted ? 'msg-deleted' : ''}" id="msg-${m.id}">
     ${m.reply_to_id ? `<span class="msg-reply-badge" onclick="scrollToMsg(${m.reply_to_id})">↩ ${t('replying_to')} ${msgMap[m.reply_to_id] ? esc(msgMap[m.reply_to_id].from_user) : '#' + m.reply_to_id}</span>` : ''}
-    <span class="msg-user${m.from_id ? ' clickable' : ''}" title="ID: ${m.from_id}" ${m.from_id ? `onclick="showUserProfile(${m.from_id})"` : ''}>${esc(m.from_user)}</span>
+    <span class="msg-user${m.from_id ? ' clickable' : ''}" title="ID: ${m.from_id}" ${m.from_id ? `onclick="showUserProfile(${m.from_id})"` : ''}>${esc(m.from_user)}</span>${m.from_is_bot ? `<span class="msg-bot-badge">${t('bot_badge')}</span>` : ''}${m.sender_tag ? `<span class="msg-sender-tag">${esc(m.sender_tag)}</span>` : ''}
     <span class="msg-text">${renderMsgContent(m)}</span>
     ${m.deleted ? `<span class="msg-deleted-badge">${t('deleted')}</span>` : ''}
     <span class="msg-time">${m.date_str}</span>
@@ -3510,7 +3513,7 @@ async function doSearch() {
     const msgs = await api(`/api/messages/search?bot_id=${currentBotID}&chat_id=${currentChat.id}&q=${encodeURIComponent(q)}`);
     document.getElementById('messagesList').innerHTML = msgs.map(m => `
       <div class="msg-row ${m.deleted ? 'msg-deleted' : ''}">
-        <span class="msg-user${m.from_id ? ' clickable' : ''}" ${m.from_id ? `onclick="showUserProfile(${m.from_id})"` : ''}>${esc(m.from_user)}</span>
+        <span class="msg-user${m.from_id ? ' clickable' : ''}" ${m.from_id ? `onclick="showUserProfile(${m.from_id})"` : ''}>${esc(m.from_user)}</span>${m.from_is_bot ? `<span class="msg-bot-badge">${t('bot_badge')}</span>` : ''}${m.sender_tag ? `<span class="msg-sender-tag">${esc(m.sender_tag)}</span>` : ''}
         <span class="msg-text">${m.media_type ? renderMsgContent(m) : highlight(esc(m.text), esc(q))}</span>
         ${m.deleted ? `<span class="msg-deleted-badge">${t('deleted')}</span>` : ''}
         <span class="msg-time">${m.date_str}</span>

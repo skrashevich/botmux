@@ -1042,6 +1042,7 @@ func (pm *ProxyManager) getUpdates(ctx context.Context, token string, offset int
 		"offset":  offset,
 		"timeout": timeout,
 		"limit":   100,
+		"allowed_updates": allowedUpdateTypes,
 	})
 
 	maskedToken := token
@@ -1288,24 +1289,47 @@ func (pm *ProxyManager) GetManagedBot(botID int64) *Bot {
 func summarizeUpdate(update map[string]any) string {
 	updateID, _ := update["update_id"].(float64)
 	summary := fmt.Sprintf("update_id=%d", int64(updateID))
-	if msg, ok := update["message"].(map[string]any); ok {
-		if text, ok := msg["text"].(string); ok {
-			if len(text) > 80 {
-				text = text[:80] + "..."
+
+	// Message-like update types (contain text, from, chat fields)
+	for _, key := range []string{
+		"message", "edited_message", "channel_post", "edited_channel_post",
+		"business_message", "edited_business_message",
+	} {
+		if msg, ok := update[key].(map[string]any); ok {
+			summary += " type=" + key
+			if text, ok := msg["text"].(string); ok {
+				summary += fmt.Sprintf(" text=%q", truncate(text, 80))
 			}
-			summary += fmt.Sprintf(" text=%q", text)
-		}
-		if from, ok := msg["from"].(map[string]any); ok {
-			if uname, ok := from["username"].(string); ok {
-				summary += fmt.Sprintf(" from=@%s", uname)
+			if from, ok := msg["from"].(map[string]any); ok {
+				if uname, ok := from["username"].(string); ok {
+					summary += fmt.Sprintf(" from=@%s", uname)
+				}
 			}
-		}
-		if chat, ok := msg["chat"].(map[string]any); ok {
-			if chatID, ok := chat["id"].(float64); ok {
-				summary += fmt.Sprintf(" chat_id=%d", int64(chatID))
+			if chat, ok := msg["chat"].(map[string]any); ok {
+				if chatID, ok := chat["id"].(float64); ok {
+					summary += fmt.Sprintf(" chat_id=%d", int64(chatID))
+				}
 			}
+			return summary
 		}
 	}
+
+	// Non-message update types
+	for _, key := range []string{
+		"callback_query", "message_reaction", "message_reaction_count",
+		"inline_query", "poll", "poll_answer",
+		"my_chat_member", "chat_member", "chat_join_request",
+		"chat_boost", "removed_chat_boost", "managed_bot",
+		"business_connection", "deleted_business_messages",
+		"purchased_paid_media", "pre_checkout_query", "shipping_query",
+	} {
+		if _, ok := update[key]; ok {
+			summary += " type=" + key
+			return summary
+		}
+	}
+
+	summary += " type=unknown keys=" + fmt.Sprintf("%v", mapKeys(update))
 	return summary
 }
 

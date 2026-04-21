@@ -10,6 +10,18 @@ import (
 	tgbotapi "github.com/OvyFlash/telegram-bot-api"
 )
 
+// allowedUpdateTypes is the shared list of update types requested from the Telegram API.
+// Used by both StartPolling (library path) and ProxyManager.getUpdates (raw HTTP path).
+var allowedUpdateTypes = []string{
+	"message", "edited_message",
+	"channel_post", "edited_channel_post",
+	"callback_query",
+	"my_chat_member", "chat_member", "chat_join_request",
+	"business_message", "edited_business_message",
+	"message_reaction",
+	"poll", "poll_answer",
+}
+
 // OnMessageSentFunc is called when a bot sends a message (for bridge outgoing notifications)
 type OnMessageSentFunc func(botID int64, chatID int64, text string, msgID int, replyToMsgID int)
 
@@ -88,7 +100,7 @@ func (b *Bot) StartPolling() {
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
-	u.AllowedUpdates = []string{"message", "channel_post", "my_chat_member", "chat_member"}
+	u.AllowedUpdates = allowedUpdateTypes
 
 	updates := b.api.GetUpdatesChan(u)
 
@@ -127,11 +139,20 @@ func (b *Bot) processUpdate(update tgbotapi.Update) {
 	if update.EditedChannelPost != nil {
 		b.handleChannelPost(update.EditedChannelPost)
 	}
+	if update.BusinessMessage != nil {
+		b.handleMessage(update.BusinessMessage)
+	}
+	if update.EditedBusinessMessage != nil {
+		b.handleMessage(update.EditedBusinessMessage)
+	}
 	if update.MyChatMember != nil {
 		b.handleMyChatMember(update.MyChatMember)
 	}
 	if update.ChatMember != nil {
 		b.handleChatMember(update.ChatMember)
+	}
+	if update.ChatJoinRequest != nil {
+		b.trackChat(&update.ChatJoinRequest.Chat)
 	}
 	if update.CallbackQuery != nil {
 		b.handleCallbackQuery(update.CallbackQuery)
@@ -192,7 +213,7 @@ func formatUsername(user *tgbotapi.User) string {
 // extractMedia returns media type and file_id from a Telegram message
 func extractMedia(msg *tgbotapi.Message) (mediaType, fileID string) {
 	switch {
-	case msg.Photo != nil && len(msg.Photo) > 0:
+	case len(msg.Photo) > 0:
 		// Pick the largest photo (last in array)
 		mediaType = "photo"
 		fileID = msg.Photo[len(msg.Photo)-1].FileID
@@ -230,9 +251,11 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 
 	fromUser := ""
 	var fromID int64
+	var fromIsBot bool
 	if msg.From != nil {
 		fromUser = formatUsername(msg.From)
 		fromID = msg.From.ID
+		fromIsBot = msg.From.IsBot
 		b.store.TrackUser(msg.Chat.ID, fromID, fromUser)
 	}
 
@@ -266,6 +289,8 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 		ReplyToID: replyToID,
 		MediaType: mediaType,
 		FileID:    fileID,
+		FromIsBot: fromIsBot,
+		SenderTag: msg.SenderTag,
 	}
 	if err := b.store.SaveMessage(m); err != nil {
 		log.Printf("Error saving message: %v", err)
@@ -296,6 +321,7 @@ func (b *Bot) handleChannelPost(msg *tgbotapi.Message) {
 		Date:      int64(msg.Date) * 1000,
 		MediaType: mediaType,
 		FileID:    fileID,
+		SenderTag: msg.SenderTag,
 	}
 	if err := b.store.SaveMessage(m); err != nil {
 		log.Printf("Error saving channel post: %v", err)

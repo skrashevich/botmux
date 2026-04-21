@@ -63,6 +63,8 @@ type Message struct {
 	Deleted   bool   `json:"deleted"`
 	MediaType string `json:"media_type,omitempty"` // photo, video, animation, sticker, voice, audio, document, video_note
 	FileID    string `json:"file_id,omitempty"`
+	FromIsBot bool   `json:"from_is_bot,omitempty"`
+	SenderTag string `json:"sender_tag,omitempty"`
 }
 
 type ChatStats struct {
@@ -325,6 +327,14 @@ func (s *Store) migrate() error {
 		s.db.Exec(`ALTER TABLE messages ADD COLUMN file_id TEXT NOT NULL DEFAULT ''`)
 	}
 
+	// Add from_is_bot and sender_tag columns if missing (Bot API 9.6)
+	var hasFromIsBot int
+	s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name='from_is_bot'`).Scan(&hasFromIsBot)
+	if hasFromIsBot == 0 {
+		s.db.Exec(`ALTER TABLE messages ADD COLUMN from_is_bot INTEGER NOT NULL DEFAULT 0`)
+		s.db.Exec(`ALTER TABLE messages ADD COLUMN sender_tag TEXT NOT NULL DEFAULT ''`)
+	}
+
 	// Add backend health columns if missing
 	var hasBackendStatus int
 	s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('bots') WHERE name='backend_status'`).Scan(&hasBackendStatus)
@@ -436,6 +446,8 @@ func (s *Store) migrate() error {
 			deleted INTEGER NOT NULL DEFAULT 0,
 			media_type TEXT NOT NULL DEFAULT '',
 			file_id TEXT NOT NULL DEFAULT '',
+			from_is_bot INTEGER NOT NULL DEFAULT 0,
+			sender_tag TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (bot_id, chat_id, id)
 		)`)
 		// Copy data, deriving bot_id from chats table where possible
@@ -697,15 +709,21 @@ func (s *Store) DeleteChat(botID int64, chatID int64) error {
 // text/media so streaming bot edits (editMessageText, EditedMessage) surface
 // in the UI; identity fields and the deleted tombstone are preserved.
 func (s *Store) SaveMessage(m Message) error {
+	fromIsBot := 0
+	if m.FromIsBot {
+		fromIsBot = 1
+	}
 	res, err := s.db.Exec(`
-		INSERT INTO messages (id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, media_type, file_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO messages (id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, media_type, file_id, from_is_bot, sender_tag)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(bot_id, chat_id, id) DO UPDATE SET
 			text       = excluded.text,
 			media_type = CASE WHEN excluded.media_type != '' THEN excluded.media_type ELSE messages.media_type END,
-			file_id    = CASE WHEN excluded.file_id    != '' THEN excluded.file_id    ELSE messages.file_id    END
+			file_id    = CASE WHEN excluded.file_id    != '' THEN excluded.file_id    ELSE messages.file_id    END,
+			sender_tag = CASE WHEN excluded.sender_tag != '' THEN excluded.sender_tag ELSE messages.sender_tag END,
+			from_is_bot = excluded.from_is_bot
 		WHERE messages.deleted = 0
-	`, m.ID, m.BotID, m.ChatID, m.FromUser, m.FromID, m.Text, m.Date, m.ReplyToID, m.MediaType, m.FileID)
+	`, m.ID, m.BotID, m.ChatID, m.FromUser, m.FromID, m.Text, m.Date, m.ReplyToID, m.MediaType, m.FileID, fromIsBot, m.SenderTag)
 	if err != nil {
 		return err
 	}
@@ -719,7 +737,7 @@ func (s *Store) SaveMessage(m Message) error {
 
 func (s *Store) GetMessages(botID, chatID int64, limit, offset int) ([]Message, error) {
 	rows, err := s.db.Query(`
-		SELECT id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id
+		SELECT id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id, from_is_bot, sender_tag
 		FROM messages WHERE bot_id = ? AND chat_id = ? ORDER BY id DESC LIMIT ? OFFSET ?
 	`, botID, chatID, limit, offset)
 	if err != nil {
@@ -730,7 +748,7 @@ func (s *Store) GetMessages(botID, chatID int64, limit, offset int) ([]Message, 
 	var msgs []Message
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID); err != nil {
+		if err := rows.Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID, &m.FromIsBot, &m.SenderTag); err != nil {
 			return nil, err
 		}
 		m.DateStr = time.UnixMilli(m.Date).Format("2006-01-02 15:04:05")
@@ -742,9 +760,9 @@ func (s *Store) GetMessages(botID, chatID int64, limit, offset int) ([]Message, 
 func (s *Store) GetMessage(botID, chatID int64, messageID int) (*Message, error) {
 	var m Message
 	err := s.db.QueryRow(`
-		SELECT id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id
+		SELECT id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id, from_is_bot, sender_tag
 		FROM messages WHERE bot_id = ? AND chat_id = ? AND id = ?
-	`, botID, chatID, messageID).Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID)
+	`, botID, chatID, messageID).Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID, &m.FromIsBot, &m.SenderTag)
 	if err != nil {
 		return nil, err
 	}
@@ -800,7 +818,7 @@ func (s *Store) GetChatStats(botID, chatID int64) (*ChatStats, error) {
 
 func (s *Store) SearchMessages(botID, chatID int64, query string, limit int) ([]Message, error) {
 	rows, err := s.db.Query(`
-		SELECT id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id
+		SELECT id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id, from_is_bot, sender_tag
 		FROM messages WHERE bot_id = ? AND chat_id = ? AND text LIKE ?
 		ORDER BY id DESC LIMIT ?
 	`, botID, chatID, "%"+query+"%", limit)
@@ -812,7 +830,7 @@ func (s *Store) SearchMessages(botID, chatID int64, query string, limit int) ([]
 	var msgs []Message
 	for rows.Next() {
 		var m Message
-		rows.Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID)
+		rows.Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID, &m.FromIsBot, &m.SenderTag)
 		m.DateStr = time.UnixMilli(m.Date).Format("2006-01-02 15:04:05")
 		msgs = append(msgs, m)
 	}
