@@ -375,6 +375,11 @@ func (pm *ProxyManager) Start() {
 		pm.mu.Lock()
 		isWebhook := pm.webhookBots[bot.ID]
 		pm.mu.Unlock()
+		if bot.Disabled {
+			log.Printf("[proxy] Start: bot id=%d is disabled, skipping", bot.ID)
+			continue
+		}
+
 		if isWebhook {
 			log.Printf("[proxy] Start: bot id=%d uses webhook mode, skipping polling", bot.ID)
 			continue
@@ -461,10 +466,19 @@ func (pm *ProxyManager) RestartBot(botID int64) error {
 		return err
 	}
 
-	log.Printf("[proxy] RestartBot: botID=%d source=%s manage=%v proxy=%v backend=%q",
-		botID, bot.Source, bot.ManageEnabled, bot.ProxyEnabled, bot.BackendURL)
+	log.Printf("[proxy] RestartBot: botID=%d source=%s manage=%v proxy=%v backend=%q disabled=%v",
+		botID, bot.Source, bot.ManageEnabled, bot.ProxyEnabled, bot.BackendURL, bot.Disabled)
 
 	pm.stopBot(botID)
+
+	if bot.Disabled {
+		pm.UnregisterManagedBot(botID)
+		pm.mu.Lock()
+		delete(pm.webhookBots, botID)
+		pm.mu.Unlock()
+		log.Printf("[proxy] RestartBot: bot id=%d is disabled, stopped and unregistered", botID)
+		return nil
+	}
 
 	pm.mu.Lock()
 	isWebhook := pm.webhookBots[botID]

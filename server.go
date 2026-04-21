@@ -163,6 +163,7 @@ func (s *Server) BuildMux() *http.ServeMux {
 	mux.HandleFunc("/api/bots/add", s.adminOnly(s.handleBotAdd))
 	mux.HandleFunc("/api/bots/update", s.adminOnly(s.handleBotUpdate))
 	mux.HandleFunc("/api/bots/delete", s.adminOnly(s.handleBotDelete))
+	mux.HandleFunc("/api/bots/toggle-disabled", s.adminOnly(s.handleToggleDisabled))
 	mux.HandleFunc("/api/bots/validate", s.adminOnly(s.handleBotValidate))
 	mux.HandleFunc("/api/bots/health", s.authMiddleware(s.handleBotHealth))
 
@@ -488,6 +489,33 @@ func (s *Server) handleBotDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleToggleDisabled(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+
+	bot, err := s.store.GetBotConfig(id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	newDisabled := !bot.Disabled
+	if err := s.store.SetBotDisabled(id, newDisabled); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	if err := s.proxy.RestartBot(id); err != nil {
+		log.Printf("[server] handleToggleDisabled: RestartBot failed for id=%d: %v", id, err)
+	}
+
+	bot.Disabled = newDisabled
+	writeJSON(w, bot)
 }
 
 // handleBotValidate validates a Telegram bot token and returns the bot username.

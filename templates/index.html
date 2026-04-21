@@ -126,6 +126,7 @@ body::before {
   display: flex; align-items: center; gap: 8px;
 }
 .bot-item:hover { background: var(--surface2); border-color: var(--border); }
+.bot-item.disabled { opacity: 0.5; }
 .bot-item.active {
   background: var(--surface2);
   border-color: var(--cyan-dim);
@@ -2690,13 +2691,14 @@ async function loadBots() {
 function renderBotList() {
   const list = document.getElementById('botList');
   list.innerHTML = allBots.map(b => {
-    const statusClass = b.last_error ? 'status-error' : (b.running ? 'status-running' : 'status-stopped');
+    const statusClass = b.disabled ? 'status-stopped' : (b.last_error ? 'status-error' : (b.running ? 'status-running' : 'status-stopped'));
     const badges = [];
+    if (b.disabled) badges.push(`<span class="badge" style="font-size:8px;padding:0 4px;background:var(--magenta-dim,rgba(255,85,85,0.1));color:var(--magenta)">${t('bot_disabled').toUpperCase()}</span>`);
     if (b.manage_enabled) badges.push('<span class="badge badge-admin" style="font-size:8px;padding:0 4px">MGR</span>');
     if (b.proxy_enabled) badges.push('<span class="badge badge-proxy" style="font-size:8px;padding:0 4px">PRX</span>');
     if (b.long_poll_enabled) badges.push('<span class="badge" style="font-size:8px;padding:0 4px;background:var(--cyan-dim);color:var(--cyan)">POLL</span>');
     return `
-      <div class="bot-item ${b.id === currentBotID ? 'active' : ''}" onclick="selectBot(${b.id})">
+      <div class="bot-item ${b.id === currentBotID ? 'active' : ''} ${b.disabled ? 'disabled' : ''}" onclick="selectBot(${b.id})">
         <span class="status-dot ${statusClass}"></span>
         <div class="bot-item-info">
           <div class="bot-item-name">${esc(b.name || b.bot_username)}</div>
@@ -2756,6 +2758,7 @@ function showBotDetail() {
     if (b.proxy_enabled && b.backend_url) {
       actions.push(`<button class="btn btn-sm" onclick="checkBackendHealth()" id="btnCheckHealth">${t('check_webhook')}</button>`);
     }
+    actions.push(`<button class="btn btn-sm" style="${b.disabled ? 'background:var(--green-dim,rgba(0,200,0,0.1));color:var(--green)' : 'background:var(--magenta-dim,rgba(255,85,85,0.1));color:var(--magenta)'}" onclick="toggleBotDisabled()">${b.disabled ? t('bot_enable') : t('bot_disable')}</button>`);
     actions.push(`<button class="btn btn-danger btn-sm" onclick="deleteCurrentBot()">${t('delete')}</button>`);
   }
   document.getElementById('botDetailActions').innerHTML = actions.join('');
@@ -4029,6 +4032,17 @@ async function checkBackendHealth() {
 function editCurrentBot() {
   if (!currentBot) return;
   showBotModal(currentBot);
+}
+
+async function toggleBotDisabled() {
+  if (!currentBot) return;
+  try {
+    const updated = await api(`/api/bots/toggle-disabled?id=${currentBot.id}`, { method: 'POST' });
+    toast(updated.disabled ? t('bot_disabled') : t('bot_enabled'));
+    await loadBots();
+    currentBot = allBots.find(b => b.id === currentBot.id);
+    if (currentBot) showBotDetail();
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 async function deleteCurrentBot() {
