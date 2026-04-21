@@ -61,6 +61,7 @@
   "ban": "BAN",
   "unban": "UNBAN",
   "deleted": "deleted",
+  "bot_badge": "BOT",
   "reply": "REPLY",
   "replying_to": "Replying to",
   "confirm_delete_msg": "Delete this message?",

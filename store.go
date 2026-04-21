@@ -673,8 +673,8 @@ func (s *Store) GetChats(botID int64) ([]Chat, error) {
 		SELECT c.id, c.type, c.title, c.username, c.member_count, c.description, c.is_admin, c.updated_at,
 			COALESCE(m.text, ''), COALESCE(m.from_user, ''), COALESCE(m.date, 0)
 		FROM chats c
-		LEFT JOIN messages m ON m.chat_id = c.id AND m.id = (
-			SELECT id FROM messages WHERE chat_id = c.id ORDER BY id DESC LIMIT 1
+		LEFT JOIN messages m ON m.bot_id = c.bot_id AND m.chat_id = c.id AND m.id = (
+			SELECT id FROM messages WHERE bot_id = c.bot_id AND chat_id = c.id ORDER BY id DESC LIMIT 1
 		)
 		WHERE c.bot_id=?
 		ORDER BY CASE WHEN m.date IS NOT NULL THEN m.date ELSE 0 END DESC, c.title
