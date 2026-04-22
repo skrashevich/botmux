@@ -8,6 +8,8 @@ description: "Configure BotMux via environment variables"
 | `TELEGRAM_BOT_TOKEN` | `-token` | Telegram bot token |
 | `TELEGRAM_API_URL` | `-tg-api` | Custom Telegram API base URL |
 | `DEMO_MODE` | `-demo` | Set to `true` for demo mode |
+| `BOTMUX_ALLOW_AUTO_REGISTER` | — | Set to `1` to allow the API proxy's `setWebhook` interception to auto-register unknown bot tokens. Disabled by default. |
+| `BOTMUX_STRICT_WEBHOOK` | — | Set to `1` to require HTTPS for all webhook URLs, including loopback addresses. When unset, HTTP is allowed for `localhost`, `127.0.0.1`, and `::1`. |
 
 ## Usage
 

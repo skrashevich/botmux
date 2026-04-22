@@ -45,10 +45,10 @@ tags:
       Transparent proxy to api.telegram.org with message capture and method interception.
 
       Several Telegram Bot API methods are intercepted by BotMux instead of being forwarded:
-      - `setWebhook` — configures the bot's backend URL in BotMux and enables proxy mode
+      - `setWebhook` — configures the bot's backend URL in BotMux and enables proxy mode (auto-registration of unknown tokens requires `BOTMUX_ALLOW_AUTO_REGISTER=1`)
       - `deleteWebhook` — clears the backend URL and disables proxy mode
       - `getWebhookInfo` — returns BotMux's internal webhook state
-      - `getUpdates` — served from BotMux's internal queue when long polling is enabled
+      - `getUpdates` — served from BotMux's internal queue when long polling is enabled; returns empty for any other known bot to prevent conflict errors
       - `logOut` — returns success without forwarding (prevents token being disabled for 10 minutes)
       - `close` — returns success without forwarding (prevents bot instance shutdown on Telegram's side)
 
@@ -118,6 +118,9 @@ components:
         webhook_mode:
           type: boolean
           description: Whether the bot is in webhook mode (not polled by BotMux)
+        disabled:
+          type: boolean
+          description: Whether the bot is disabled. Disabled bots are stopped and do not poll or receive webhook updates.
 
     BotAddRequest:
       type: object
@@ -232,7 +235,7 @@ components:
           description: Unix timestamp of the message
         media_type:
           type: string
-          description: Media type if the message contains media (photo, video, animation, sticker, voice, audio, document, video_note)
+          description: Media type if the message contains media (photo, video, animation, sticker, voice, audio, document, video_note) or `callback` for inline button interactions tracked as synthetic messages
         file_id:
           type: string
           description: Telegram file ID for media messages
@@ -706,6 +709,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+
+  /api/bots/toggle-disabled:
+    post:
+      tags: [Bots]
+      summary: Toggle bot disabled state
+      description: |
+        Toggles whether a bot is disabled. A disabled bot is fully stopped — it does not poll for updates, does not receive webhook updates, and its managed Bot instance is removed. Calling this endpoint again re-enables the bot and restarts it. Admin only.
+      operationId: toggleBotDisabled
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Bot ID to toggle
+      responses:
+        '200':
+          description: Updated bot configuration with the new disabled state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bot'
+        '400':
+          description: Missing or invalid ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Admin role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed (must be POST)
 
   /api/bots/validate:
     get:
@@ -1935,10 +1980,10 @@ paths:
         Transparently proxies requests to `api.telegram.org`. No BotMux authentication required — the bot token in the URL is the authorization.
 
         Several methods are intercepted and handled internally by BotMux instead of being forwarded to Telegram:
-        - **`setWebhook`** — Registers the webhook URL as the bot's backend URL in BotMux and enables proxy mode. If the bot token is not yet registered, BotMux auto-registers it via `getMe`. Supports `url` and `drop_pending_updates` parameters.
+        - **`setWebhook`** — Registers the webhook URL as the bot's backend URL in BotMux and enables proxy mode. If the bot token is not yet registered and the `BOTMUX_ALLOW_AUTO_REGISTER` environment variable is set to `1`, BotMux auto-registers it via `getMe`. Otherwise, unknown tokens are rejected with a 401 error. Supports `url` and `drop_pending_updates` parameters. The webhook URL must use HTTPS (HTTP is only allowed for loopback addresses in non-strict mode; set `BOTMUX_STRICT_WEBHOOK=1` to require HTTPS always).
         - **`deleteWebhook`** — Clears the backend URL and disables proxy mode for the bot. Supports `drop_pending_updates`.
         - **`getWebhookInfo`** — Returns BotMux's internal webhook state including the configured backend URL and pending update count.
-        - **`getUpdates`** — When `long_poll_enabled` is set on the matching bot, requests are intercepted and served from BotMux's internal update queue instead of forwarding to Telegram. When the bot is managed by BotMux but long polling is not enabled, returns an empty result to prevent Telegram API conflict errors.
+        - **`getUpdates`** — When `long_poll_enabled` is set on the matching bot, requests are intercepted and served from BotMux's internal update queue instead of forwarding to Telegram. For any other bot known to BotMux (regardless of running state), returns an empty result to prevent Telegram API conflict errors from concurrent `getUpdates` consumers.
         - **`logOut`** — Returns `{"ok": true, "result": true}` without forwarding. Forwarding would disable the token for 10 minutes.
         - **`close`** — Returns `{"ok": true, "result": true}` without forwarding. Forwarding would shut down the bot instance on Telegram's side.
       operationId: telegramProxyGet
@@ -1971,7 +2016,7 @@ paths:
       description: |
         Transparently proxies POST requests to `api.telegram.org`.
 
-        For send methods (`sendMessage`, `sendPhoto`, `sendVideo`, etc.), BotMux parses the Telegram response to extract the sent message and saves it to the database, capturing outgoing messages that would not appear in `getUpdates`.
+        For send methods (`sendMessage`, `sendPhoto`, `sendVideo`, `editMessageText`, `editMessageCaption`, `editMessageMedia`, etc.), BotMux parses the Telegram response to extract the sent or edited message and saves it to the database, capturing outgoing messages that would not appear in `getUpdates`.
 
         The same method interception rules described in the GET endpoint apply here. Methods like `setWebhook`, `deleteWebhook`, `getWebhookInfo`, `getUpdates`, `logOut`, and `close` are handled internally by BotMux rather than forwarded to Telegram.
       operationId: telegramProxyPost
