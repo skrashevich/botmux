@@ -1,0 +1,28 @@
+---
+title: 'April 22, 2026'
+description: 'Bot disable/enable, callback query handling, edited message tracking, and Bot API 9.6 support.'
+---
+
+<Update label="2026-04-22" description="Week of April 22" tags={["Features", "Improvements", "Fixes"]}>
+
+## New features
+
+- **Bot disable/enable** — You can now temporarily disable a bot from the dashboard without removing it. Disabled bots stop polling and proxying but retain all their configuration and history. Re-enable them at any time with a single click. See [multi-bot management](/docs/en/concepts/multi-bot) for details.
+
+- **Callback query handling** — BotMux now processes inline button interactions (callback queries) and stores callback data in the message history. This gives you full visibility into how users interact with inline keyboards in your bots.
+
+- **Edited message tracking** — The [API proxy](/docs/en/features/api-proxy) now intercepts `editMessageCaption` and `editMessageMedia` in addition to send methods. Edited messages are captured and updated in the dashboard in real time, so your message history always reflects the latest content.
+
+## Improvements
+
+- **Telegram Bot API 9.6 compatibility** — BotMux now supports the latest Telegram Bot API update types, including business messages and chat join requests. Messages from bots are visually distinguished with a badge in the dashboard, and sender tags are displayed where available.
+
+- **Custom API endpoint support** — Bots can now be configured with a custom Telegram API base URL, making it easier to use BotMux with self-hosted [Telegram Bot API servers](/docs/en/configuration/custom-telegram-api).
+
+## Bug fixes
+
+- **Fixed XSS vulnerability in dashboard** — User input in button handlers is now properly escaped, preventing potential cross-site scripting attacks.
+
+- **Fixed chat list showing wrong message previews** — Resolved an issue where the chat list could display a message preview from a different bot when multiple bots shared the same chat.
+
+</Update>
