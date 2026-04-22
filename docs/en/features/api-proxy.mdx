@@ -57,7 +57,9 @@ This endpoint downloads the file from Telegram and streams it to the client. Web
 | `sendDice` | Dice |
 | `forwardMessage` | Forwarded messages |
 | `copyMessage` | Copied messages |
-| `editMessageText` | Edited messages |
+| `editMessageText` | Edited text messages |
+| `editMessageCaption` | Edited captions |
+| `editMessageMedia` | Edited media |
 
 The **API Proxy URL** is displayed in the bot detail view when proxy mode is enabled (click to copy).
 
@@ -67,13 +69,13 @@ The following Telegram Bot API methods are intercepted by the proxy and handled 
 
 | Method | Behavior |
 |--------|----------|
-| `setWebhook` | Registers the webhook URL as the bot's backend URL in BotMux and enables proxy mode. If the bot token is not yet registered, BotMux auto-registers it via `getMe`. Supports `url` and `drop_pending_updates` parameters. |
+| `setWebhook` | Registers the webhook URL as the bot's backend URL in BotMux and enables proxy mode. Auto-registration of unknown tokens requires the `BOTMUX_ALLOW_AUTO_REGISTER=1` environment variable. The webhook URL must use HTTPS (HTTP is only allowed for loopback addresses unless `BOTMUX_STRICT_WEBHOOK=1` is set). Supports `url` and `drop_pending_updates` parameters. |
 | `deleteWebhook` | Clears the backend URL and disables proxy mode for the bot. Supports `drop_pending_updates`. |
 | `getWebhookInfo` | Returns BotMux's internal webhook state including the configured backend URL and pending update count. |
-| `getUpdates` | When long polling is enabled, returns updates from BotMux's internal queue instead of polling Telegram directly. When the bot is managed but long polling is not enabled, returns an empty result to prevent conflict errors. |
+| `getUpdates` | When long polling is enabled, returns updates from BotMux's internal queue instead of polling Telegram directly. For any other bot known to BotMux, returns an empty result to prevent conflict errors. |
 | `logOut` | Returns success without forwarding to Telegram. Forwarding would disable the token for 10 minutes, breaking BotMux's polling. |
 | `close` | Returns success without forwarding to Telegram. Forwarding would shut down the bot instance on Telegram's side. |
 
 <Note>
-The `setWebhook` interception enables zero-configuration migration: point your existing bot backend at BotMux's API proxy URL, and BotMux will automatically register the bot and start forwarding updates to your backend.
+When `BOTMUX_ALLOW_AUTO_REGISTER=1` is set, the `setWebhook` interception enables zero-configuration migration: point your existing bot backend at BotMux's API proxy URL, and BotMux will automatically register the bot and start forwarding updates to your backend.
 </Note>

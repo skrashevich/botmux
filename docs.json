@@ -130,6 +130,7 @@
                   "docs/en/api-reference/bots/add",
                   "docs/en/api-reference/bots/update",
                   "docs/en/api-reference/bots/delete",
+                  "docs/en/api-reference/bots/toggle-disabled",
                   "docs/en/api-reference/bots/validate",
                   "docs/en/api-reference/bots/health"
                 ]
@@ -309,6 +310,7 @@
                   "docs/ru/api-reference/bots/add",
                   "docs/ru/api-reference/bots/update",
                   "docs/ru/api-reference/bots/delete",
+                  "docs/ru/api-reference/bots/toggle-disabled",
                   "docs/ru/api-reference/bots/validate",
                   "docs/ru/api-reference/bots/health"
                 ]
@@ -488,6 +490,7 @@
                   "docs/zh/api-reference/bots/add",
                   "docs/zh/api-reference/bots/update",
                   "docs/zh/api-reference/bots/delete",
+                  "docs/zh/api-reference/bots/toggle-disabled",
                   "docs/zh/api-reference/bots/validate",
                   "docs/zh/api-reference/bots/health"
                 ]

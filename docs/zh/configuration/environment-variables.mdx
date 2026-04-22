@@ -8,6 +8,8 @@ description: "通过环境变量配置 BotMux"
 | `TELEGRAM_BOT_TOKEN` | `-token` | Telegram 机器人令牌 |
 | `TELEGRAM_API_URL` | `-tg-api` | 自定义 Telegram API 基础 URL |
 | `DEMO_MODE` | `-demo` | 设置为 `true` 启用演示模式 |
+| `BOTMUX_ALLOW_AUTO_REGISTER` | — | 设置为 `1` 以允许 API 代理的 `setWebhook` 拦截自动注册未知的机器人令牌。默认禁用。 |
+| `BOTMUX_STRICT_WEBHOOK` | — | 设置为 `1` 以要求所有 webhook URL 使用 HTTPS，包括回环地址。未设置时，`localhost`、`127.0.0.1` 和 `::1` 允许使用 HTTP。 |
 
 ## 使用方法
 

@@ -57,7 +57,9 @@ http://localhost:8080/tgapi/file/bot{TOKEN}/{file_path}
 | `sendDice` | 骰子 |
 | `forwardMessage` | 转发消息 |
 | `copyMessage` | 复制消息 |
-| `editMessageText` | 编辑消息 |
+| `editMessageText` | 编辑文本消息 |
+| `editMessageCaption` | 编辑标题 |
+| `editMessageMedia` | 编辑媒体 |
 
 当启用代理模式时，**API 代理 URL** 会显示在机器人详情视图中（点击复制）。
 
@@ -67,13 +69,13 @@ http://localhost:8080/tgapi/file/bot{TOKEN}/{file_path}
 
 | 方法 | 行为 |
 |--------|----------|
-| `setWebhook` | 将 webhook URL 注册为 BotMux 中机器人的后端 URL 并启用代理模式。如果机器人令牌尚未注册，BotMux 会通过 `getMe` 自动注册。支持 `url` 和 `drop_pending_updates` 参数。 |
+| `setWebhook` | 将 webhook URL 注册为 BotMux 中机器人的后端 URL 并启用代理模式。未知令牌的自动注册需要设置 `BOTMUX_ALLOW_AUTO_REGISTER=1` 环境变量。Webhook URL 必须使用 HTTPS（除非设置 `BOTMUX_STRICT_WEBHOOK=1`，否则仅允许回环地址使用 HTTP）。支持 `url` 和 `drop_pending_updates` 参数。 |
 | `deleteWebhook` | 清除后端 URL 并禁用机器人的代理模式。支持 `drop_pending_updates`。 |
 | `getWebhookInfo` | 返回 BotMux 的内部 webhook 状态，包括配置的后端 URL 和待处理的更新数量。 |
-| `getUpdates` | 当启用长轮询时，从 BotMux 的内部队列返回更新，而不是直接轮询 Telegram。当机器人由 BotMux 管理但未启用长轮询时，返回空结果以防止冲突错误。 |
+| `getUpdates` | 当启用长轮询时，从 BotMux 的内部队列返回更新，而不是直接轮询 Telegram。对于 BotMux 已知的任何其他机器人，返回空结果以防止冲突错误。 |
 | `logOut` | 返回成功而不转发到 Telegram。转发会导致令牌被禁用 10 分钟，破坏 BotMux 的轮询。 |
 | `close` | 返回成功而不转发到 Telegram。转发会关闭 Telegram 端的机器人实例。 |
 
 <Note>
-`setWebhook` 拦截实现了零配置迁移：将您现有的机器人后端指向 BotMux 的 API 代理 URL，BotMux 将自动注册机器人并开始将更新转发到您的后端。
+当设置 `BOTMUX_ALLOW_AUTO_REGISTER=1` 时，`setWebhook` 拦截实现了零配置迁移：将您现有的机器人后端指向 BotMux 的 API 代理 URL，BotMux 将自动注册机器人并开始将更新转发到您的后端。
 </Note>
