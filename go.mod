@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	github.com/OvyFlash/telegram-bot-api v0.0.0-20260417154322-26e93143c22a
-	modernc.org/sqlite v1.49.1
+	modernc.org/sqlite v1.50.0
 )
 
 require (
