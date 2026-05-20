@@ -37,7 +37,7 @@ func TestE2E_Webhook_W01_SetWebhookIntercept(t *testing.T) {
 		BotUsername:   "webhookbot",
 		ManageEnabled: true,
 	})
-	_ = botID
+	h.proxy.SetWebhookMode(botID)
 
 	callbackURL := "https://my-backend.example.com/callback"
 
@@ -67,6 +67,10 @@ func TestE2E_Webhook_W01_SetWebhookIntercept(t *testing.T) {
 	if cfg.BackendURL != callbackURL {
 		t.Errorf("setWebhook: expected BackendURL=%q, got %q", callbackURL, cfg.BackendURL)
 	}
+
+	h.Eventually(func() bool {
+		return h.fake.RequestsCountFor("getUpdates") >= 1
+	}, time.Second, "setWebhook intercept should clear webhook mode and start polling")
 }
 
 // TestE2E_Webhook_W02_DeleteWebhookIntercept verifies that deleteWebhook is intercepted locally

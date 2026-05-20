@@ -5,6 +5,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image/png"
 	"io"
@@ -159,11 +160,50 @@ func (s *Server) checkBotAccess(r *http.Request, botID int64) bool {
 	return s.store.UserHasBotAccess(user.ID, botID)
 }
 
+var errForbidden = errors.New("forbidden")
+
+func (s *Server) requireBotAccess(w http.ResponseWriter, r *http.Request, botID int64) bool {
+	if !s.checkBotAccess(r, botID) {
+		w.WriteHeader(403)
+		writeJSON(w, map[string]string{"error": "Forbidden"})
+		return false
+	}
+	return true
+}
+
+func (s *Server) requireBotChatAccess(w http.ResponseWriter, r *http.Request, botID, chatID int64) bool {
+	if botID == 0 {
+		http.Error(w, "bot_id required", 400)
+		return false
+	}
+	if chatID == 0 {
+		http.Error(w, "chat_id required", 400)
+		return false
+	}
+	if !s.requireBotAccess(w, r, botID) {
+		return false
+	}
+	ok, err := s.store.ChatExists(botID, chatID)
+	if err != nil {
+		writeError(w, err)
+		return false
+	}
+	if !ok {
+		w.WriteHeader(404)
+		writeJSON(w, map[string]string{"error": "chat not found"})
+		return false
+	}
+	return true
+}
+
 // getBotFromRequest extracts bot_id from query params and returns the Bot instance
 func (s *Server) getBotFromRequest(r *http.Request) (*bot.Bot, int64, error) {
 	botID, err := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
 	if err != nil {
 		return nil, 0, fmt.Errorf("invalid bot_id")
+	}
+	if !s.checkBotAccess(r, botID) {
+		return nil, botID, errForbidden
 	}
 	bot := s.getBot(botID)
 	if bot == nil {
@@ -297,7 +337,7 @@ func (s *Server) BuildMux() *http.ServeMux {
 	mux.HandleFunc("/bridge/", s.handleBridgeIncoming) // no auth — external services POST here
 
 	// LLM routing config — admin only
-	mux.HandleFunc("/api/llm-config", s.authMiddleware(s.handleGetLLMConfig))
+	mux.HandleFunc("/api/llm-config", s.adminOnly(s.handleGetLLMConfig))
 	mux.HandleFunc("/api/llm-config/save", s.adminOnly(s.handleSaveLLMConfig))
 	mux.HandleFunc("/api/bots/description", s.authMiddleware(s.handleBotDescription))
 
@@ -635,6 +675,12 @@ func (s *Server) handleBotValidate(w http.ResponseWriter, r *http.Request) {
 // @Security CookieAuth || BearerAuth
 func (s *Server) handleBotHealth(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	if id == 0 || !s.requireBotAccess(w, r, id) {
+		if id == 0 {
+			http.Error(w, "id required", 400)
+		}
+		return
+	}
 	status, err := s.proxy.CheckAndStoreHealth(id)
 	if err != nil {
 		writeJSON(w, map[string]any{"status": status, "error": err.Error(), "checked_at": time.Now().Format(time.RFC3339)})
@@ -657,6 +703,12 @@ func (s *Server) handleBotHealth(w http.ResponseWriter, r *http.Request) {
 // @Security CookieAuth || BearerAuth
 func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
 	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
+	if botID == 0 || !s.requireBotAccess(w, r, botID) {
+		if botID == 0 {
+			http.Error(w, "bot_id required", 400)
+		}
+		return
+	}
 	chats, err := s.store.GetChats(botID)
 	if err != nil {
 		writeError(w, err)
@@ -717,6 +769,12 @@ func (s *Server) handleDeleteChat(w http.ResponseWriter, r *http.Request) {
 	}
 	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
+	if botID == 0 || !s.requireBotAccess(w, r, botID) {
+		if botID == 0 {
+			http.Error(w, "bot_id required", 400)
+		}
+		return
+	}
 	if err := s.store.DeleteChat(botID, chatID); err != nil {
 		writeError(w, err)
 		return
@@ -740,6 +798,12 @@ func (s *Server) handleDeleteChat(w http.ResponseWriter, r *http.Request) {
 // @Security CookieAuth || BearerAuth
 func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
+	if botID == 0 || !s.requireBotAccess(w, r, botID) {
+		if botID == 0 {
+			http.Error(w, "bot_id required", 400)
+		}
+		return
+	}
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
@@ -771,6 +835,12 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 // handleMessageStream sends new messages via Server-Sent Events
 func (s *Server) handleMessageStream(w http.ResponseWriter, r *http.Request) {
 	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
+	if botID == 0 || !s.requireBotAccess(w, r, botID) {
+		if botID == 0 {
+			http.Error(w, "bot_id required", 400)
+		}
+		return
+	}
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	if chatID == 0 {
 		http.Error(w, "chat_id required", 400)
@@ -961,6 +1031,12 @@ func (s *Server) handleLongPollGetUpdates(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
+	if botID == 0 || !s.requireBotAccess(w, r, botID) {
+		if botID == 0 {
+			http.Error(w, "bot_id required", 400)
+		}
+		return
+	}
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	query := r.URL.Query().Get("q")
 	msgs, err := s.store.SearchMessages(botID, chatID, query, 50)
@@ -999,6 +1075,9 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, err)
+		return
+	}
+	if !s.requireBotChatAccess(w, r, req.BotID, req.ChatID) {
 		return
 	}
 	bot := s.resolveBot(req.BotID)
@@ -1137,6 +1216,12 @@ func (s *Server) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 // @Security CookieAuth || BearerAuth
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
+	if botID == 0 || !s.requireBotAccess(w, r, botID) {
+		if botID == 0 {
+			http.Error(w, "bot_id required", 400)
+		}
+		return
+	}
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	stats, err := s.store.GetChatStats(botID, chatID)
 	if err != nil {
@@ -1160,14 +1245,18 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 // @Router /api/users/list [get]
 // @Security CookieAuth || BearerAuth
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
+	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
+	if !s.requireBotChatAccess(w, r, botID, chatID) {
+		return
+	}
 	search := r.URL.Query().Get("q")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	if limit == 0 {
 		limit = 50
 	}
-	users, err := s.store.GetChatUsers(chatID, search, limit, offset)
+	users, err := s.store.GetChatUsers(botID, chatID, search, limit, offset)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -1194,6 +1283,18 @@ func (s *Server) handleUserProfile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"error": "chat_id and user_id are required"})
 		return
 	}
+	if botID != 0 {
+		ok, err := s.store.ChatExists(botID, chatID)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		if !ok {
+			w.WriteHeader(404)
+			writeJSON(w, map[string]string{"error": "chat not found"})
+			return
+		}
+	}
 
 	profile := map[string]any{
 		"user_id": userID,
@@ -1205,10 +1306,10 @@ func (s *Server) handleUserProfile(w http.ResponseWriter, r *http.Request) {
 	var msgCount int
 	err := s.store.DB().QueryRow(`
 		SELECT ku.username, ku.first_seen,
-			(SELECT COUNT(*) FROM messages WHERE chat_id = ? AND from_id = ?) as msg_count,
-			(SELECT MAX(date) FROM messages WHERE chat_id = ? AND from_id = ?) as last_msg
+			(SELECT COUNT(*) FROM messages WHERE bot_id = ? AND chat_id = ? AND from_id = ?) as msg_count,
+			(SELECT MAX(date) FROM messages WHERE bot_id = ? AND chat_id = ? AND from_id = ?) as last_msg
 		FROM known_users ku WHERE ku.chat_id = ? AND ku.user_id = ?
-	`, chatID, userID, chatID, userID, chatID, userID).Scan(&username, &lastSeen, &msgCount, &lastSeen)
+	`, botID, chatID, userID, botID, chatID, userID, chatID, userID).Scan(&username, &lastSeen, &msgCount, &lastSeen)
 	if err == nil {
 		profile["username"] = username
 		profile["message_count"] = msgCount
@@ -1390,6 +1491,9 @@ func (s *Server) handlePromoteAdmin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	if !s.requireBotChatAccess(w, r, req.BotID, req.ChatID) {
+		return
+	}
 	bot := s.resolveBot(req.BotID)
 	if bot == nil {
 		writeError(w, fmt.Errorf("bot not found"))
@@ -1469,6 +1573,12 @@ func (s *Server) handleSetAdminTitle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	if req.BotID == 0 || !s.requireBotAccess(w, r, req.BotID) {
+		if req.BotID == 0 {
+			http.Error(w, "bot_id required", 400)
+		}
+		return
+	}
 	bot := s.resolveBot(req.BotID)
 	if bot == nil {
 		writeError(w, fmt.Errorf("bot not found"))
@@ -1498,7 +1608,11 @@ func (s *Server) handleSetAdminTitle(w http.ResponseWriter, r *http.Request) {
 // @Router /api/adminlog [get]
 // @Security CookieAuth || BearerAuth
 func (s *Server) handleAdminLog(w http.ResponseWriter, r *http.Request) {
+	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
+	if !s.requireBotChatAccess(w, r, botID, chatID) {
+		return
+	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	if limit == 0 {
@@ -1528,7 +1642,11 @@ func (s *Server) handleAdminLog(w http.ResponseWriter, r *http.Request) {
 // @Router /api/tags [get]
 // @Security CookieAuth || BearerAuth
 func (s *Server) handleGetTags(w http.ResponseWriter, r *http.Request) {
+	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
+	if !s.requireBotChatAccess(w, r, botID, chatID) {
+		return
+	}
 	tags, err := s.store.GetUserTags(chatID)
 	if err != nil {
 		writeError(w, err)
@@ -1563,6 +1681,9 @@ func (s *Server) handleAddTag(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, err)
+		return
+	}
+	if !s.requireBotChatAccess(w, r, req.BotID, req.ChatID) {
 		return
 	}
 	if !IsValidHexColor(req.Color) {
@@ -1601,6 +1722,23 @@ func (s *Server) handleRemoveTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tagID, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
+	if tagID == 0 {
+		http.Error(w, "id required", 400)
+		return
+	}
+	tag, err := s.store.GetUserTag(tagID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if botID == 0 {
+		http.Error(w, "bot_id required", 400)
+		return
+	}
+	if !s.requireBotChatAccess(w, r, botID, tag.ChatID) {
+		return
+	}
 	if err := s.store.RemoveUserTag(tagID); err != nil {
 		writeError(w, err)
 		return
@@ -1620,8 +1758,12 @@ func (s *Server) handleRemoveTag(w http.ResponseWriter, r *http.Request) {
 // @Router /api/tags/user [get]
 // @Security CookieAuth || BearerAuth
 func (s *Server) handleGetUserTags(w http.ResponseWriter, r *http.Request) {
+	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	userID, _ := strconv.ParseInt(r.URL.Query().Get("user_id"), 10, 64)
+	if !s.requireBotChatAccess(w, r, botID, chatID) {
+		return
+	}
 	tags, err := s.store.GetUserTagsByUser(chatID, userID)
 	if err != nil {
 		writeError(w, err)
@@ -1647,6 +1789,12 @@ func (s *Server) handleGetUserTags(w http.ResponseWriter, r *http.Request) {
 // @Security CookieAuth || BearerAuth
 func (s *Server) handleGetRoutes(w http.ResponseWriter, r *http.Request) {
 	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
+	if botID == 0 || !s.requireBotAccess(w, r, botID) {
+		if botID == 0 {
+			http.Error(w, "bot_id required", 400)
+		}
+		return
+	}
 	routes, err := s.store.GetRoutes(botID)
 	if err != nil {
 		writeError(w, err)
@@ -2028,6 +2176,12 @@ func (s *Server) handleBotDescription(w http.ResponseWriter, r *http.Request) {
 			writeError(w, err)
 			return
 		}
+		if req.BotID == 0 || !s.requireBotAccess(w, r, req.BotID) {
+			if req.BotID == 0 {
+				http.Error(w, "bot_id required", 400)
+			}
+			return
+		}
 		if err := s.store.UpdateBotDescription(req.BotID, req.Description); err != nil {
 			writeError(w, err)
 			return
@@ -2036,6 +2190,12 @@ func (s *Server) handleBotDescription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	botID, _ := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
+	if botID == 0 || !s.requireBotAccess(w, r, botID) {
+		if botID == 0 {
+			http.Error(w, "bot_id required", 400)
+		}
+		return
+	}
 	desc, err := s.store.GetBotDescription(botID)
 	if err != nil {
 		writeJSON(w, map[string]string{"description": ""})
@@ -2653,6 +2813,11 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 func writeError(w http.ResponseWriter, err error) {
 	w.Header().Set("Content-Type", "application/json")
+	if errors.Is(err, errForbidden) {
+		w.WriteHeader(403)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Forbidden"})
+		return
+	}
 	w.WriteHeader(500)
 	json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 }
@@ -2886,33 +3051,31 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 // @Router /api/media [get]
 // @Security CookieAuth || BearerAuth
 func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
-	botID := r.URL.Query().Get("bot_id")
+	botIDStr := r.URL.Query().Get("bot_id")
 	fileID := r.URL.Query().Get("file_id")
 	if fileID == "" {
 		http.Error(w, "file_id required", 400)
 		return
 	}
+	if botIDStr == "" {
+		http.Error(w, "bot_id required", 400)
+		return
+	}
+	botID, err := strconv.ParseInt(botIDStr, 10, 64)
+	if err != nil || botID == 0 {
+		http.Error(w, "invalid bot_id", 400)
+		return
+	}
+	if !s.requireBotAccess(w, r, botID) {
+		return
+	}
 
-	// Find bot token
-	var token string
-	if botID != "" {
-		bots, _ := s.store.GetBotConfigs()
-		for _, b := range bots {
-			if fmt.Sprintf("%d", b.ID) == botID {
-				token = b.Token
-				break
-			}
-		}
+	botCfg, err := s.store.GetBotConfig(botID)
+	if err != nil {
+		http.Error(w, "bot not found", 404)
+		return
 	}
-	if token == "" {
-		// Try CLI bot
-		s.mu.RLock()
-		for _, bot := range s.bots {
-			token = bot.GetToken()
-			break
-		}
-		s.mu.RUnlock()
-	}
+	token := botCfg.Token
 	if token == "" {
 		http.Error(w, "no bot available", 400)
 		return
@@ -3089,10 +3252,10 @@ func (s *Server) handleInterceptSetWebhook(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	// Mark as webhook-mode so pollLoop stops and updates come only via /tghook/.
-	// Without this, the bot would be polled AND receive webhook updates → dual delivery.
+	// Intercepted setWebhook stores the backend URL for proxy forwarding.
+	// Polling continues — Telegram webhook is not registered (request is intercepted).
 	if s.proxy != nil {
-		s.proxy.SetWebhookMode(botCfg.ID)
+		s.proxy.ClearWebhookMode(botCfg.ID)
 		s.proxy.RestartBot(botCfg.ID)
 	}
 
@@ -3141,8 +3304,9 @@ func (s *Server) handleInterceptDeleteWebhook(w http.ResponseWriter, r *http.Req
 		s.proxy.RemoveUpdateQueue(botCfg.ID)
 	}
 
-	// Restart bot to apply config
+	// Restart bot to apply config and resume polling if webhook mode was set
 	if s.proxy != nil {
+		s.proxy.ClearWebhookMode(botCfg.ID)
 		s.proxy.RestartBot(botCfg.ID)
 	}
 

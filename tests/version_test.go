@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -283,6 +284,11 @@ func TestUserProfileEndpointReturnsData(t *testing.T) {
 	// Track a user
 	store.TrackUser(123, 456, "@testuser")
 
+	// Register chat for bot (required for profile access check)
+	if err := store.UpsertChat(botID, models.Chat{ID: 123, Type: "private", Title: "Test"}); err != nil {
+		t.Fatalf("UpsertChat error: %v", err)
+	}
+
 	// Save some messages from this user
 	for i := 1; i <= 3; i++ {
 		store.SaveMessage(models.Message{
@@ -378,5 +384,50 @@ func TestUserProfileEndpointBotAccessCheck(t *testing.T) {
 
 	if resp.StatusCode != 403 {
 		t.Errorf("expected 403 for unauthorized bot access, got %d", resp.StatusCode)
+	}
+}
+
+func TestAddTagRequiresChatToBelongToBot(t *testing.T) {
+	store := newTestStore(t)
+	proxy := proxy.NewManager(store, "https://api.telegram.org")
+	server := server.NewServer(store, proxy)
+
+	botID, err := store.AddBotConfig(models.BotConfig{
+		Name:        "Tag Bot",
+		Token:       "tag-token",
+		BotUsername: "tagbot",
+	})
+	if err != nil {
+		t.Fatalf("AddBotConfig error: %v", err)
+	}
+	if err := store.UpsertChat(botID, models.Chat{ID: 100, Type: "private", Title: "Owned"}); err != nil {
+		t.Fatalf("UpsertChat error: %v", err)
+	}
+	session := createTestAuth(t, store)
+
+	mux := server.BuildMux()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	body := []byte(fmt.Sprintf(`{
+		"bot_id": %d,
+		"chat_id": 999,
+		"user_id": 456,
+		"username": "@intruder",
+		"tag": "VIP",
+		"color": "#00ff00"
+	}`, botID))
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tags/add", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session})
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		t.Fatalf("expected tag creation for chat outside bot to be rejected")
 	}
 }

@@ -80,6 +80,62 @@ func TestCaptureSentMessageStoresCopiedMessageUsingRequestAndSourceMessage(t *te
 	}
 }
 
+func TestDeleteChatKeepsSharedChatDataWhenAnotherBotTracksChat(t *testing.T) {
+	store := newTestStore(t)
+
+	bot1, err := store.AddBotConfig(models.BotConfig{Name: "Bot 1", Token: "token1", BotUsername: "bot1"})
+	if err != nil {
+		t.Fatalf("AddBotConfig bot1 error: %v", err)
+	}
+	bot2, err := store.AddBotConfig(models.BotConfig{Name: "Bot 2", Token: "token2", BotUsername: "bot2"})
+	if err != nil {
+		t.Fatalf("AddBotConfig bot2 error: %v", err)
+	}
+	const chatID int64 = 12345
+	if err := store.UpsertChat(bot1, models.Chat{ID: chatID, Type: "private", Title: "Shared"}); err != nil {
+		t.Fatalf("UpsertChat bot1 error: %v", err)
+	}
+	if err := store.UpsertChat(bot2, models.Chat{ID: chatID, Type: "private", Title: "Shared"}); err != nil {
+		t.Fatalf("UpsertChat bot2 error: %v", err)
+	}
+	store.TrackUser(chatID, 7, "@alice")
+	if err := store.AddUserTag(models.UserTag{ChatID: chatID, UserID: 7, Username: "@alice", Tag: "VIP", Color: "#00ff00"}); err != nil {
+		t.Fatalf("AddUserTag error: %v", err)
+	}
+	if err := store.LogAdminAction(models.AdminLog{ChatID: chatID, Action: "ban_user", ActorName: "bot1", TargetID: 7, CreatedAt: time.Now().Format(time.RFC3339)}); err != nil {
+		t.Fatalf("LogAdminAction error: %v", err)
+	}
+
+	if err := store.DeleteChat(bot1, chatID); err != nil {
+		t.Fatalf("DeleteChat error: %v", err)
+	}
+
+	if ok, err := store.ChatExists(bot2, chatID); err != nil || !ok {
+		t.Fatalf("expected bot2 chat to remain, ok=%v err=%v", ok, err)
+	}
+	users, err := store.GetChatUsers(bot2, chatID, "", 10, 0)
+	if err != nil {
+		t.Fatalf("GetChatUsers error: %v", err)
+	}
+	if len(users) != 1 || users[0].UserID != 7 {
+		t.Fatalf("expected shared known user to remain, got %#v", users)
+	}
+	tags, err := store.GetUserTags(chatID)
+	if err != nil {
+		t.Fatalf("GetUserTags error: %v", err)
+	}
+	if len(tags) != 1 {
+		t.Fatalf("expected shared tag to remain, got %#v", tags)
+	}
+	logs, err := store.GetAdminLog(chatID, 10, 0)
+	if err != nil {
+		t.Fatalf("GetAdminLog error: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected shared admin log to remain, got %#v", logs)
+	}
+}
+
 func TestCaptureSentMessageStoresFullSendMessageResults(t *testing.T) {
 	store := newTestStore(t)
 	server := server.NewServer(store, nil)

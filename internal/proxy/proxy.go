@@ -216,14 +216,9 @@ func (pm *Manager) GetOrCreateUpdateQueue(botID int64) *UpdateQueue {
 	return q
 }
 
-// EnqueueUpdate adds a raw update to the bot's long-poll queue (if it exists).
+// EnqueueUpdate adds a raw update to the bot's long-poll queue, creating it if needed.
 func (pm *Manager) EnqueueUpdate(botID int64, rawUpdate map[string]any) {
-	pm.mu.Lock()
-	q := pm.updateQueues[botID]
-	pm.mu.Unlock()
-	if q != nil {
-		q.Enqueue(rawUpdate)
-	}
+	pm.GetOrCreateUpdateQueue(botID).Enqueue(rawUpdate)
 }
 
 // GetQueueStats returns the number of waiting clients and queue depth for a bot.
@@ -259,6 +254,14 @@ func (pm *Manager) UnregisterManagedBot(botID int64) {
 	defer pm.mu.Unlock()
 	delete(pm.managedBots, botID)
 	log.Printf("[proxy] UnregisterManagedBot: botID=%d", botID)
+}
+
+// ClearWebhookMode removes webhook-mode flag so polling can resume.
+func (pm *Manager) ClearWebhookMode(botID int64) {
+	pm.mu.Lock()
+	delete(pm.webhookBots, botID)
+	pm.mu.Unlock()
+	log.Printf("[proxy] ClearWebhookMode: botID=%d", botID)
 }
 
 // SetWebhookMode marks a bot as using webhook (don't poll it)
@@ -301,12 +304,13 @@ func (pm *Manager) WebhookHandler(botID int64) http.HandlerFunc {
 	}
 }
 
-// ProcessUpdate handles a single update: proxy forwarding + management processing
-func (pm *Manager) ProcessUpdate(botID int64, rawUpdate map[string]any) {
+// ProcessUpdate handles a single update: proxy forwarding + management processing.
+// It returns false when the update must not be acknowledged yet.
+func (pm *Manager) ProcessUpdate(botID int64, rawUpdate map[string]any) bool {
 	b, err := pm.store.GetBotConfig(botID)
 	if err != nil {
 		log.Printf("[proxy] ProcessUpdate: failed to get config for botID=%d: %v", botID, err)
-		return
+		return false
 	}
 
 	// Enqueue for long-poll consumers (before any other processing)
@@ -324,11 +328,13 @@ func (pm *Manager) ProcessUpdate(botID int64, rawUpdate map[string]any) {
 	}
 
 	// Proxy: forward to backend (skip if long poll enabled — backend pulls via queue)
+	ackOffset := true
 	if b.ProxyEnabled && b.BackendURL != "" && !b.LongPollEnabled {
 		log.Printf("[proxy] forward: botID=%d %s → %s", botID, updateSummary, b.BackendURL)
 		if err := pm.forwardUpdate(context.Background(), b, rawUpdate); err != nil {
 			pm.store.UpdateBotStatus(botID, fmt.Sprintf("forward error: %v", err), "")
 			log.Printf("[proxy] forward: botID=%d FAILED: %v", botID, err)
+			ackOffset = false // keep offset so Telegram redelivers on next poll
 		} else {
 			log.Printf("[proxy] forward: botID=%d SUCCESS", botID)
 			pm.store.IncrementBotForwarded(botID)
@@ -352,10 +358,13 @@ func (pm *Manager) ProcessUpdate(botID int64, rawUpdate map[string]any) {
 	// Telegram id would permanently skip all future real updates. Threshold
 	// 10^9 is a safe sentinel between real TG range and bridge synthetic range.
 	const bridgeUpdateIDThreshold = int64(1_000_000_000)
-	if realID := int64(updateID); realID > 0 && realID < bridgeUpdateIDThreshold {
-		pm.store.UpdateBotOffset(botID, realID+1)
+	if ackOffset {
+		if realID := int64(updateID); realID > 0 && realID < bridgeUpdateIDThreshold {
+			pm.store.UpdateBotOffset(botID, realID+1)
+		}
 	}
 	pm.store.UpdateBotStatus(botID, "", time.Now().Format(time.RFC3339))
+	return ackOffset
 }
 
 // Start launches goroutines for all active bots
@@ -632,43 +641,16 @@ func (pm *Manager) pollLoop(ctx context.Context, botID int64) {
 			default:
 			}
 
-			updateID, ok := update["update_id"].(float64)
-			if !ok {
+			if _, ok := update["update_id"].(float64); !ok {
 				log.Printf("[proxy] pollLoop: botID=%d update has no valid update_id, skipping", botID)
 				continue
 			}
 
-			updateSummary := summarizeUpdate(update)
-			log.Printf("[proxy] pollLoop: botID=%d processing %s", botID, updateSummary)
-
-			// Long poll queue: enqueue for pull-based consumers
-			if b.LongPollEnabled {
-				pm.EnqueueUpdate(botID, update)
+			log.Printf("[proxy] pollLoop: botID=%d processing %s", botID, summarizeUpdate(update))
+			if !pm.ProcessUpdate(botID, update) {
+				log.Printf("[proxy] pollLoop: botID=%d leaving batch after unacknowledged update", botID)
+				break
 			}
-
-			// Proxy: forward to backend (skip if long poll enabled — backend pulls via queue)
-			if b.ProxyEnabled && b.BackendURL != "" && !b.LongPollEnabled {
-				log.Printf("[proxy] forward: botID=%d %s → %s", botID, updateSummary, b.BackendURL)
-				err := pm.forwardUpdate(ctx, b, update)
-				if err != nil {
-					pm.store.UpdateBotStatus(botID, fmt.Sprintf("forward error: %v", err), "")
-					log.Printf("[proxy] forward: botID=%d FAILED for %s: %v", botID, updateSummary, err)
-				} else {
-					log.Printf("[proxy] forward: botID=%d SUCCESS for %s", botID, updateSummary)
-					pm.store.IncrementBotForwarded(botID)
-				}
-			} else if b.ProxyEnabled {
-				log.Printf("[proxy] pollLoop: botID=%d proxy enabled but no backend_url set!", botID)
-			}
-
-			// Management: process update for chat/message tracking
-			if b.ManageEnabled {
-				pm.processForManagement(botID, update)
-			}
-
-			newOffset := int64(updateID) + 1
-			pm.store.UpdateBotOffset(botID, newOffset)
-			pm.store.UpdateBotStatus(botID, "", time.Now().Format(time.RFC3339))
 		}
 	}
 }
@@ -977,15 +959,15 @@ func (pm *Manager) applyReverseRoutes(botID int64, rawUpdate map[string]any) {
 		if replyMsgID, ok := replyTo["message_id"].(float64); ok {
 			mapping, err = pm.store.FindReverseMappingByReply(botID, chatID, int(replyMsgID))
 		}
-	}
-
-	if mapping == nil || err != nil {
-		// Fallback: check if this chat has any active mapping (latest conversation)
+		if mapping == nil || err != nil {
+			return // explicit reply but no matching route mapping
+		}
+	} else {
+		// Conversation mode: latest mapping for this target chat
 		mapping, err = pm.store.FindReverseMapping(botID, chatID)
-	}
-
-	if mapping == nil || err != nil {
-		return // no reverse route for this message
+		if mapping == nil || err != nil {
+			return
+		}
 	}
 
 	// Don't reverse-route messages sent by the target bot itself (avoid loops)

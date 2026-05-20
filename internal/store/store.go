@@ -567,13 +567,42 @@ func (s *Store) GetChats(botID int64) ([]models.Chat, error) {
 	return chats, nil
 }
 
+func (s *Store) ChatExists(botID, chatID int64) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM chats WHERE bot_id=? AND id=?`, botID, chatID).Scan(&n)
+	return n > 0, err
+}
+
 func (s *Store) DeleteChat(botID int64, chatID int64) error {
-	_, err := s.db.Exec(`DELETE FROM chats WHERE bot_id=? AND id=?`, botID, chatID)
+	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`DELETE FROM messages WHERE chat_id = ?`, chatID)
-	return err
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM messages WHERE bot_id=? AND chat_id=?`, botID, chatID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM chats WHERE bot_id=? AND id=?`, botID, chatID); err != nil {
+		return err
+	}
+
+	var remaining int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM chats WHERE id=?`, chatID).Scan(&remaining); err != nil {
+		return err
+	}
+	if remaining == 0 {
+		if _, err := tx.Exec(`DELETE FROM user_tags WHERE chat_id=?`, chatID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM admin_log WHERE chat_id=?`, chatID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM known_users WHERE chat_id=?`, chatID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // SaveMessage upserts by (bot_id, chat_id, id). On conflict it refreshes only
@@ -759,6 +788,16 @@ func (s *Store) RemoveUserTag(id int64) error {
 	return err
 }
 
+func (s *Store) GetUserTag(id int64) (*models.UserTag, error) {
+	var t models.UserTag
+	err := s.db.QueryRow(`SELECT id, chat_id, user_id, username, tag, color FROM user_tags WHERE id=?`, id).
+		Scan(&t.ID, &t.ChatID, &t.UserID, &t.Username, &t.Tag, &t.Color)
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
 func (s *Store) GetUserTags(chatID int64) ([]models.UserTag, error) {
 	rows, err := s.db.Query(`
 		SELECT id, chat_id, user_id, username, tag, color
@@ -812,7 +851,7 @@ func (s *Store) TrackUser(chatID int64, userID int64, username string) {
 	`, chatID, userID, username, time.Now().Format(time.RFC3339))
 }
 
-func (s *Store) GetChatUsers(chatID int64, search string, limit, offset int) ([]models.ChatUser, error) {
+func (s *Store) GetChatUsers(botID, chatID int64, search string, limit, offset int) ([]models.ChatUser, error) {
 	q := `
 		SELECT ku.user_id, ku.username,
 			COALESCE(m.cnt, 0) as message_count,
@@ -821,12 +860,12 @@ func (s *Store) GetChatUsers(chatID int64, search string, limit, offset int) ([]
 		LEFT JOIN (
 			SELECT from_id, COUNT(*) as cnt,
 				datetime(MAX(date), 'unixepoch', 'localtime') as last
-			FROM messages WHERE chat_id = ?
+			FROM messages WHERE bot_id = ? AND chat_id = ?
 			GROUP BY from_id
 		) m ON ku.user_id = m.from_id
 		WHERE ku.chat_id = ?
 	`
-	args := []any{chatID, chatID}
+	args := []any{botID, chatID, chatID}
 	if search != "" {
 		q += ` AND ku.username LIKE ?`
 		args = append(args, "%"+search+"%")

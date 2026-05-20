@@ -303,11 +303,12 @@ func TestE2E_ChatAdmin(t *testing.T) {
 	// M-01: my_chat_member — bot status change (member → administrator).
 	// After processUpdate, trackChat is called which upserts the chat into store.
 	t.Run("M-01_my_chat_member", func(t *testing.T) {
-		h := setupE2E(t, withStartedProxy())
+		h := setupE2E(t)
 		token := "chatadmin:M01"
 		botID := setupChatAdminBot(h, token)
 
-		// RestartBot creates and registers the managed Bot instance.
+		// Webhook mode: register managed Bot without starting pollLoop (updates injected directly).
+		h.proxy.SetWebhookMode(botID)
 		if err := h.proxy.RestartBot(botID); err != nil {
 			t.Fatalf("M-01: RestartBot: %v", err)
 		}
@@ -326,10 +327,11 @@ func TestE2E_ChatAdmin(t *testing.T) {
 	// M-02: chat_member — user status change (member → kicked).
 	// handleChatMember calls store.TrackUser. Check known_users via GetChatUsers.
 	t.Run("M-02_chat_member", func(t *testing.T) {
-		h := setupE2E(t, withStartedProxy())
+		h := setupE2E(t)
 		token := "chatadmin:M02"
 		botID := setupChatAdminBot(h, token)
 
+		h.proxy.SetWebhookMode(botID)
 		if err := h.proxy.RestartBot(botID); err != nil {
 			t.Fatalf("M-02: RestartBot: %v", err)
 		}
@@ -343,7 +345,7 @@ func TestE2E_ChatAdmin(t *testing.T) {
 
 		// handleChatMember → store.TrackUser; verify user appears in known_users
 		h.Eventually(func() bool {
-			users, err := h.store.GetChatUsers(chatID, "", 50, 0)
+			users, err := h.store.GetChatUsers(botID, chatID, "", 50, 0)
 			if err != nil {
 				return false
 			}
@@ -353,16 +355,17 @@ func TestE2E_ChatAdmin(t *testing.T) {
 				}
 			}
 			return false
-		}, 5*time.Second, "M-02: Alice should be tracked after chat_member update")
+		}, 1*time.Second, "M-02: Alice should be tracked after chat_member update")
 	})
 
 	// M-03: new_chat_members — message with new member list.
 	// handleMessage → SaveMessage + TrackUser for each new member.
 	t.Run("M-03_new_chat_members", func(t *testing.T) {
-		h := setupE2E(t, withStartedProxy())
+		h := setupE2E(t)
 		token := "chatadmin:M03"
 		botID := setupChatAdminBot(h, token)
 
+		h.proxy.SetWebhookMode(botID)
 		if err := h.proxy.RestartBot(botID); err != nil {
 			t.Fatalf("M-03: RestartBot: %v", err)
 		}

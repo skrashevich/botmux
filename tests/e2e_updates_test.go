@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -177,6 +178,64 @@ func TestE2E_Updates_G02_PollLoopProcessesUpdate(t *testing.T) {
 	}
 	if msg.ChatID != chatID {
 		t.Errorf("chat_id: got %d, want %d", msg.ChatID, chatID)
+	}
+}
+
+func TestE2E_Updates_DoesNotSkipLaterBatchUpdatesAfterForwardFailure(t *testing.T) {
+	h := setupE2E(t, withFastBackoff())
+
+	const token = "1009:g09token"
+	h.fake.RegisterBot(token, "g09bot", 1009)
+
+	var sawUpdate2 atomic.Bool
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var update map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+			t.Errorf("backend decode update: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if id, _ := update["update_id"].(float64); int(id) == 2 {
+			sawUpdate2.Store(true)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Error(w, "temporary backend failure", http.StatusInternalServerError)
+	}))
+	defer backend.Close()
+
+	h.AddBot(models.BotConfig{
+		Name:          "G09 Bot",
+		Token:         token,
+		BotUsername:   "g09bot",
+		ManageEnabled: false,
+		ProxyEnabled:  true,
+		BackendURL:    backend.URL,
+	})
+
+	upd1 := loadFixture(t, "update_message_text.json")
+	upd2 := loadFixture(t, "update_message_text.json")
+	upd1["update_id"] = float64(1)
+	upd2["update_id"] = float64(2)
+	if msg, ok := upd1["message"].(map[string]any); ok {
+		msg["message_id"] = float64(901)
+	}
+	if msg, ok := upd2["message"].(map[string]any); ok {
+		msg["message_id"] = float64(902)
+	}
+	h.fake.EnqueueUpdate(token, upd1)
+	h.fake.EnqueueUpdate(token, upd2)
+
+	h.proxy.Start()
+	h.Eventually(func() bool {
+		return h.fake.RequestsCountFor("getUpdates") >= 1
+	}, time.Second, "first getUpdates request")
+	time.Sleep(50 * time.Millisecond)
+	h.proxy.StopAll()
+
+	if sawUpdate2.Load() {
+		t.Fatal("pollLoop forwarded update_id=2 even though update_id=1 failed")
 	}
 }
 

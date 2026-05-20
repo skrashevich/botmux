@@ -3802,7 +3802,7 @@ async function loadAdminLog(append = false) {
   if (!currentChat) return;
   if (!append) adminLogOffset = 0;
   try {
-    const logs = await api(`/api/adminlog?chat_id=${currentChat.id}&limit=50&offset=${adminLogOffset}`);
+    const logs = await api(`/api/adminlog?bot_id=${currentBotID}&chat_id=${currentChat.id}&limit=50&offset=${adminLogOffset}`);
     const html = logs.map(l => {
       const [label, cls] = getActionLabels()[l.action] || [l.action.toUpperCase(), 'log-action-default'];
       const target = l.target_name || (l.target_id ? `ID:${l.target_id}` : '');
@@ -3826,7 +3826,7 @@ function loadMoreAdminLog() { adminLogOffset += 50; loadAdminLog(true); }
 async function loadTags() {
   if (!currentChat) return;
   try {
-    const tags = await api(`/api/tags?chat_id=${currentChat.id}`);
+    const tags = await api(`/api/tags?bot_id=${currentBotID}&chat_id=${currentChat.id}`);
     const byUser = {};
     for (const t of tags) {
       if (!byUser[t.user_id]) byUser[t.user_id] = { username: t.username, user_id: t.user_id, tags: [] };
@@ -3861,7 +3861,7 @@ async function addTag() {
 }
 
 async function removeTag(tagID) {
-  try { await api(`/api/tags/remove?id=${tagID}`, { method: 'POST' }); toast(t('tag_removed')); loadTags(); }
+  try { await api(`/api/tags/remove?id=${tagID}&bot_id=${currentBotID}`, { method: 'POST' }); toast(t('tag_removed')); loadTags(); }
   catch(e) { toast(e.message, 'error'); }
 }
 
@@ -3873,7 +3873,7 @@ async function loadUsers(append = false) {
   const q = document.getElementById('usersSearchInput').value.trim();
   const searchParam = q ? `&q=${encodeURIComponent(q)}` : '';
   try {
-    const users = await api(`/api/users/list?chat_id=${currentChat.id}&limit=50&offset=${usersOffset}${searchParam}`);
+    const users = await api(`/api/users/list?bot_id=${currentBotID}&chat_id=${currentChat.id}&limit=50&offset=${usersOffset}${searchParam}`);
     const html = users.map(u => `
       <div class="user-card">
         <div class="user-card-info">
@@ -3906,7 +3906,7 @@ function loadMoreUsers() { usersOffset += 50; loadUsers(true); }
 function debounceUserSearch() { clearTimeout(usersSearchTimeout); usersSearchTimeout = setTimeout(() => loadUsers(), 300); }
 
 async function removeTagAndReloadUsers(tagID) {
-  try { await api(`/api/tags/remove?id=${tagID}`, { method: 'POST' }); toast(t('tag_removed')); loadUsers(); }
+  try { await api(`/api/tags/remove?id=${tagID}&bot_id=${currentBotID}`, { method: 'POST' }); toast(t('tag_removed')); loadUsers(); }
   catch(e) { toast(e.message, 'error'); }
 }
 
