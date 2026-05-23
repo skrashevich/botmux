@@ -545,7 +545,7 @@ func (s *Store) GetChats(botID int64) ([]models.Chat, error) {
 			COALESCE(m.text, ''), COALESCE(m.from_user, ''), COALESCE(m.date, 0)
 		FROM chats c
 		LEFT JOIN messages m ON m.bot_id = c.bot_id AND m.chat_id = c.id AND m.id = (
-			SELECT id FROM messages WHERE bot_id = c.bot_id AND chat_id = c.id ORDER BY id DESC LIMIT 1
+			SELECT id FROM messages WHERE bot_id = c.bot_id AND chat_id = c.id ORDER BY date DESC LIMIT 1
 		)
 		WHERE c.bot_id=?
 		ORDER BY CASE WHEN m.date IS NOT NULL THEN m.date ELSE 0 END DESC, c.title
@@ -638,7 +638,7 @@ func (s *Store) SaveMessage(m models.Message) error {
 func (s *Store) GetMessages(botID, chatID int64, limit, offset int) ([]models.Message, error) {
 	rows, err := s.db.Query(`
 		SELECT id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id, from_is_bot, sender_tag
-		FROM messages WHERE bot_id = ? AND chat_id = ? ORDER BY id DESC LIMIT ? OFFSET ?
+		FROM messages WHERE bot_id = ? AND chat_id = ? ORDER BY date DESC LIMIT ? OFFSET ?
 	`, botID, chatID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -720,7 +720,7 @@ func (s *Store) SearchMessages(botID, chatID int64, query string, limit int) ([]
 	rows, err := s.db.Query(`
 		SELECT id, bot_id, chat_id, from_user, from_id, text, date, reply_to_id, deleted, media_type, file_id, from_is_bot, sender_tag
 		FROM messages WHERE bot_id = ? AND chat_id = ? AND text LIKE ?
-		ORDER BY id DESC LIMIT ?
+		ORDER BY date DESC LIMIT ?
 	`, botID, chatID, "%"+query+"%", limit)
 	if err != nil {
 		return nil, err
