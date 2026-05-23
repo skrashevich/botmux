@@ -1,0 +1,28 @@
+---
+title: 'May 22, 2026'
+description: 'Webhook-to-polling switchover, stronger per-bot access controls, and security hardening.'
+---
+
+<Update label="2026-05-22" description="Week of May 22" tags={["Features", "Improvements", "Fixes"]}>
+
+## New features
+
+- **Switch bots from webhook back to polling** — You can now clear a bot's webhook mode and resume [long polling](/docs/en/features/long-polling) without restarting BotMux. This makes it easier to move bots between deployment styles or recover from a misconfigured webhook.
+
+## Improvements
+
+- **Per-bot access checks across the dashboard** — Endpoints that act on a specific bot or chat now consistently verify that the calling user has access to that bot. Users with limited bot assignments no longer see or affect bots outside their scope. See [users and roles](/docs/en/auth/users-and-roles) for how access is granted.
+
+- **More reliable update processing** — The internal update queue has been refactored so updates are acknowledged only after they are fully processed, reducing the chance of duplicate or dropped updates under load.
+
+- **Hardened dashboard cookies** — Session cookies are now marked `Secure`, so they are only sent over HTTPS. This closes a code-scanning finding and improves protection against session interception.
+
+## Bug fixes
+
+- **Shared chats are preserved when one bot leaves** — When multiple bots tracked the same chat, removing the chat from one bot could wipe shared data used by the others. The chat record is now retained as long as any bot still tracks it. See [multi-bot routing](/docs/en/concepts/multi-bot).
+
+- **Correct chat membership per bot** — Chat user lookups are now scoped to the requesting bot, so user lists and tags no longer mix members from other bots that share the same chat.
+
+- **Dependency updates** — Bumped `golang.org/x/crypto` and `modernc.org/sqlite` to their latest patch releases for upstream security and stability fixes.
+
+</Update>
