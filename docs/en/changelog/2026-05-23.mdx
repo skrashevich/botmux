@@ -1,0 +1,12 @@
+---
+title: 'May 23, 2026'
+description: 'Message lists and search now order by date.'
+---
+
+<Update label="2026-05-23" description="May 23" tags={["Fixes"]}>
+
+## Bug fixes
+
+- **Newly sent messages no longer hide behind seed data** — Listing messages with [`GET /api/messages`](/docs/en/api-reference/messages/list) and searching with [`GET /api/messages/search`](/docs/en/api-reference/messages/search) now order results by message date (newest first) instead of by message `id`. Telegram message IDs are per-chat counters and are not globally monotonic, so freshly sent messages with low IDs could previously be pushed off the page by older seed or demo messages with higher IDs once the limit was reached. The same ordering is also applied to the "last message" shown for each chat in the dashboard.
+
+</Update>
