@@ -1,0 +1,12 @@
+---
+title: '2026年5月23日'
+description: '消息列表和搜索现在按日期排序。'
+---
+
+<Update label="2026-05-23" description="5月23日" tags={["修复"]}>
+
+## 错误修复
+
+- **新发送的消息不再被种子数据淹没** — 使用 [`GET /api/messages`](/docs/zh/api-reference/messages/list) 列出消息以及使用 [`GET /api/messages/search`](/docs/zh/api-reference/messages/search) 搜索消息时，结果现在按消息日期（最新的在前）排序，而不是按消息 `id` 排序。Telegram 的消息 ID 是按每个聊天单独计数的，不是全局单调递增的，因此当达到分页上限时，刚刚发送、ID 较低的消息可能会被 ID 较高的旧种子或演示消息挤出页面。仪表板中每个聊天显示的"最后一条消息"也采用相同的排序规则。
+
+</Update>

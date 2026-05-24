@@ -955,7 +955,11 @@ paths:
     get:
       tags: [Messages]
       summary: List messages
-      description: Returns paginated messages for a chat.
+      description: |
+        Returns paginated messages for a chat, ordered by message date in descending
+        order (newest first). Telegram message IDs are per-chat counters and are not
+        globally monotonic, so ordering is by the message's `date` field rather than
+        by `id`.
       operationId: listMessages
       parameters:
         - name: chat_id
@@ -1003,7 +1007,10 @@ paths:
     get:
       tags: [Messages]
       summary: Search messages
-      description: Full-text search within a chat's message history.
+      description: |
+        Full-text search within a chat's message history. Results are ordered by
+        message date in descending order (newest first), so the most recent matching
+        messages appear before older ones regardless of message `id`.
       operationId: searchMessages
       parameters:
         - name: chat_id
