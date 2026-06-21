@@ -4,15 +4,13 @@ go 1.26.1
 
 require (
 	github.com/OvyFlash/telegram-bot-api v0.0.0-20260520191229-4464f18f9850
-	modernc.org/sqlite v1.51.0
+	modernc.org/sqlite v1.53.0
 )
 
 require (
 	go.uber.org/goleak v1.3.0
 	golang.org/x/crypto v0.52.0
 )
-
-require golang.org/x/tools v0.44.0 // indirect
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -22,7 +20,7 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/skrashevich/go-webp v0.1.0
 	golang.org/x/sys v0.45.0 // indirect
-	modernc.org/libc v1.72.3 // indirect
+	modernc.org/libc v1.73.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
