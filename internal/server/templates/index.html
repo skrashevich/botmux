@@ -3069,6 +3069,10 @@ function renderBridges(bridges) {
     const statusClass = b.enabled ? 'route-toggle-on' : 'route-toggle-off';
     const statusText = b.enabled ? 'ON' : 'OFF';
     const webhookURL = `${location.origin}/bridge/${b.id}/incoming`;
+    const secretLine = (b.protocol !== 'slack' && b.incoming_secret)
+      ? `<div style="font-family:var(--ff-mono);font-size:10px;color:var(--text3);word-break:break-all;margin-top:2px">
+          ${t('bridge_incoming_secret')}: <span style="cursor:pointer;border-bottom:1px dashed var(--cyan-dim)" onclick="navigator.clipboard.writeText('${esc(b.incoming_secret)}');this.style.color='var(--green)';setTimeout(()=>this.style.color='',1000)" title="Click to copy">${esc(b.incoming_secret)}</span>
+        </div>` : '';
     const lastAct = b.last_activity ? b.last_activity.replace('T',' ').substring(0,19) : '—';
     const errInfo = b.last_error ? `<span style="color:var(--magenta);font-size:10px;margin-left:8px">${esc(b.last_error)}</span>` : '';
     return `<div class="route-item" style="padding:10px 14px">
@@ -3081,6 +3085,7 @@ function renderBridges(bridges) {
         <div style="font-family:var(--ff-mono);font-size:10px;color:var(--text3);word-break:break-all">
           IN: <span style="cursor:pointer;border-bottom:1px dashed var(--cyan-dim)" onclick="navigator.clipboard.writeText('${webhookURL}');this.style.color='var(--green)';setTimeout(()=>this.style.color='',1000)" title="Click to copy">${esc(webhookURL)}</span>
         </div>
+        ${secretLine}
         ${b.callback_url ? `<div style="font-family:var(--ff-mono);font-size:10px;color:var(--text3);word-break:break-all">OUT: ${esc(b.callback_url)}</div>` : ''}
         <div style="font-size:10px;color:var(--text3);margin-top:2px">${t('last_activity')}: ${lastAct}${errInfo}</div>
       </div>
@@ -3124,7 +3129,11 @@ function showBridgeModal(bridgeId) {
         }
         const whURL = `${location.origin}/bridge/${b.id}/incoming`;
         const whEl = document.getElementById('bridgeWebhookURL');
-        whEl.innerHTML = `<span style="color:var(--text3)">${t('bridge_webhook_url')}:</span><br><span style="cursor:pointer" onclick="navigator.clipboard.writeText('${whURL}');this.style.color='var(--green)';setTimeout(()=>this.style.color='',1000)" title="Click to copy">${esc(whURL)}</span>`;
+        let whHTML = `<span style="color:var(--text3)">${t('bridge_webhook_url')}:</span><br><span style="cursor:pointer" onclick="navigator.clipboard.writeText('${whURL}');this.style.color='var(--green)';setTimeout(()=>this.style.color='',1000)" title="Click to copy">${esc(whURL)}</span>`;
+        if (b.protocol !== 'slack' && b.incoming_secret) {
+          whHTML += `<br><span style="color:var(--text3);margin-top:6px;display:inline-block">${t('bridge_incoming_secret')}:</span><br><span style="cursor:pointer" onclick="navigator.clipboard.writeText('${esc(b.incoming_secret)}');this.style.color='var(--green)';setTimeout(()=>this.style.color='',1000)" title="Click to copy">${esc(b.incoming_secret)}</span>`;
+        }
+        whEl.innerHTML = whHTML;
         whEl.style.display = '';
         updateBridgeProtocolHints();
       }

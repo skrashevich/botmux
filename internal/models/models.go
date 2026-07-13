@@ -180,16 +180,17 @@ type LLMRouteResult struct {
 
 // BridgeConfig represents a protocol bridge in the database
 type BridgeConfig struct {
-	ID           int64  `json:"id"`
-	Name         string `json:"name"`
-	Protocol     string `json:"protocol"`
-	LinkedBotID  int64  `json:"linked_bot_id"`
-	Config       string `json:"config"`
-	CallbackURL  string `json:"callback_url"`
-	Enabled      bool   `json:"enabled"`
-	CreatedAt    string `json:"created_at"`
-	LastActivity string `json:"last_activity,omitempty"`
-	LastError    string `json:"last_error,omitempty"`
+	ID             int64  `json:"id"`
+	Name           string `json:"name"`
+	Protocol       string `json:"protocol"`
+	LinkedBotID    int64  `json:"linked_bot_id"`
+	Config         string `json:"config"`
+	CallbackURL    string `json:"callback_url"`
+	IncomingSecret string `json:"incoming_secret,omitempty"`
+	Enabled        bool   `json:"enabled"`
+	CreatedAt      string `json:"created_at"`
+	LastActivity   string `json:"last_activity,omitempty"`
+	LastError      string `json:"last_error,omitempty"`
 }
 
 // BridgeIncomingMessage is the simple format external sources POST to us

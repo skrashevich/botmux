@@ -1964,7 +1964,12 @@ func (s *Server) handleBridgeAdd(w http.ResponseWriter, r *http.Request) {
 	if s.bridge != nil {
 		s.bridge.Reload(id)
 	}
-	writeJSON(w, map[string]any{"status": "ok", "id": id})
+	bridgeCfg, _ := s.store.GetBridge(id)
+	resp := map[string]any{"status": "ok", "id": id}
+	if bridgeCfg != nil && bridgeCfg.IncomingSecret != "" {
+		resp["incoming_secret"] = bridgeCfg.IncomingSecret
+	}
+	writeJSON(w, resp)
 }
 
 // handleBridgeUpdate updates an existing bridge.
@@ -2026,7 +2031,7 @@ func (s *Server) handleBridgeDelete(w http.ResponseWriter, r *http.Request) {
 
 // handleBridgeIncoming receives messages from external protocol bridges.
 // @Summary Bridge incoming webhook
-// @Description Receives a message from an external protocol and injects it as a Telegram update. URL format: /bridge/{id}/incoming. No authentication — bridges use the URL as a secret. For Slack bridges, handles Events API payloads (including url_verification challenge) and verifies request signatures. For webhook bridges, expects models.BridgeIncomingMessage JSON.
+// @Description Receives a message from an external protocol and injects it as a Telegram update. URL format: /bridge/{id}/incoming. Webhook bridges require X-Bridge-Secret header (or Authorization: Bearer). For Slack bridges, handles Events API payloads (including url_verification challenge) and verifies request signatures. For webhook bridges, expects models.BridgeIncomingMessage JSON.
 // @Tags bridges
 // @Accept json
 // @Produce json
@@ -2075,8 +2080,21 @@ func (s *Server) handleBridgeIncoming(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if this is a Slack bridge — route to Slack handler
-	cfg := s.bridge.GetBridge(bridgeID)
-	if cfg != nil && bridge.IsSlackBridge(cfg) {
+	cfg, err := s.store.GetBridge(bridgeID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(404)
+		w.Write([]byte(`{"error":"bridge not found"}`))
+		return
+	}
+	if !cfg.Enabled {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(403)
+		w.Write([]byte(`{"error":"bridge disabled"}`))
+		return
+	}
+
+	if bridge.IsSlackBridge(cfg) {
 		respBody, contentType, status, err := s.bridge.HandleSlackEvent(bridgeID, r.Header, body)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -2087,6 +2105,20 @@ func (s *Server) handleBridgeIncoming(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", contentType)
 		w.WriteHeader(status)
 		w.Write(respBody)
+		return
+	}
+
+	// Generic webhook bridge — require incoming secret
+	providedSecret := r.Header.Get("X-Bridge-Secret")
+	if providedSecret == "" {
+		if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
+			providedSecret = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+	}
+	if cfg.IncomingSecret == "" || providedSecret != cfg.IncomingSecret {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(401)
+		w.Write([]byte(`{"error":"invalid bridge secret"}`))
 		return
 	}
 
@@ -2265,7 +2297,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		Expires:  expiresAt,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteStrictMode,
 	})
 	writeJSON(w, map[string]any{
@@ -2292,7 +2324,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteStrictMode,
 	})
 	writeJSON(w, map[string]string{"status": "ok"})
@@ -2813,6 +2845,17 @@ func (s *Server) resolveBot(botID int64) *bot.Bot {
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
+}
+
+// isSecureRequest reports whether the request arrived over HTTPS (directly or via proxy).
+func isSecureRequest(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto == "https" {
+		return true
+	}
+	return false
 }
 
 func writeError(w http.ResponseWriter, err error) {

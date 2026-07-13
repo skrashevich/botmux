@@ -194,6 +194,7 @@
   "bridge_callback_hint": "When the bot sends a message, it will be POSTed here as JSON",
   "bridge_config": "Config (JSON)",
   "bridge_webhook_url": "Incoming webhook URL",
+  "bridge_incoming_secret": "Incoming secret (X-Bridge-Secret header)",
   "bridge_saved": "Bridge saved",
   "bridge_deleted": "Bridge deleted",
   "confirm_delete_bridge": "Delete this bridge and all its mappings?",

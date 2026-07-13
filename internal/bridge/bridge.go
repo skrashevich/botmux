@@ -104,7 +104,9 @@ func (bm *Manager) HandleIncoming(bridgeID int64, msg models.BridgeIncomingMessa
 		// Use a synthetic negative chat ID derived from bridge+external chat
 		// Format: -bridge_id * 1000000 - hash of external_chat_id
 		tgChatID = bm.syntheticChatID(bridgeID, msg.ExternalChatID)
-		bm.store.SaveBridgeChatMapping(bridgeID, msg.ExternalChatID, tgChatID)
+		if err := bm.store.SaveBridgeChatMapping(bridgeID, msg.ExternalChatID, tgChatID); err != nil {
+			return fmt.Errorf("save bridge chat mapping: %w", err)
+		}
 	}
 
 	// Build a Telegram-format update

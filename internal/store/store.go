@@ -413,6 +413,43 @@ func (s *Store) migrate() error {
 		return err
 	}
 
+	if err != nil {
+		return err
+	}
+
+	// Add incoming_secret column to bridges if missing
+	var hasIncomingSecret int
+	s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('bridges') WHERE name='incoming_secret'`).Scan(&hasIncomingSecret)
+	if hasIncomingSecret == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE bridges ADD COLUMN incoming_secret TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+		rows, err := s.db.Query(`SELECT id FROM bridges WHERE incoming_secret = ''`)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			secret, err := generateBridgeIncomingSecret()
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			if _, err := s.db.Exec(`UPDATE bridges SET incoming_secret=? WHERE id=?`, secret, id); err != nil {
+				rows.Close()
+				return err
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+	}
+
 	// Create default admin if no users exist
 	var userCount int
 	s.db.QueryRow(`SELECT COUNT(*) FROM auth_users`).Scan(&userCount)
@@ -744,11 +781,13 @@ func (s *Store) SearchMessages(botID, chatID int64, query string, limit int) ([]
 	var msgs []models.Message
 	for rows.Next() {
 		var m models.Message
-		rows.Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.RichText, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID, &m.FromIsBot, &m.SenderTag)
+		if err := rows.Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.RichText, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID, &m.FromIsBot, &m.SenderTag); err != nil {
+			return nil, err
+		}
 		m.DateStr = time.UnixMilli(m.Date).Format("2006-01-02 15:04:05")
 		msgs = append(msgs, m)
 	}
-	return msgs, nil
+	return msgs, rows.Err()
 }
 
 func (s *Store) MarkMessageDeleted(botID, chatID int64, messageID int) error {
@@ -1350,7 +1389,7 @@ func (s *Store) GetBotDescription(botID int64) (string, error) {
 // Bridge methods
 
 func (s *Store) GetBridges() ([]models.BridgeConfig, error) {
-	rows, err := s.db.Query(`SELECT id, name, protocol, linked_bot_id, config, callback_url, enabled, created_at, last_activity, last_error FROM bridges ORDER BY id`)
+	rows, err := s.db.Query(`SELECT id, name, protocol, linked_bot_id, config, callback_url, incoming_secret, enabled, created_at, last_activity, last_error FROM bridges ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -1358,7 +1397,7 @@ func (s *Store) GetBridges() ([]models.BridgeConfig, error) {
 	var result []models.BridgeConfig
 	for rows.Next() {
 		var b models.BridgeConfig
-		if err := rows.Scan(&b.ID, &b.Name, &b.Protocol, &b.LinkedBotID, &b.Config, &b.CallbackURL, &b.Enabled, &b.CreatedAt, &b.LastActivity, &b.LastError); err != nil {
+		if err := rows.Scan(&b.ID, &b.Name, &b.Protocol, &b.LinkedBotID, &b.Config, &b.CallbackURL, &b.IncomingSecret, &b.Enabled, &b.CreatedAt, &b.LastActivity, &b.LastError); err != nil {
 			return nil, err
 		}
 		result = append(result, b)
@@ -1368,8 +1407,8 @@ func (s *Store) GetBridges() ([]models.BridgeConfig, error) {
 
 func (s *Store) GetBridge(id int64) (*models.BridgeConfig, error) {
 	var b models.BridgeConfig
-	err := s.db.QueryRow(`SELECT id, name, protocol, linked_bot_id, config, callback_url, enabled, created_at, last_activity, last_error FROM bridges WHERE id=?`, id).
-		Scan(&b.ID, &b.Name, &b.Protocol, &b.LinkedBotID, &b.Config, &b.CallbackURL, &b.Enabled, &b.CreatedAt, &b.LastActivity, &b.LastError)
+	err := s.db.QueryRow(`SELECT id, name, protocol, linked_bot_id, config, callback_url, incoming_secret, enabled, created_at, last_activity, last_error FROM bridges WHERE id=?`, id).
+		Scan(&b.ID, &b.Name, &b.Protocol, &b.LinkedBotID, &b.Config, &b.CallbackURL, &b.IncomingSecret, &b.Enabled, &b.CreatedAt, &b.LastActivity, &b.LastError)
 	if err != nil {
 		return nil, err
 	}
@@ -1377,7 +1416,7 @@ func (s *Store) GetBridge(id int64) (*models.BridgeConfig, error) {
 }
 
 func (s *Store) GetBridgesForBot(botID int64) ([]models.BridgeConfig, error) {
-	rows, err := s.db.Query(`SELECT id, name, protocol, linked_bot_id, config, callback_url, enabled, created_at, last_activity, last_error FROM bridges WHERE linked_bot_id=? ORDER BY id`, botID)
+	rows, err := s.db.Query(`SELECT id, name, protocol, linked_bot_id, config, callback_url, incoming_secret, enabled, created_at, last_activity, last_error FROM bridges WHERE linked_bot_id=? ORDER BY id`, botID)
 	if err != nil {
 		return nil, err
 	}
@@ -1385,7 +1424,7 @@ func (s *Store) GetBridgesForBot(botID int64) ([]models.BridgeConfig, error) {
 	var result []models.BridgeConfig
 	for rows.Next() {
 		var b models.BridgeConfig
-		if err := rows.Scan(&b.ID, &b.Name, &b.Protocol, &b.LinkedBotID, &b.Config, &b.CallbackURL, &b.Enabled, &b.CreatedAt, &b.LastActivity, &b.LastError); err != nil {
+		if err := rows.Scan(&b.ID, &b.Name, &b.Protocol, &b.LinkedBotID, &b.Config, &b.CallbackURL, &b.IncomingSecret, &b.Enabled, &b.CreatedAt, &b.LastActivity, &b.LastError); err != nil {
 			return nil, err
 		}
 		result = append(result, b)
@@ -1394,8 +1433,15 @@ func (s *Store) GetBridgesForBot(botID int64) ([]models.BridgeConfig, error) {
 }
 
 func (s *Store) AddBridge(b models.BridgeConfig) (int64, error) {
-	res, err := s.db.Exec(`INSERT INTO bridges (name, protocol, linked_bot_id, config, callback_url, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		b.Name, b.Protocol, b.LinkedBotID, b.Config, b.CallbackURL, b.Enabled, time.Now().Format(time.RFC3339))
+	if b.IncomingSecret == "" {
+		secret, err := generateBridgeIncomingSecret()
+		if err != nil {
+			return 0, err
+		}
+		b.IncomingSecret = secret
+	}
+	res, err := s.db.Exec(`INSERT INTO bridges (name, protocol, linked_bot_id, config, callback_url, incoming_secret, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		b.Name, b.Protocol, b.LinkedBotID, b.Config, b.CallbackURL, b.IncomingSecret, b.Enabled, time.Now().Format(time.RFC3339))
 	if err != nil {
 		return 0, err
 	}
@@ -1403,8 +1449,15 @@ func (s *Store) AddBridge(b models.BridgeConfig) (int64, error) {
 }
 
 func (s *Store) UpdateBridge(b models.BridgeConfig) error {
-	_, err := s.db.Exec(`UPDATE bridges SET name=?, protocol=?, linked_bot_id=?, config=?, callback_url=?, enabled=? WHERE id=?`,
-		b.Name, b.Protocol, b.LinkedBotID, b.Config, b.CallbackURL, b.Enabled, b.ID)
+	if b.IncomingSecret == "" {
+		existing, err := s.GetBridge(b.ID)
+		if err != nil {
+			return err
+		}
+		b.IncomingSecret = existing.IncomingSecret
+	}
+	_, err := s.db.Exec(`UPDATE bridges SET name=?, protocol=?, linked_bot_id=?, config=?, callback_url=?, incoming_secret=?, enabled=? WHERE id=?`,
+		b.Name, b.Protocol, b.LinkedBotID, b.Config, b.CallbackURL, b.IncomingSecret, b.Enabled, b.ID)
 	return err
 }
 
@@ -1428,9 +1481,10 @@ func (s *Store) UpdateBridgeActivity(bridgeID int64, lastError string) {
 
 // Bridge chat mappings
 
-func (s *Store) SaveBridgeChatMapping(bridgeID int64, externalChatID string, telegramChatID int64) {
-	s.db.Exec(`INSERT OR REPLACE INTO bridge_chat_mappings (bridge_id, external_chat_id, telegram_chat_id) VALUES (?, ?, ?)`,
+func (s *Store) SaveBridgeChatMapping(bridgeID int64, externalChatID string, telegramChatID int64) error {
+	_, err := s.db.Exec(`INSERT OR REPLACE INTO bridge_chat_mappings (bridge_id, external_chat_id, telegram_chat_id) VALUES (?, ?, ?)`,
 		bridgeID, externalChatID, telegramChatID)
+	return err
 }
 
 func (s *Store) GetBridgeChatMapping(bridgeID int64, externalChatID string) (int64, error) {
@@ -1480,4 +1534,12 @@ func (s *Store) DB() *sql.DB {
 func (s *Store) UpdateDemoAdmin(passwordHash string) error {
 	_, err := s.db.Exec(`UPDATE auth_users SET username='demo', password_hash=?, display_name='Demo User', must_change_password=0 WHERE id=1`, passwordHash)
 	return err
+}
+
+func generateBridgeIncomingSecret() (string, error) {
+	token, err := auth.GenerateSessionToken()
+	if err != nil {
+		return "", err
+	}
+	return "brg_" + token, nil
 }

@@ -110,8 +110,9 @@ func (bm *Manager) HandleSlackEvent(bridgeID int64, header http.Header, body []b
 
 	// Verify signature using signing_secret
 	if slackCfg.SigningSecret == "" {
-		log.Printf("[bridge] WARNING: Slack bridge %d has no signing_secret - requests are NOT verified", bridgeID)
-	} else if !VerifySlackSignature(slackCfg.SigningSecret, header, body) {
+		return nil, "", 401, fmt.Errorf("slack signing_secret not configured")
+	}
+	if !VerifySlackSignature(slackCfg.SigningSecret, header, body) {
 		return nil, "", 401, fmt.Errorf("invalid slack signature")
 	}
 

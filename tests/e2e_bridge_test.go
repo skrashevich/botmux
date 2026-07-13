@@ -22,8 +22,8 @@ func TestE2E_Bridge(t *testing.T) {
 }
 
 // addWebhookBridge inserts a webhook bridge into the store and reloads it into
-// the in-memory BridgeManager. Returns the new bridge ID.
-func addWebhookBridge(t *testing.T, h *e2eHarness, botID int64, callbackURL string) int64 {
+// the in-memory BridgeManager. Returns the new bridge ID and incoming secret.
+func addWebhookBridge(t *testing.T, h *e2eHarness, botID int64, callbackURL string) (int64, string) {
 	t.Helper()
 	bridgeID, err := h.store.AddBridge(models.BridgeConfig{
 		Name:        "test-webhook",
@@ -36,9 +36,31 @@ func addWebhookBridge(t *testing.T, h *e2eHarness, botID int64, callbackURL stri
 	if err != nil {
 		t.Fatalf("addWebhookBridge: AddBridge: %v", err)
 	}
+	cfg, err := h.store.GetBridge(bridgeID)
+	if err != nil {
+		t.Fatalf("addWebhookBridge: GetBridge: %v", err)
+	}
 	// BridgeManager.Start() ran before AddBridge, so register in-memory via Reload.
 	h.bridge.Reload(bridgeID)
-	return bridgeID
+	return bridgeID, cfg.IncomingSecret
+}
+
+// postWebhookBridgeIncoming POSTs to /bridge/{id}/incoming with the bridge secret header.
+func postWebhookBridgeIncoming(t *testing.T, serverURL string, bridgeID int64, secret string, body []byte) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, serverURL+"/bridge/"+itoa64(bridgeID)+"/incoming", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("postBridgeIncoming: NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if secret != "" {
+		req.Header.Set("X-Bridge-Secret", secret)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("postBridgeIncoming: Do: %v", err)
+	}
+	return resp
 }
 
 // registerManagedBot creates a Bot instance against the fake TG server and
@@ -70,7 +92,7 @@ func testBridgeB03IncomingWebhook(t *testing.T) {
 	// Pre-create managed Bot so ensureManagedBot short-circuits with fake TG URL.
 	registerManagedBot(t, h, token, botID)
 
-	bridgeID := addWebhookBridge(t, h, botID, "")
+	bridgeID, bridgeSecret := addWebhookBridge(t, h, botID, "")
 
 	// Build the incoming message payload.
 	msg := models.BridgeIncomingMessage{
@@ -82,15 +104,7 @@ func testBridgeB03IncomingWebhook(t *testing.T) {
 	}
 	body, _ := json.Marshal(msg)
 
-	// POST to /bridge/{id}/incoming — no auth required.
-	resp, err := http.Post(
-		h.ts.URL+"/bridge/"+itoa64(bridgeID)+"/incoming",
-		"application/json",
-		bytes.NewReader(body),
-	)
-	if err != nil {
-		t.Fatalf("POST /bridge/incoming: %v", err)
-	}
+	resp := postWebhookBridgeIncoming(t, h.ts.URL, bridgeID, bridgeSecret, body)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -151,7 +165,7 @@ func testBridgeB04OutgoingCallback(t *testing.T) {
 	// Pre-create managed Bot so ensureManagedBot short-circuits with fake TG URL.
 	registerManagedBot(t, h, token, botID)
 
-	bridgeID := addWebhookBridge(t, h, botID, callbackSrv.URL)
+	bridgeID, bridgeSecret := addWebhookBridge(t, h, botID, callbackSrv.URL)
 
 	// Send an incoming message to establish the chat mapping.
 	// NotifyOutgoing needs GetBridgeChatMappingReverse to resolve the ext chat ID.
@@ -163,14 +177,7 @@ func testBridgeB04OutgoingCallback(t *testing.T) {
 		ExternalMsgID:  "ext-msg-b04-1",
 	}
 	inBody, _ := json.Marshal(inMsg)
-	resp, err := http.Post(
-		h.ts.URL+"/bridge/"+itoa64(bridgeID)+"/incoming",
-		"application/json",
-		bytes.NewReader(inBody),
-	)
-	if err != nil {
-		t.Fatalf("POST /bridge/incoming (setup): %v", err)
-	}
+	resp := postWebhookBridgeIncoming(t, h.ts.URL, bridgeID, bridgeSecret, inBody)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("setup POST: expected 200, got %d", resp.StatusCode)
@@ -240,7 +247,7 @@ func testBridgeB06MappingPersistence(t *testing.T) {
 	// Pre-create managed Bot so ensureManagedBot short-circuits with fake TG URL.
 	registerManagedBot(t, h, token, botID)
 
-	bridgeID := addWebhookBridge(t, h, botID, "")
+	bridgeID, bridgeSecret := addWebhookBridge(t, h, botID, "")
 
 	sendMsg := func(extMsgID, text string) {
 		t.Helper()
@@ -252,14 +259,7 @@ func testBridgeB06MappingPersistence(t *testing.T) {
 			ExternalMsgID:  extMsgID,
 		}
 		body, _ := json.Marshal(msg)
-		resp, err := http.Post(
-			h.ts.URL+"/bridge/"+itoa64(bridgeID)+"/incoming",
-			"application/json",
-			bytes.NewReader(body),
-		)
-		if err != nil {
-			t.Fatalf("POST /bridge/incoming: %v", err)
-		}
+		resp := postWebhookBridgeIncoming(t, h.ts.URL, bridgeID, bridgeSecret, body)
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("expected 200, got %d", resp.StatusCode)

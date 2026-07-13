@@ -187,6 +187,29 @@ type Manager struct {
 type proxyRunner struct {
 	cancel context.CancelFunc
 	botID  int64
+	done   chan struct{}
+}
+
+// blockedTelegramMethods are never executed via webhook reply passthrough.
+var blockedTelegramMethods = map[string]bool{
+	"logOut":        true,
+	"close":         true,
+	"deleteWebhook": true,
+	"setWebhook":    true,
+}
+
+func validTelegramMethod(m string) bool {
+	if m == "" || len(m) > 64 {
+		return false
+	}
+	for i := 0; i < len(m); i++ {
+		c := m[i]
+		ok := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func NewManager(s *store.Store, tgAPIBaseURL string) *Manager {
@@ -343,14 +366,18 @@ func (pm *Manager) ProcessUpdate(botID int64, rawUpdate map[string]any) bool {
 		log.Printf("[proxy] ProcessUpdate: botID=%d proxy enabled but no backend_url!", botID)
 	}
 
-	// Reverse routing (Source-NAT): check if this is a reply in a routed chat
-	pm.applyReverseRoutes(botID, rawUpdate)
+	// Skip routing when proxy forward failed — Telegram will redeliver the update
+	// and routing actions would otherwise run twice (duplicate forwards/copies).
+	if ackOffset {
+		// Reverse routing (Source-NAT): check if this is a reply in a routed chat
+		pm.applyReverseRoutes(botID, rawUpdate)
 
-	// Routing: check rules and forward to other bots
-	pm.applyRoutes(botID, rawUpdate)
+		// Routing: check rules and forward to other bots
+		pm.applyRoutes(botID, rawUpdate)
 
-	// LLM-based routing
-	pm.applyLLMRoutes(botID, rawUpdate)
+		// LLM-based routing
+		pm.applyLLMRoutes(botID, rawUpdate)
+	}
 
 	// Skip offset advancement for bridge-synthetic updates. Bridge uses
 	// time.Now().Unix() as seed (~1.7B+), while real Telegram update_ids are
@@ -418,19 +445,33 @@ func (pm *Manager) Start() {
 
 func (pm *Manager) startBot(botID int64) {
 	pm.mu.Lock()
-	defer pm.mu.Unlock()
-
+	var oldDone chan struct{}
 	if r, ok := pm.runners[botID]; ok {
 		log.Printf("[proxy] startBot: cancelling existing runner for botID=%d", botID)
 		r.cancel()
+		oldDone = r.done
 		delete(pm.runners, botID)
 	}
+	pm.mu.Unlock()
+
+	// Wait for the previous pollLoop to exit before starting a new one.
+	// Otherwise two concurrent getUpdates calls cause Telegram conflicts.
+	if oldDone != nil {
+		<-oldDone
+	}
+
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	pm.runners[botID] = &proxyRunner{cancel: cancel, botID: botID}
+	done := make(chan struct{})
+	pm.runners[botID] = &proxyRunner{cancel: cancel, botID: botID, done: done}
 	log.Printf("[proxy] startBot: launched pollLoop for botID=%d", botID)
 
-	go pm.pollLoop(ctx, botID)
+	go func() {
+		pm.pollLoop(ctx, botID)
+		close(done)
+	}()
 }
 
 func (pm *Manager) StopBot(botID int64) {
@@ -958,11 +999,9 @@ func (pm *Manager) applyReverseRoutes(botID int64, rawUpdate map[string]any) {
 			return // explicit reply but no matching route mapping
 		}
 	} else {
-		// Conversation mode: latest mapping for this target chat
-		mapping, err = pm.store.FindReverseMapping(botID, chatID)
-		if mapping == nil || err != nil {
-			return
-		}
+		// Require an explicit reply — using the latest mapping for the whole chat
+		// misroutes unrelated messages in active shared chats.
+		return
 	}
 
 	// Don't reverse-route messages sent by the target bot itself (avoid loops)
@@ -1143,6 +1182,14 @@ func (pm *Manager) handleWebhookReply(token string, body []byte) {
 	method, ok := methodRaw.(string)
 	if !ok || method == "" {
 		log.Printf("[proxy] handleWebhookReply: 'method' field is not a valid string: %v", methodRaw)
+		return
+	}
+	if !validTelegramMethod(method) {
+		log.Printf("[proxy] handleWebhookReply: rejected invalid method name: %q", method)
+		return
+	}
+	if blockedTelegramMethods[method] {
+		log.Printf("[proxy] handleWebhookReply: blocked destructive method %s", method)
 		return
 	}
 

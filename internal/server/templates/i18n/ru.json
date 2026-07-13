@@ -194,6 +194,7 @@
   "bridge_callback_hint": "Когда бот отправляет сообщение, оно будет отправлено сюда как JSON",
   "bridge_config": "Конфиг (JSON)",
   "bridge_webhook_url": "URL входящего вебхука",
+  "bridge_incoming_secret": "Секрет входящих запросов (заголовок X-Bridge-Secret)",
   "bridge_saved": "Мост сохранён",
   "bridge_deleted": "Мост удалён",
   "confirm_delete_bridge": "Удалить мост и все его маппинги?",
