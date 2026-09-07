@@ -47,6 +47,9 @@ func NewBot(token string, s *store.Store, botID int64, baseURL string) (*Bot, er
 	var err error
 	if baseURL != "" && baseURL != "https://api.telegram.org" {
 		api, err = tgbotapi.NewBotAPIWithAPIEndpoint(token, baseURL+"/bot%s/%s")
+		if err == nil {
+			api.SetFileEndpoint(baseURL + "/file/bot%s/%s")
+		}
 	} else {
 		api, err = tgbotapi.NewBotAPI(token)
 	}

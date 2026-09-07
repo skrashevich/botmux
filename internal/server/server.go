@@ -49,6 +49,7 @@ type Server struct {
 	LogBuf         *logbuf.LogBuffer
 	VersionChecker *version.Checker
 	TgAPIBaseURL   string // override for Telegram API base URL (tests/custom deployments)
+	TgAPIFilesRoot string // optional root for Local Bot API --local file_path reads
 }
 
 func NewServer(s *store.Store, p *proxy.Manager) *Server {
@@ -2920,19 +2921,6 @@ func validTelegramMethod(m string) bool {
 	return true
 }
 
-// validFilePath whitelists Telegram file paths (typically "photos/file_N.jpg"
-// or "documents/file_N.ext"). Reject traversal, schemes, and absolute paths.
-func validFilePath(p string) bool {
-	if p == "" || len(p) > 256 {
-		return false
-	}
-	if strings.Contains(p, "..") || strings.HasPrefix(p, "/") ||
-		strings.ContainsAny(p, "\\:@?#") {
-		return false
-	}
-	return true
-}
-
 // handleTelegramAPIProxy proxies requests to api.telegram.org and captures sent messages.
 // URL format: /tgapi/bot{TOKEN}/{method}
 // Backends set their API base URL to http://{addr}/tgapi/ instead of https://api.telegram.org/
@@ -3009,13 +2997,26 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Read request body
-	// Cap /tgapi/ body to 50 MB — sendDocument/sendVideo can include file uploads
-	// (inline multipart), but nothing legit will exceed this. Prevents OOM DoS.
-	reqBody, err := io.ReadAll(io.LimitReader(r.Body, 50*1024*1024))
-	if err != nil {
-		http.Error(w, "Failed to read request body", 400)
-		return
+	// Read or stream request body. Send methods may need the body for message capture;
+	// large multipart uploads stream through without buffering.
+	needsCapture := sendMethods[method] || method == "copyMessage"
+	var reqBody []byte
+	var bodyReader io.Reader = r.Body
+	skipCapture := false
+
+	if needsCapture && (r.ContentLength < 0 || r.ContentLength <= tgapiMaxBodyCapture) {
+		var err error
+		reqBody, err = io.ReadAll(io.LimitReader(r.Body, tgapiMaxBodyCapture))
+		if err != nil {
+			http.Error(w, "Failed to read request body", 400)
+			return
+		}
+		bodyReader = bytes.NewReader(reqBody)
+	} else {
+		if needsCapture {
+			skipCapture = true
+		}
+		bodyReader = io.LimitReader(r.Body, s.tgapiMaxBodySize())
 	}
 
 	// If method is empty, try to detect it from query param or request body
@@ -3051,14 +3052,17 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 
 	// Forward to Telegram
 	tgURL := fmt.Sprintf("%s/bot%s/%s", s.tgAPIURL(), botToken, method)
-	tgReq, err := http.NewRequestWithContext(r.Context(), r.Method, tgURL, io.NopCloser(strings.NewReader(string(reqBody))))
+	tgReq, err := http.NewRequestWithContext(r.Context(), r.Method, tgURL, bodyReader)
 	if err != nil {
 		http.Error(w, "Failed to create request", 500)
 		return
 	}
 	tgReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
+	if cl := r.Header.Get("Content-Length"); cl != "" {
+		tgReq.Header.Set("Content-Length", cl)
+	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: s.tgapiProxyTimeout()}
 	resp, err := client.Do(tgReq)
 	if err != nil {
 		log.Printf("[tgapi-proxy] %s FAILED: %v", method, err)
@@ -3068,6 +3072,10 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
+
+	if method == "getFile" && resp.StatusCode == 200 {
+		respBody = rewriteGetFileResponse(respBody)
+	}
 
 	// Forward response to the backend
 	for k, vv := range resp.Header {
@@ -3079,7 +3087,7 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 	w.Write(respBody)
 
 	// Capture sent messages from the response
-	if resp.StatusCode == 200 {
+	if resp.StatusCode == 200 && !skipCapture && len(reqBody) > 0 {
 		s.CaptureSentMessage(botToken, method, reqBody, r.Header.Get("Content-Type"), respBody)
 	}
 }
@@ -3137,9 +3145,11 @@ func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid bot token", 400)
 		return
 	}
-	getFileURL := fmt.Sprintf("%s/bot%s/getFile?file_id=%s", s.tgAPIURL(), token, url.QueryEscape(fileID))
-	client := &http.Client{Timeout: 15 * time.Second}
-	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, getFileURL, nil)
+	getFileURL := fmt.Sprintf("%s/bot%s/getFile", s.tgAPIURL(), token)
+	getFileBody, _ := json.Marshal(map[string]string{"file_id": fileID})
+	client := &http.Client{Timeout: s.tgapiGetFileTimeout()}
+	req, _ := http.NewRequestWithContext(r.Context(), http.MethodPost, getFileURL, bytes.NewReader(getFileBody))
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, "getFile failed", 500)
@@ -3166,8 +3176,7 @@ func (s *Server) handleMediaProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 2: Download and stream the file (with WebP→PNG conversion)
-	downloadURL := fmt.Sprintf("%s/file/bot%s/%s", s.tgAPIURL(), token, fileResp.Result.FilePath)
-	proxyFileDownload(w, r, downloadURL, fileResp.Result.FilePath, fileResp.Result.FileSize)
+	s.serveTelegramFile(w, r, token, fileResp.Result.FilePath, fileResp.Result.FileSize)
 }
 
 // handleInterceptSetWebhook intercepts setWebhook calls and configures botmux to proxy updates
@@ -3434,10 +3443,8 @@ func (s *Server) autoRegisterBot(token string) (*models.BotConfig, error) {
 // Handles WebP→PNG conversion for stickers, Content-Type detection, and Range requests
 // (required by Safari for <audio>/<video> playback).
 // fileSize may be 0 if unknown — in that case Content-Length is taken from upstream.
-func proxyFileDownload(w http.ResponseWriter, r *http.Request, downloadURL string, filePath string, fileSize int64) {
-	// 60s total client timeout — covers large media downloads but bounds the
-	// goroutine lifetime if upstream stalls.
-	client := &http.Client{Timeout: 60 * time.Second}
+func proxyFileDownload(w http.ResponseWriter, r *http.Request, downloadURL string, filePath string, fileSize int64, timeout time.Duration) {
+	client := &http.Client{Timeout: timeout}
 	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, downloadURL, nil)
 
 	// Forward Range header for browser media seeking support.
@@ -3530,14 +3537,14 @@ func (s *Server) handleTelegramFileProxy(w http.ResponseWriter, r *http.Request)
 	}
 
 	botToken := strings.TrimPrefix(parts[0], "bot")
-	remotePath := parts[1]
+	remotePath, err := url.PathUnescape(parts[1])
+	if err != nil || !validFilePath(remotePath) {
+		http.Error(w, "invalid file path", 400)
+		return
+	}
 
 	if !validBotToken(botToken) {
 		http.Error(w, "invalid bot token", 400)
-		return
-	}
-	if !validFilePath(remotePath) {
-		http.Error(w, "invalid file path", 400)
 		return
 	}
 
@@ -3547,8 +3554,7 @@ func (s *Server) handleTelegramFileProxy(w http.ResponseWriter, r *http.Request)
 	}
 	log.Printf("[tgapi-file] GET bot=%s path=%s", maskedToken, remotePath)
 
-	downloadURL := fmt.Sprintf("%s/file/bot%s/%s", s.tgAPIURL(), botToken, remotePath)
-	proxyFileDownload(w, r, downloadURL, remotePath, 0)
+	s.serveTelegramFile(w, r, botToken, remotePath, 0)
 }
 
 // inferTelegramMethod tries to guess the Telegram API method from request body fields.

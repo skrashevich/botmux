@@ -37,6 +37,29 @@ http://localhost:8080/tgapi/file/bot{TOKEN}/{file_path}
 
 This endpoint downloads the file from Telegram and streams it to the client. WebP files (stickers) are automatically converted to PNG for browser compatibility.
 
+## Local Bot API Server upstream
+
+BotMux can use a self-hosted [Telegram Bot API Server](https://github.com/tdlib/telegram-bot-api) as upstream instead of `api.telegram.org`:
+
+```bash
+./botmux -tg-api http://127.0.0.1:8081
+# or
+TELEGRAM_API_URL=http://127.0.0.1:8081 ./botmux
+```
+
+When the upstream runs in `--local` mode, `getFile` may return absolute filesystem paths. BotMux handles this in two ways:
+
+1. **Via `/tgapi/`** — `getFile` responses rewrite absolute `file_path` values to BotMux-relative paths, so backends can keep using `base_file_url=http://botmux:8080/tgapi`.
+2. **Direct filesystem reads** — if BotMux shares a volume with the Local Bot API server, point it at the files directory:
+
+```bash
+./botmux -tg-api http://127.0.0.1:8081 -tg-api-files /var/lib/telegram-bot-api
+# or
+TELEGRAM_API_FILES=/var/lib/telegram-bot-api ./botmux
+```
+
+With `-tg-api-files`, `/api/media` and `/tgapi/file/` can serve files directly from disk when colocated, avoiding redundant HTTP downloads. Large uploads (up to ~2 GB) and longer timeouts are enabled automatically when a custom `-tg-api` is set.
+
 ## Captured methods
 
 | Method | Description |

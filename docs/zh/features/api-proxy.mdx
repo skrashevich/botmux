@@ -37,6 +37,29 @@ http://localhost:8080/tgapi/file/bot{TOKEN}/{file_path}
 
 此端点从 Telegram 下载文件并流式传输给客户端。WebP 文件（贴纸）会自动转换为 PNG 以兼容浏览器。
 
+## Local Bot API Server 作为上游
+
+BotMux 可使用自托管的 [Telegram Bot API Server](https://github.com/tdlib/telegram-bot-api) 替代 `api.telegram.org`：
+
+```bash
+./botmux -tg-api http://127.0.0.1:8081
+# 或
+TELEGRAM_API_URL=http://127.0.0.1:8081 ./botmux
+```
+
+当上游以 `--local` 模式运行时，`getFile` 可能返回绝对文件系统路径。BotMux 通过两种方式处理：
+
+1. **通过 `/tgapi/`** — `getFile` 响应将绝对 `file_path` 重写为 BotMux 相对路径，后端可继续使用 `base_file_url=http://botmux:8080/tgapi`。
+2. **直接读取文件系统** — 若 BotMux 与 Local Bot API 共享卷，指定文件根目录：
+
+```bash
+./botmux -tg-api http://127.0.0.1:8081 -tg-api-files /var/lib/telegram-bot-api
+# 或
+TELEGRAM_API_FILES=/var/lib/telegram-bot-api ./botmux
+```
+
+使用 `-tg-api-files` 时，`/api/media` 和 `/tgapi/file/` 可直接从磁盘提供文件。设置自定义 `-tg-api` 后会自动启用更大的上传限制（约 2 GB）和更长的超时。
+
 ## 捕获的发送方法
 
 | 方法 | 说明 |

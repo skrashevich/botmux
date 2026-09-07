@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"image"
 	_ "image/png"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -135,6 +137,83 @@ func TestE2E_Files(t *testing.T) {
 		}
 		if len(body) != len(largePNG) {
 			t.Errorf("large file: got %d bytes, want %d bytes", len(body), len(largePNG))
+		}
+	})
+
+	// F-06: Local Bot API --local absolute file_path served from shared filesystem.
+	t.Run("F-06_local_absolute_path_via_fs", func(t *testing.T) {
+		root := t.TempDir()
+		localName := "documents/local.jpg"
+		localPath := filepath.Join(root, localName)
+		if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(localPath, jpegData, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		h.server.TgAPIFilesRoot = root
+
+		absPath := localPath
+		h.fake.SetHandler("getFile", func(w http.ResponseWriter, r *http.Request) {
+			h.fake.writeJSON(w, 200, map[string]any{
+				"ok": true,
+				"result": map[string]any{
+					"file_id":   "local-abs",
+					"file_path": absPath,
+					"file_size": len(jpegData),
+				},
+			})
+		})
+
+		resp, body := h.CallMedia(botID, "local-abs")
+		if resp.StatusCode != 200 {
+			t.Fatalf("expected status 200, got %d", resp.StatusCode)
+		}
+		if !bytes.Equal(body, jpegData) {
+			t.Fatalf("body mismatch: got %d bytes, want %d", len(body), len(jpegData))
+		}
+	})
+
+	// F-07: /tgapi/getFile rewrites absolute file_path for backends.
+	t.Run("F-07_getFile_rewrite_absolute_path", func(t *testing.T) {
+		h.fake.PutFile("var/lib/telegram-bot-api/photo.jpg", jpegData, "image/jpeg")
+		h.fake.SetHandler("getFile", func(w http.ResponseWriter, r *http.Request) {
+			h.fake.writeJSON(w, 200, map[string]any{
+				"ok": true,
+				"result": map[string]any{
+					"file_id":   "abs-photo",
+					"file_path": "/var/lib/telegram-bot-api/photo.jpg",
+					"file_size": len(jpegData),
+				},
+			})
+		})
+
+		status, resp := h.CallTgapi("getFile", token, map[string]any{"file_id": "abs-photo"})
+		if status != 200 {
+			t.Fatalf("expected status 200, got %d; resp=%v", status, resp)
+		}
+		result := resp["result"].(map[string]any)
+		if result["file_path"] != "var/lib/telegram-bot-api/photo.jpg" {
+			t.Fatalf("file_path: got %v", result["file_path"])
+		}
+	})
+
+	// F-08: /tgapi/file/ downloads using rewritten relative path.
+	t.Run("F-08_tgapi_file_rewritten_path", func(t *testing.T) {
+		h.fake.PutFile("var/lib/telegram-bot-api/photo.jpg", jpegData, "image/jpeg")
+
+		url := h.ts.URL + "/tgapi/file/bot" + token + "/var/lib/telegram-bot-api/photo.jpg"
+		resp, err := http.Get(url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != 200 {
+			t.Fatalf("expected status 200, got %d", resp.StatusCode)
+		}
+		if !bytes.Equal(body, jpegData) {
+			t.Fatalf("body mismatch: got %d bytes, want %d", len(body), len(jpegData))
 		}
 	})
 }
