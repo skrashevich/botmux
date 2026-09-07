@@ -2849,12 +2849,32 @@ func writeJSON(w http.ResponseWriter, v any) {
 }
 
 // isSecureRequest reports whether the request arrived over HTTPS (directly or via proxy).
+// isSecureRequest reports whether the client reached us over HTTPS, either
+// directly (TLS) or via a reverse proxy that terminates TLS and forwards the
+// original scheme. The result drives the Secure attribute on the session
+// cookie: setting Secure on a plain-HTTP deployment makes browsers drop the
+// cookie entirely, which silently breaks login (see issue #43).
 func isSecureRequest(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
-	if proto := r.Header.Get("X-Forwarded-Proto"); proto == "https" {
-		return true
+	// X-Forwarded-Proto may hold a comma-separated chain when several proxies
+	// are involved; the first entry is the scheme the client used.
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		first, _, _ := strings.Cut(proto, ",")
+		if strings.EqualFold(strings.TrimSpace(first), "https") {
+			return true
+		}
+	}
+	// RFC 7239: Forwarded: for=1.2.3.4;proto=https;by=...
+	if fwd := r.Header.Get("Forwarded"); fwd != "" {
+		first, _, _ := strings.Cut(fwd, ",")
+		for _, part := range strings.Split(first, ";") {
+			k, v, ok := strings.Cut(strings.TrimSpace(part), "=")
+			if ok && strings.EqualFold(k, "proto") && strings.EqualFold(strings.Trim(v, `"`), "https") {
+				return true
+			}
+		}
 	}
 	return false
 }

@@ -262,7 +262,7 @@ Slack channel                    BotMux                         Telegram
 - Reverse routing (Source-NAT) works automatically for LLM-routed messages
 
 ### Authentication & Authorization
-- **Session-based authentication** with secure HTTP-only cookies (30-day sessions)
+- **Session-based authentication** with HTTP-only cookies (30-day sessions). The `Secure` attribute is set only when the request arrived over HTTPS (direct TLS, or `X-Forwarded-Proto: https` / `Forwarded: proto=https` from a reverse proxy), so plain-HTTP deployments keep working
 - **Role-based access control** — two roles: `admin` (full access) and `user` (assigned bots only)
 - **Default admin account** — auto-created on first run (`admin` / `admin`) with mandatory password change
 - **User management** — admin panel for adding, editing, and deleting users
