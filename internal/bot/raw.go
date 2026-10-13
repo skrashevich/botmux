@@ -19,14 +19,14 @@ func (b *Bot) ProcessRawUpdate(rawUpdate map[string]any) {
 }
 
 func (b *Bot) saveRawRichMessage(msg map[string]any, channelPost bool) {
+	if msg["ephemeral_message_id"] != nil || msg["receiver_user"] != nil {
+		return
+	}
 	rich, ok := msg["rich_message"]
 	if !ok {
 		return
 	}
 	richText := ExtractRichText(rich)
-	if richText == "" {
-		return
-	}
 
 	messageID := rawMapInt(msg["message_id"])
 	chat := rawMap(msg["chat"])
@@ -66,18 +66,23 @@ func (b *Bot) saveRawRichMessage(msg map[string]any, channelPost bool) {
 	}
 
 	m := models.Message{
-		ID:        messageID,
-		BotID:     b.botID,
-		ChatID:    chatID,
-		FromUser:  fromUser,
-		FromID:    fromID,
-		Text:      text,
-		RichText:  richText,
-		Date:      date,
-		ReplyToID: replyToID,
-		MediaType: "rich_message",
-		FromIsBot: fromIsBot,
-		SenderTag: rawString(msg["sender_tag"]),
+		ID:           messageID,
+		BotID:        b.botID,
+		ChatID:       chatID,
+		FromUser:     fromUser,
+		FromID:       fromID,
+		Text:         text,
+		RichText:     richText,
+		Date:         date,
+		ReplyToID:    replyToID,
+		MediaType:    "rich_message",
+		FromIsBot:    fromIsBot,
+		SenderTag:    rawString(msg["sender_tag"]),
+		ReplyMarkup:  marshalOptional(msg["reply_markup"]),
+		RichMessage:  marshalOptional(rich),
+		ThreadID:     rawMapInt(msg["message_thread_id"]),
+		MediaGroupID: rawString(msg["media_group_id"]),
+		Complete:     true,
 	}
 	if err := b.store.SaveMessage(m); err != nil {
 		log.Printf("Error saving raw rich message: %v", err)

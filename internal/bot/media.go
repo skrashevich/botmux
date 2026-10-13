@@ -8,6 +8,12 @@ func ExtractMedia(msg *tgbotapi.Message) (mediaType, fileID string) {
 		return "", ""
 	}
 	switch {
+	case msg.Invoice != nil:
+		mediaType = "invoice"
+	case msg.Game != nil:
+		mediaType = "game"
+	case msg.RichMessage != nil:
+		mediaType = "rich_message"
 	case msg.LivePhoto != nil:
 		mediaType = "live_photo"
 		if len(msg.LivePhoto.Photo) > 0 {

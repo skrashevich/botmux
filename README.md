@@ -83,9 +83,9 @@ This applies to **all modes** — monitoring, admin actions, and reverse proxy a
 - Response format identical to Telegram: `{"ok": true, "result": [...]}`
 - Supports `offset`, `limit` (max 100), and `timeout` (max 60s) parameters — same semantics as Telegram's `getUpdates`
 - Enable per bot via the "Long Poll" toggle in bot settings
-- In-memory ring buffer (1000 updates per bot) with waiter notification for efficient long polling
+- Durable SQLite queue with persisted consumer offsets and waiter notification for efficient long polling
 - Multiple clients can poll the same bot simultaneously
-- Works alongside push proxy — both can be active for the same bot
+- Management stays active in pull mode; the backend consumes updates from the queue instead of push delivery
 - Also available via authenticated API: `GET /api/updates/poll?bot_id=X` (Bearer API key or session cookie)
 
 ### Message Monitoring
@@ -148,7 +148,7 @@ Custom classification system for chat members:
   - **LLM (AI)** — describe the routing rule in natural language; an LLM decides which bot should handle the message
 - Three routing actions:
   - **Forward** — sends message text as a new message via the target bot
-  - **Copy** — forwards the original message (preserving author attribution) via Telegram's `forwardMessage`
+  - **Copy** — copies the original message via Telegram's `copyMessage` without a forwarded-author header
   - **Drop** — silently ignore the message
 - **Source-NAT return path** — replies to routed messages are automatically sent back through the original source bot to the original chat, maintaining conversational context
 - Bidirectional conversation tracking: each reply creates a new mapping, enabling ongoing cross-bot dialogs
@@ -494,7 +494,17 @@ The proxy transparently forwards all requests to Telegram and returns the respon
 
 The **API Proxy URL** is displayed in the bot detail view when proxy mode is enabled (click to copy).
 
-**Supported methods for message capture:** `sendMessage`, `sendPhoto`, `sendAudio`, `sendDocument`, `sendVideo`, `sendAnimation`, `sendVoice`, `sendVideoNote`, `sendSticker`, `sendLocation`, `sendVenue`, `sendContact`, `sendPoll`, `sendDice`, `forwardMessage`, `copyMessage`, `editMessageText`.
+**Bot API 10.3:** The Telegram SDK is pinned to a revision with 10.3 types and methods. JSON, form and multipart parameters are preserved by the API proxy, including query strings. BotMux requests all 27 supported update types; backend `allowed_updates` preferences are persisted separately for each bot for both polling and webhook forwarding. An omitted list retains the previous preference; an empty list uses Telegram's default set (excluding chat-member and reaction updates). Local polling filters apply when reading pending updates.
+
+**Inline keyboards:** Incoming and outgoing keyboards and rich-message structures are saved with the message. The panel previews every button action, supports URL and copy buttons, and provides a keyboard editor for composing, editing and removing buttons. The JSON editor accepts all Bot API 10.3 button types, styles, icons, disabled buttons and force-reply markup. Callback actions, Mini Apps, login, inline-query, game and payment buttons execute in Telegram; the panel displays their labels/actions. Callback events retain their Telegram ID, sender, original message or inline message ID, and answer status. Repeated delivery is deduplicated. The callback log supports explicit replies and keyboard editing for inline messages, retaining subsequent keyboard edits. Inline callbacks can be routed to an explicit destination chat even when Telegram provides no source chat. BotMux does not automatically answer callbacks on behalf of the backend.
+
+**Delivery:** Long-poll updates and consumer offsets live in SQLite and survive restarts. Managed queues retain unread updates without the previous 1000-item eviction. A queue write failure or backend delivery failure prevents acknowledgement; incoming webhooks return HTTP 503 so Telegram can retry. Successful update receipts prevent repeat routing of already handled events. Delivery remains at least once: a crash between a remote API call and its local receipt can still require backend idempotency.
+
+**Albums and topics:** `sendMediaGroup` captures every returned message and its `media_group_id`. The panel can send 2–10 media items using Telegram file IDs or URLs; file uploads remain available through the multipart Telegram API proxy. Topic IDs are stored, available as a history filter, and selectable when composing messages/albums. Topic creation, renaming, closing and reopening are available in the panel. The topic list is populated by observed service messages and successful topic operations; the Bot API has no method for enumerating all past topics.
+
+**Privacy:** Bot tokens are masked in proxy logs and network errors. Ephemeral payloads are excluded from request/update log previews, including requests with privacy parameters in the query string. Ephemeral content is forwarded to the bot's backend, but is excluded from shared message history and from ordinary, reverse and LLM routes. Private ephemeral callbacks are also excluded from the shared callback log. Rich messages retain their structure and render text and button previews; the panel is not a Telegram client and does not launch native Mini App/payment flows.
+
+**Supported methods for message capture:** `sendMessage`, `sendInvoice`, `sendGame`, `sendPaidMedia`, `sendRichMessage`, `sendLivePhoto`, `sendMediaGroup`, `editMessageReplyMarkup`, `sendPhoto`, `sendAudio`, `sendDocument`, `sendVideo`, `sendAnimation`, `sendVoice`, `sendVideoNote`, `sendSticker`, `sendLocation`, `sendVenue`, `sendContact`, `sendPoll`, `sendDice`, `forwardMessage`, `copyMessage`, `editMessageText`.
 
 ## Architecture
 

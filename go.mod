@@ -3,7 +3,7 @@ module github.com/skrashevich/botmux
 go 1.26.1
 
 require (
-	github.com/OvyFlash/telegram-bot-api v0.0.0-20260614133753-78a1eb63fa7a
+	github.com/OvyFlash/telegram-bot-api v0.0.0-20260826195316-83c4eada97a1
 	modernc.org/sqlite v1.58.0
 )
 

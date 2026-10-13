@@ -23,12 +23,15 @@ import (
 	"github.com/skrashevich/botmux/internal/store"
 )
 
-// UpdateQueue is an in-memory ring buffer of raw Telegram updates for long-poll consumers.
+// UpdateQueue persists managed bot updates in SQLite. Standalone queues used by
+// callers without a Store retain the bounded in-memory behavior.
 type UpdateQueue struct {
 	mu              sync.Mutex
 	updates         []models.QueuedUpdate
 	maxSize         int
 	waiters         []chan struct{}
+	store           *store.Store
+	botID           int64
 	confirmedOffset int64 // highest offset ever confirmed via Get(); prevents re-delivery
 }
 
@@ -43,6 +46,30 @@ func NewUpdateQueue(maxSize int) *UpdateQueue {
 // Enqueue adds a raw update to the queue, evicting the oldest if full, and wakes all waiters.
 // Updates already confirmed (UpdateID < confirmedOffset) are silently dropped.
 func (q *UpdateQueue) Enqueue(rawUpdate map[string]any) {
+	if err := q.EnqueueChecked(rawUpdate); err != nil {
+		log.Printf("queue enqueue failed: %v", err)
+	}
+}
+func (q *UpdateQueue) EnqueueChecked(rawUpdate map[string]any) error {
+	if q.store == nil {
+		q.enqueueMemory(rawUpdate)
+		return nil
+	}
+	if err := q.store.EnqueueTelegramUpdate(q.botID, rawUpdate); err != nil {
+		return err
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, ch := range q.waiters {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+	q.waiters = nil
+	return nil
+}
+func (q *UpdateQueue) enqueueMemory(rawUpdate map[string]any) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -83,6 +110,19 @@ func (q *UpdateQueue) Enqueue(rawUpdate map[string]any) {
 // Like the real Telegram API, calling Get with offset > 0 confirms (purges)
 // all updates with UpdateID < offset — they will never be returned again.
 func (q *UpdateQueue) Get(offset int64, limit int) []models.QueuedUpdate {
+	updates, err := q.GetChecked(offset, limit)
+	if err != nil {
+		log.Printf("queue read failed: %v", err)
+	}
+	return updates
+}
+func (q *UpdateQueue) GetChecked(offset int64, limit int) ([]models.QueuedUpdate, error) {
+	if q.store != nil {
+		return q.store.PendingTelegramUpdates(q.botID, offset, limit)
+	}
+	return q.getMemory(offset, limit), nil
+}
+func (q *UpdateQueue) getMemory(offset int64, limit int) []models.QueuedUpdate {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -123,9 +163,7 @@ func (q *UpdateQueue) Wait(ctx context.Context) <-chan struct{} {
 	ch := make(chan struct{}, 1)
 	q.waiters = append(q.waiters, ch)
 
-	// If context is already cancelled, signal immediately
-	go func() {
-		<-ctx.Done()
+	context.AfterFunc(ctx, func() {
 		q.mu.Lock()
 		defer q.mu.Unlock()
 		for i, w := range q.waiters {
@@ -138,7 +176,7 @@ func (q *UpdateQueue) Wait(ctx context.Context) <-chan struct{} {
 				break
 			}
 		}
-	}()
+	})
 
 	return ch
 }
@@ -152,6 +190,10 @@ func (q *UpdateQueue) WaiterCount() int {
 
 // QueueDepth returns the number of buffered updates.
 func (q *UpdateQueue) QueueDepth() int {
+	if q.store != nil {
+		n, _ := q.store.PendingUpdateCount(q.botID)
+		return n
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.updates)
@@ -172,6 +214,7 @@ func (e *rateLimitError) Error() string {
 // Manager manages polling and forwarding for all bots
 type Manager struct {
 	store             *store.Store
+	deliveryLocks     sync.Map // bot ID -> *sync.Mutex
 	mu                sync.Mutex
 	runners           map[int64]*proxyRunner
 	managedBots       map[int64]*bot.Bot     // botID -> Bot instance for management processing
@@ -181,6 +224,7 @@ type Manager struct {
 	llmRouter         *llm.Router   // LLM-based routing
 	tgAPIBaseURL      string        // base URL for Telegram API
 	retryDelayInitial time.Duration // initial backoff delay for pollLoop (default 1s)
+	responseHook      func(string, string, []byte, string, []byte)
 	retryDelayMax     time.Duration // maximum backoff delay for pollLoop (default 30s)
 }
 
@@ -234,6 +278,8 @@ func (pm *Manager) GetOrCreateUpdateQueue(botID int64) *UpdateQueue {
 	q, ok := pm.updateQueues[botID]
 	if !ok {
 		q = NewUpdateQueue(1000)
+		q.store = pm.store
+		q.botID = botID
 		pm.updateQueues[botID] = q
 	}
 	return q
@@ -260,6 +306,9 @@ func (pm *Manager) GetQueueStats(botID int64) (waiters int, depth int) {
 func (pm *Manager) RemoveUpdateQueue(botID int64) {
 	pm.mu.Lock()
 	delete(pm.updateQueues, botID)
+	if err := pm.store.ClearPendingUpdates(botID); err != nil {
+		log.Printf("queue clear failed: %v", err)
+	}
 	pm.mu.Unlock()
 }
 
@@ -321,7 +370,10 @@ func (pm *Manager) WebhookHandler(botID int64) http.HandlerFunc {
 		updateID, _ := rawUpdate["update_id"].(float64)
 		log.Printf("[proxy] WebhookHandler: botID=%d received update_id=%d", botID, int64(updateID))
 
-		pm.ProcessUpdate(botID, rawUpdate)
+		if !pm.ProcessUpdate(botID, rawUpdate) {
+			http.Error(w, "Update delivery failed; retry", http.StatusServiceUnavailable)
+			return
+		}
 
 		w.WriteHeader(200)
 	}
@@ -330,18 +382,36 @@ func (pm *Manager) WebhookHandler(botID int64) http.HandlerFunc {
 // ProcessUpdate handles a single update: proxy forwarding + management processing.
 // It returns false when the update must not be acknowledged yet.
 func (pm *Manager) ProcessUpdate(botID int64, rawUpdate map[string]any) bool {
+	lock, _ := pm.deliveryLocks.LoadOrStore(botID, new(sync.Mutex))
+	serial := lock.(*sync.Mutex)
+	serial.Lock()
+	defer serial.Unlock()
 	b, err := pm.store.GetBotConfig(botID)
 	if err != nil {
 		log.Printf("[proxy] ProcessUpdate: failed to get config for botID=%d: %v", botID, err)
 		return false
 	}
 
+	updateID, _ := rawUpdate["update_id"].(float64)
+	realUpdate := updateID > 0 && rawUpdate["_botmux_bridge"] != true
+	if realUpdate {
+		done, err := pm.store.HandledTelegramUpdate(botID, int64(updateID))
+		if err != nil {
+			return false
+		}
+		if done {
+			// Recover a crash after the delivery receipt but before the polling offset.
+			return pm.store.AdvanceTelegramOffset(botID, int64(updateID)+1) == nil
+		}
+	}
 	// Enqueue for long-poll consumers (before any other processing)
 	if b.LongPollEnabled {
-		pm.EnqueueUpdate(botID, rawUpdate)
+		if err := pm.GetOrCreateUpdateQueue(botID).EnqueueChecked(rawUpdate); err != nil {
+			pm.store.UpdateBotStatus(botID, "queue persist error: "+err.Error(), "")
+			return false
+		}
 	}
 
-	updateID, _ := rawUpdate["update_id"].(float64)
 	updateSummary := summarizeUpdate(rawUpdate)
 
 	// Management: process update for chat/message tracking (before forwarding,
@@ -352,7 +422,11 @@ func (pm *Manager) ProcessUpdate(botID int64, rawUpdate map[string]any) bool {
 
 	// Proxy: forward to backend (skip if long poll enabled — backend pulls via queue)
 	ackOffset := true
-	if b.ProxyEnabled && b.BackendURL != "" && !b.LongPollEnabled {
+	allowed, filterErr := pm.store.AllowsTelegramUpdate(botID, rawUpdate)
+	if filterErr != nil {
+		return false
+	}
+	if b.ProxyEnabled && b.BackendURL != "" && !b.LongPollEnabled && allowed {
 		log.Printf("[proxy] forward: botID=%d %s → %s", botID, updateSummary, b.BackendURL)
 		if err := pm.forwardUpdate(context.Background(), b, rawUpdate); err != nil {
 			pm.store.UpdateBotStatus(botID, fmt.Sprintf("forward error: %v", err), "")
@@ -379,15 +453,20 @@ func (pm *Manager) ProcessUpdate(botID int64, rawUpdate map[string]any) bool {
 		pm.applyLLMRoutes(botID, rawUpdate)
 	}
 
-	// Skip offset advancement for bridge-synthetic updates. Bridge uses
-	// time.Now().Unix() as seed (~1.7B+), while real Telegram update_ids are
-	// small positive ints (<1e9 in practice). Advancing bot.Offset past a real
-	// Telegram id would permanently skip all future real updates. Threshold
-	// 10^9 is a safe sentinel between real TG range and bridge synthetic range.
-	const bridgeUpdateIDThreshold = int64(1_000_000_000)
+	// Persist successful delivery before acknowledging it to Telegram.
+	if ackOffset && realUpdate {
+		if err := pm.store.MarkTelegramUpdateHandled(botID, int64(updateID)); err != nil {
+			pm.store.UpdateBotStatus(botID, "delivery receipt save failed: "+err.Error(), "")
+			return false
+		}
+	}
+	// Bridge updates are marked explicitly; Telegram update IDs have no artificial ceiling.
+
 	if ackOffset {
-		if realID := int64(updateID); realID > 0 && realID < bridgeUpdateIDThreshold {
-			pm.store.UpdateBotOffset(botID, realID+1)
+		if realID := int64(updateID); realID > 0 && rawUpdate["_botmux_bridge"] != true {
+			if err := pm.store.AdvanceTelegramOffset(botID, realID+1); err != nil {
+				return false
+			}
 		}
 	}
 	pm.store.UpdateBotStatus(botID, "", time.Now().Format(time.RFC3339))
@@ -630,15 +709,12 @@ func (pm *Manager) pollLoop(ctx context.Context, botID int64) {
 
 			// Honor Telegram's retry_after on 429 (rate limit). Short exponential
 			// backoff would hammer the API and extend the flood ban.
-			var rlErr *rateLimitError
-			if errors.As(err, &rlErr) {
+			if rlErr, ok := errors.AsType[*rateLimitError](err); ok {
 				delay := rlErr.After
 				if delay < retryDelay {
 					delay = retryDelay
 				}
-				if delay > maxRetryDelay*4 {
-					delay = maxRetryDelay * 4 // absolute cap against absurd retry_after
-				}
+
 				log.Printf("[proxy] pollLoop: botID=%d 429 retry_after=%s (honoring)", botID, delay)
 				select {
 				case <-ctx.Done():
@@ -738,6 +814,9 @@ func (pm *Manager) applyLLMRoutes(botID int64, rawUpdate map[string]any) {
 		msgText = caption
 	}
 	if msgText == "" {
+		msgText = bot.ExtractRichText(msg["rich_message"])
+	}
+	if msgText == "" {
 		return
 	}
 
@@ -780,6 +859,9 @@ func (pm *Manager) applyLLMRoutes(botID int64, rawUpdate map[string]any) {
 	if destChatID == 0 {
 		destChatID = chatID
 	}
+	if destChatID == 0 {
+		return
+	}
 
 	var sourceMsgID int
 	if msgIDFloat, ok := msg["message_id"].(float64); ok {
@@ -801,7 +883,7 @@ func (pm *Manager) applyLLMRoutes(botID int64, rawUpdate map[string]any) {
 		}
 	case "copy":
 		if sourceMsgID != 0 {
-			sentID, err := targetBot.ForwardMessageGetID(destChatID, chatID, sourceMsgID)
+			sentID, err := targetBot.CopyMessageGetID(destChatID, chatID, sourceMsgID)
 			if err != nil {
 				log.Printf("[llm-routing] copy FAILED: %v", err)
 			} else {
@@ -850,6 +932,9 @@ func (pm *Manager) applyRoutes(sourceBotID int64, rawUpdate map[string]any) {
 	}
 	if caption, ok := msg["caption"].(string); ok && msgText == "" {
 		msgText = caption
+	}
+	if msgText == "" {
+		msgText = bot.ExtractRichText(msg["rich_message"])
 	}
 	if from, ok := msg["from"].(map[string]any); ok {
 		if id, ok := from["id"].(float64); ok {
@@ -915,6 +1000,9 @@ func (pm *Manager) applyRoutes(sourceBotID int64, rawUpdate map[string]any) {
 		if destChatID == 0 {
 			destChatID = chatID
 		}
+		if destChatID == 0 {
+			continue
+		}
 
 		var sourceMsgID int
 		if msgIDFloat, ok := msg["message_id"].(float64); ok {
@@ -939,7 +1027,7 @@ func (pm *Manager) applyRoutes(sourceBotID int64, rawUpdate map[string]any) {
 			}
 		case "copy":
 			if sourceMsgID != 0 {
-				sentID, err := targetBot.ForwardMessageGetID(destChatID, chatID, sourceMsgID)
+				sentID, err := targetBot.CopyMessageGetID(destChatID, chatID, sourceMsgID)
 				if err != nil {
 					log.Printf("[routing] route id=%d copy FAILED: %v", route.ID, err)
 				} else {
@@ -1019,6 +1107,9 @@ func (pm *Manager) applyReverseRoutes(botID int64, rawUpdate map[string]any) {
 		msgText = caption
 	}
 	if msgText == "" {
+		msgText = bot.ExtractRichText(msg["rich_message"])
+	}
+	if msgText == "" {
 		return
 	}
 
@@ -1087,7 +1178,7 @@ func (pm *Manager) getUpdates(ctx context.Context, token string, offset int64, t
 	client := &http.Client{Timeout: time.Duration(timeout+10) * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Telegram request failed: %s", strings.ReplaceAll(err.Error(), token, "[bot token]"))
 	}
 	defer resp.Body.Close()
 
@@ -1102,6 +1193,9 @@ func (pm *Manager) getUpdates(ctx context.Context, token string, offset int64, t
 		Description string           `json:"description"`
 		ErrorCode   int              `json:"error_code"`
 		RetryAfter  int              `json:"retry_after"`
+		Parameters  struct {
+			RetryAfter int `json:"retry_after"`
+		} `json:"parameters"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("invalid response: %s", string(body[:min(200, len(body))]))
@@ -1109,6 +1203,9 @@ func (pm *Manager) getUpdates(ctx context.Context, token string, offset int64, t
 
 	if !result.OK {
 		log.Printf("[getUpdates] ← Telegram: token=%s ok=false error=%d: %s", maskedToken, result.ErrorCode, result.Description)
+		if result.Parameters.RetryAfter > 0 {
+			result.RetryAfter = result.Parameters.RetryAfter
+		}
 		if result.RetryAfter > 0 {
 			return nil, &rateLimitError{
 				After:       time.Duration(result.RetryAfter) * time.Second,
@@ -1151,53 +1248,51 @@ func (pm *Manager) forwardUpdate(ctx context.Context, b *models.BotConfig, updat
 
 	respBody, _ := io.ReadAll(resp.Body)
 
-	log.Printf("[proxy] forwardUpdate: backend responded %d (%d bytes): %s",
-		resp.StatusCode, len(respBody), truncate(string(respBody), 500))
+	log.Printf("[proxy] forwardUpdate: backend responded %d (%d bytes)", resp.StatusCode, len(respBody))
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("backend returned %d: %s", resp.StatusCode, truncate(string(respBody), 200))
+		return fmt.Errorf("backend returned %d", resp.StatusCode)
 	}
 
-	pm.handleWebhookReply(b.Token, respBody)
-	return nil
+	return pm.handleWebhookReply(b.Token, respBody)
 }
 
-func (pm *Manager) handleWebhookReply(token string, body []byte) {
+func (pm *Manager) handleWebhookReply(token string, body []byte) error {
 	if len(body) == 0 {
 		log.Printf("[proxy] handleWebhookReply: empty response body, no action")
-		return
+		return nil
 	}
 
 	var reply map[string]any
 	if err := json.Unmarshal(body, &reply); err != nil {
-		log.Printf("[proxy] handleWebhookReply: response is not JSON: %s", truncate(string(body), 200))
-		return
+		log.Printf("[proxy] handleWebhookReply: response is not JSON")
+		return nil
 	}
 
 	methodRaw, ok := reply["method"]
 	if !ok {
 		log.Printf("[proxy] handleWebhookReply: no 'method' field in response — not a webhook reply (keys: %v)", mapKeys(reply))
-		return
+		return nil
 	}
 	method, ok := methodRaw.(string)
 	if !ok || method == "" {
 		log.Printf("[proxy] handleWebhookReply: 'method' field is not a valid string: %v", methodRaw)
-		return
+		return nil
 	}
 	if !validTelegramMethod(method) {
 		log.Printf("[proxy] handleWebhookReply: rejected invalid method name: %q", method)
-		return
+		return nil
 	}
 	if blockedTelegramMethods[method] {
 		log.Printf("[proxy] handleWebhookReply: blocked destructive method %s", method)
-		return
+		return nil
 	}
 
 	delete(reply, "method")
 	data, err := json.Marshal(reply)
 	if err != nil {
 		log.Printf("[proxy] handleWebhookReply: failed to marshal reply params: %v", err)
-		return
+		return nil
 	}
 
 	apiURL := fmt.Sprintf("%s/bot%s/%s", pm.tgAPIBaseURL, token, method)
@@ -1205,14 +1300,29 @@ func (pm *Manager) handleWebhookReply(token string, body []byte) {
 
 	resp, err := pm.client.Post(apiURL, "application/json", bytes.NewReader(data))
 	if err != nil {
-		log.Printf("[proxy] handleWebhookReply: Telegram API call %s FAILED: %v", method, err)
-		return
+		return fmt.Errorf("webhook reply %s: %s", method, strings.ReplaceAll(err.Error(), token, "[bot token]"))
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
-	log.Printf("[proxy] handleWebhookReply: Telegram API %s responded %d: %s",
-		method, resp.StatusCode, truncate(string(respBody), 300))
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	var result struct {
+		OK          bool   `json:"ok"`
+		Description string `json:"description"`
+	}
+	if json.Unmarshal(respBody, &result) != nil || !result.OK || resp.StatusCode != 200 {
+		return fmt.Errorf("webhook reply %s failed: %s", method, result.Description)
+	}
+	pm.mu.Lock()
+	hook := pm.responseHook
+	pm.mu.Unlock()
+	if hook != nil {
+		hook(token, method, data, "application/json", respBody)
+	}
+	log.Printf("[proxy] handleWebhookReply: Telegram API %s responded %d", method, resp.StatusCode)
+	return nil
 }
 
 func (pm *Manager) ValidateToken(token string) (string, error) {
@@ -1340,8 +1450,28 @@ var messageLikeUpdateKeys = []string{
 }
 
 func updateMessagePayload(rawUpdate map[string]any) map[string]any {
+	if cb, ok := rawUpdate["callback_query"].(map[string]any); ok {
+		original, _ := cb["message"].(map[string]any)
+		if original != nil && (original["receiver_user"] != nil || original["ephemeral_message_id"] != nil) {
+			return nil
+		}
+		var chat any
+		if original != nil {
+			chat = original["chat"]
+		}
+		text := cb["data"]
+		if text == nil {
+			text = cb["game_short_name"]
+		}
+		// Inline callbacks have no chat; routes can still use an explicit target.
+		return map[string]any{"chat": chat, "from": cb["from"], "text": text, "_callback": true}
+	}
+
 	for _, key := range messageLikeUpdateKeys {
 		if msg, ok := rawUpdate[key].(map[string]any); ok {
+			if msg["ephemeral_message_id"] != nil || msg["receiver_user"] != nil {
+				return nil
+			}
 			return msg
 		}
 	}
@@ -1357,6 +1487,9 @@ func summarizeUpdate(update map[string]any) string {
 	for _, key := range messageLikeUpdateKeys {
 		if msg, ok := update[key].(map[string]any); ok {
 			summary += " type=" + key
+			if msg["receiver_user"] != nil || msg["ephemeral_message_id"] != nil {
+				return summary + " ephemeral"
+			}
 			if text, ok := msg["text"].(string); ok {
 				summary += fmt.Sprintf(" text=%q", truncate(text, 80))
 			}
@@ -1380,6 +1513,7 @@ func summarizeUpdate(update map[string]any) string {
 		"inline_query", "poll", "poll_answer",
 		"my_chat_member", "chat_member", "chat_join_request",
 		"chat_boost", "removed_chat_boost", "managed_bot",
+		"subscription", "stopped_message_generation",
 		"business_connection", "deleted_business_messages",
 		"purchased_paid_media", "pre_checkout_query", "shipping_query",
 	} {
@@ -1417,4 +1551,10 @@ func (pm *Manager) SetRetryDelays(initial, max time.Duration) {
 // SetLLMRouter sets the LLM router instance.
 func (pm *Manager) SetLLMRouter(r *llm.Router) {
 	pm.llmRouter = r
+}
+
+func (pm *Manager) SetResponseHook(hook func(string, string, []byte, string, []byte)) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.responseHook = hook
 }

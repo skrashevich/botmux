@@ -301,6 +301,12 @@ body::before {
 .msg-user { font-family: var(--ff-mono); font-size: 12px; font-weight: 500; color: var(--cyan); min-width: 140px; max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .msg-text { font-size: 13px; flex: 1; line-height: 1.55; word-break: break-word; }
 .msg-time { font-family: var(--ff-mono); font-size: 10px; color: var(--text3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.telegram-keyboard { display:grid; gap:4px; margin-top:6px; }
+.telegram-button-row { display:flex; gap:4px; flex-wrap:wrap; }
+.telegram-keyboard .danger { color:var(--red); }
+.telegram-keyboard .success { color:var(--green); }
+.telegram-keyboard .primary { color:var(--cyan); }
+.telegram-keyboard button:disabled { opacity:0.5; cursor:default; }
 .msg-actions { display: none; gap: 3px; }
 .msg-row:hover .msg-actions { display: flex; }
 .msg-row.msg-deleted { opacity: 0.45; border-left-color: var(--magenta) !important; }
@@ -1488,6 +1494,8 @@ body::before { display: none; }
         </div>
         <div id="bridgesList"></div>
       </div>
+      <div class="panel"><button class="btn btn-sm" onclick="loadCallbacks('botCallbackList')">Callbacks</button><div id="botCallbackList"></div>
+      </div>
     </div>
   </div>
 
@@ -1506,6 +1514,7 @@ body::before { display: none; }
 
     <div class="tab-bar">
       <div class="tab active" data-tab="messages" onclick="switchTab('messages')">Messages</div>
+      <div class="tab" data-tab="callbacks" onclick="switchTab('callbacks')">Callbacks</div>
       <div class="tab" data-tab="stats" onclick="switchTab('stats')">Analytics</div>
       <div class="tab" data-tab="admins" onclick="switchTab('admins')">Admins</div>
       <div class="tab" data-tab="adminlog" onclick="switchTab('adminlog')">Audit Log</div>
@@ -1517,6 +1526,8 @@ body::before { display: none; }
 
     <div id="tab-messages" class="tab-content" style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
       <div class="search-bar">
+        <select id="topicFilter" aria-label="Topic" onchange="changeTopic()"><option value="">All topics</option></select>
+        <button class="btn btn-sm" aria-label="Create topic" title="Create topic" onclick="manageTopic('create')">＋</button><button class="btn btn-sm" aria-label="Rename topic" title="Rename topic" onclick="manageTopic('edit')">✎</button><button class="btn btn-sm" aria-label="Close topic" title="Close topic" onclick="manageTopic('close')">🔒</button><button class="btn btn-sm" aria-label="Reopen topic" title="Reopen topic" onclick="manageTopic('reopen')">🔓</button>
         <input class="search-input" id="searchInput" type="text" placeholder="search messages..." oninput="debounceSearch()">
       </div>
       <div class="content" id="messagesContent" style="flex:1;">
@@ -1529,11 +1540,23 @@ body::before { display: none; }
         <span id="replyPreviewText"></span>
         <span class="reply-cancel" onclick="cancelReply()">&times;</span>
       </div>
+      <details class="compose-options" style="padding:8px 16px">
+       <summary id="composeOptionsLabel">Inline buttons and topic</summary>
+       <label for="composeThread" id="composeThreadLabel">Topic ID (0 = default)</label>
+       <input id="composeThread" type="number" min="0" value="0">
+       <label for="composeKeyboard" id="composeKeyboardLabel">Inline keyboard (JSON)</label>
+       <textarea id="composeKeyboard" rows="4" style="width:100%" placeholder='{"inline_keyboard":[[{"text":"Yes","callback_data":"yes"}]]}'></textarea>
+       <button class="btn btn-sm" onclick="composeAlbum()">Album</button>
+       <button class="btn btn-sm" onclick="addComposeButton()" id="addComposeButton">Add button</button>
+       <div id="composeKeyboardPreview"></div>
+      </details>
       <div class="msg-compose">
         <input class="msg-compose-input" id="msgComposeInput" type="text" placeholder="Send a message..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();composeSend()}">
         <button class="btn btn-primary btn-sm" onclick="composeSend()">SEND</button>
       </div>
     </div>
+
+    <div id="tab-callbacks" class="tab-content content" style="display:none"><button class="btn btn-sm" onclick="loadCallbacks()">↻</button><div id="callbackList"></div></div>
 
     <div id="tab-stats" class="tab-content content" style="display:none;">
       <div class="stats-grid" id="statsCards"></div>
@@ -1608,6 +1631,26 @@ body::before { display: none; }
 </div>
 
 <!-- Add/Edit Bot Modal -->
+<div id="telegramInputModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)finishTelegramInput(null)">
+ <div class="modal" role="dialog" aria-modal="true" aria-labelledby="telegramInputTitle">
+  <h3 id="telegramInputTitle"></h3>
+  <label for="telegramInputValue" id="telegramInputLabel"></label>
+  <textarea id="telegramInputValue" rows="5" style="width:100%"></textarea>
+  <button class="btn btn-primary" id="telegramInputOK" onclick="finishTelegramInput(document.getElementById('telegramInputValue').value)">OK</button>
+  <button class="btn" id="telegramInputCancel" onclick="finishTelegramInput(null)">Cancel</button>
+ </div>
+</div>
+<div id="keyboardModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeKeyboardEditor()">
+ <div class="modal" role="dialog" aria-modal="true" aria-labelledby="keyboardEditorTitle">
+  <h3 id="keyboardEditorTitle">Inline buttons</h3>
+  <label for="keyboardEditorJSON" id="keyboardEditorLabel">Keyboard JSON</label>
+  <textarea id="keyboardEditorJSON" rows="10" style="width:100%"></textarea>
+  <div id="keyboardEditorPreview"></div>
+  <button class="btn btn-primary" id="keyboardEditorSave" onclick="saveMessageKeyboard()">Save</button>
+  <button class="btn" id="keyboardEditorClear" onclick="clearKeyboardEditor()">Remove buttons</button>
+  <button class="btn" id="keyboardEditorCancel" onclick="closeKeyboardEditor()">Cancel</button>
+ </div>
+</div>
 <div id="botModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeBotModal()">
   <div class="modal" style="max-width:500px">
     <h3 id="botModalTitle">Add Bot</h3>
@@ -1769,7 +1812,7 @@ body::before { display: none; }
       <label>Then &mdash; Action</label>
       <select id="routeAction" class="route-modal-select" onchange="updateRoutePreview()">
         <option value="forward">Forward &mdash; send text as new message</option>
-        <option value="copy">Copy &mdash; forward original with attribution</option>
+        <option value="copy">Copy &mdash; copy original message</option>
         <option value="drop">Drop &mdash; ignore message, do not forward</option>
       </select>
     </div>
@@ -2337,6 +2380,10 @@ function toggleLang() {
 }
 
 function applyLang() {
+  document.getElementById('composeOptionsLabel').textContent=tgLabel('Inline-кнопки и тема','Inline buttons and topic');
+  document.getElementById('composeThreadLabel').textContent=tgLabel('ID темы (0 — по умолчанию)','Topic ID (0 = default)');
+  document.getElementById('addComposeButton').textContent=tgLabel('Добавить кнопку','Add button');
+  const callbacksTab=document.querySelector('[data-tab="callbacks"]');if(callbacksTab)callbacksTab.textContent=tgLabel('Нажатия кнопок','Callbacks');
   // lang toggle button
   document.querySelector('.lang-toggle').textContent = currentLang.toUpperCase();
   // login screen
@@ -2594,7 +2641,7 @@ function updateBroadcastLabels() {
 }
 
 const mediaIcons = {
-  photo: '🖼', live_photo: '📸', video: '🎬', animation: '🎞', sticker: '😀',
+  invoice: '💳', game: '🎮', photo: '🖼', live_photo: '📸', video: '🎬', animation: '🎞', sticker: '😀',
   voice: '🎤', audio: '🎵', document: '📎', video_note: '⏺'
 };
 
@@ -2663,7 +2710,8 @@ async function init() {
       const activeTab = document.querySelector('.tab.active');
       if (!activeTab) return;
       const tab = activeTab.dataset.tab;
-      if (tab === 'stats') loadStats();
+      if (tab === 'callbacks') loadCallbacks();
+      else if (tab === 'stats') loadStats();
       else if (tab === 'users') loadUsers();
       else if (tab === 'adminlog') loadAdminLog();
     }, 5000);
@@ -2736,6 +2784,8 @@ async function selectBot(botID) {
 }
 
 function showBotDetail() {
+ document.getElementById('botCallbackList').innerHTML='';
+ callbackEvents=[];
   document.getElementById('chatView').style.display = 'none';
   document.getElementById('emptyState').style.display = 'none';
   const view = document.getElementById('botDetailView');
@@ -3323,6 +3373,7 @@ function renderChatList(chats) {
 }
 
 async function selectChat(chatID) {
+  telegramMessages.clear();
   closeSidebar();
   const chats = await api(`/api/chats?bot_id=${currentBotID}`);
   currentChat = chats.find(c => c.id === chatID);
@@ -3340,6 +3391,9 @@ async function selectChat(chatID) {
   document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
   document.querySelector(`.chat-item[onclick="selectChat(${chatID})"]`)?.classList.add('active');
 
+  document.getElementById('composeThread').value='0';
+  document.getElementById('composeKeyboard').value='';
+  loadTopics();
   switchTab('messages');
 }
 
@@ -3351,6 +3405,7 @@ function switchTab(tab) {
 
   if (tab === 'messages') { messageOffset = 0; loadMessages(); if (currentChat) connectMessageStream(currentChat.id); }
   else disconnectMessageStream();
+  if (tab === 'callbacks') loadCallbacks();
   if (tab === 'stats') loadStats();
   if (tab === 'info') renderInfo();
   if (tab === 'admins') loadAdmins();
@@ -3363,23 +3418,25 @@ function switchTab(tab) {
 
 // Set of currently rendered message IDs for incremental updates
 let renderedMsgIds = new Set();
+const telegramMessages = new Map();
 let messageEventSource = null;
 
 function renderMsgRow(m, msgMap) {
   return `<div class="msg-row ${m.deleted ? 'msg-deleted' : ''}" id="msg-${m.id}">
     ${m.reply_to_id ? `<span class="msg-reply-badge" onclick="scrollToMsg(${m.reply_to_id})">↩ ${t('replying_to')} ${msgMap[m.reply_to_id] ? esc(msgMap[m.reply_to_id].from_user) : '#' + m.reply_to_id}</span>` : ''}
     <span class="msg-user${m.from_id ? ' clickable' : ''}" title="ID: ${m.from_id}" ${m.from_id ? `onclick="showUserProfile(${m.from_id})"` : ''}>${esc(m.from_user)}</span>${m.from_is_bot ? `<span class="msg-bot-badge">${t('bot_badge')}</span>` : ''}${m.sender_tag ? `<span class="msg-sender-tag">${esc(m.sender_tag)}</span>` : ''}
-    <span class="msg-text">${renderMsgContent(m)}</span>
+    <span class="msg-text">${m.callback_id ? `<small class="badge">Callback</small> ` : ''}${m.message_thread_id ? `<small class="badge">#${m.message_thread_id}</small> ` : ''}${m.media_group_id ? `<small class="badge" title="${esc(m.media_group_id)}">Album</small> ` : ''}${renderMsgContent(m)}${renderKeyboard(m.reply_markup)}${renderRichButtons(m.rich_message)}</span>
     ${m.deleted ? `<span class="msg-deleted-badge">${t('deleted')}</span>` : ''}
     <span class="msg-time">${m.date_str}</span>
     <div class="msg-actions">
-      ${!m.deleted ? `<button class="btn btn-sm" onclick="setReply(${m.id}, '${esc(m.from_user).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">${t('reply')}</button>` : ''}
-      ${currentChat.is_admin && !m.deleted ? `
+      ${m.id > 0 && m.media_type !== 'callback' && !m.deleted && m.from_is_bot && m.from_id === currentBot?.bot_telegram_id ? `<button class="btn btn-sm" onclick="editMessageKeyboard(${m.id})">${tgLabel('Кнопки','Buttons')}</button>` : ''}
+      ${m.id > 0 && m.media_type !== 'callback' && !m.deleted ? `<button class="btn btn-sm" onclick="setReply(${m.id}, '${esc(m.from_user).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">${t('reply')}</button>` : ''}
+      ${m.id > 0 && m.media_type !== 'callback' && currentChat.is_admin && !m.deleted ? `
         <button class="btn btn-sm" onclick="pinMsg(${m.id})">${t('pin')}</button>
         <button class="btn btn-danger btn-sm" onclick="deleteMsg(${m.id})">${t('del')}</button>
         ${m.from_id ? `<button class="btn btn-danger btn-sm" onclick="banUsr(${m.from_id})">${t('ban')}</button>` : ''}
       ` : ''}
-      ${!currentChat.is_admin && !m.deleted && currentBot?.bot_telegram_id && m.from_id === currentBot.bot_telegram_id ? `
+      ${m.id > 0 && m.media_type !== 'callback' && !currentChat.is_admin && !m.deleted && currentBot?.bot_telegram_id && m.from_id === currentBot.bot_telegram_id ? `
         <button class="btn btn-danger btn-sm" onclick="deleteMsg(${m.id})">${t('del')}</button>
       ` : ''}
     </div>
@@ -3390,16 +3447,20 @@ async function loadMessages(append = false, preserveScroll = false) {
   if (!currentChat) return;
   if (!append) messageOffset = 0;
   try {
-    const msgs = await api(`/api/messages?bot_id=${currentBotID}&chat_id=${currentChat.id}&limit=50&offset=${messageOffset}`);
+    const msgs = await api(`/api/messages?bot_id=${currentBotID}&chat_id=${currentChat.id}&limit=50&offset=${messageOffset}${topicQuery()}`);
     if (!msgs) return;
     const list = document.getElementById('messagesList');
     const content = document.getElementById('messagesContent');
+    msgs.forEach(m=>telegramMessages.set(m.id,m));
     const reversed = [...msgs].reverse();
     const msgMap = {};
     reversed.forEach(m => { msgMap[m.id] = m; });
 
     if (preserveScroll && !append && renderedMsgIds.size > 0) {
       // Incremental update: only add new messages at the bottom
+      reversed.filter(m=>renderedMsgIds.has(m.id)).forEach(m=>{
+       const existing=document.getElementById('msg-'+m.id);if(existing){const temp=document.createElement('div');temp.innerHTML=renderMsgRow(m,msgMap);existing.replaceWith(temp.firstElementChild);}
+      });
       const newMsgs = reversed.filter(m => !renderedMsgIds.has(m.id));
       if (newMsgs.length === 0) return; // nothing new
 
@@ -3467,6 +3528,9 @@ function connectMessageStream(chatID) {
   messageEventSource.onmessage = (e) => {
     try {
       const m = JSON.parse(e.data);
+      telegramMessages.set(m.id,m);
+      const topic=document.getElementById('topicFilter').value;
+      if(topic!=='' && Number(topic)!==Number(m.message_thread_id||0)) return;
       const list = document.getElementById('messagesList');
       const content = document.getElementById('messagesContent');
       const msgMap = {};
@@ -3521,13 +3585,14 @@ function debounceSearch() { clearTimeout(searchTimeout); searchTimeout = setTime
 
 async function doSearch() {
   const q = document.getElementById('searchInput').value.trim();
-  if (!q) { loadMessages(); return; }
+  if (!q) { loadMessages(); if(currentChat)connectMessageStream(currentChat.id); return; }
+  disconnectMessageStream();
   try {
-    const msgs = await api(`/api/messages/search?bot_id=${currentBotID}&chat_id=${currentChat.id}&q=${encodeURIComponent(q)}`);
+    const msgs = await api(`/api/messages/search?bot_id=${currentBotID}&chat_id=${currentChat.id}&q=${encodeURIComponent(q)}${topicQuery()}`);
     document.getElementById('messagesList').innerHTML = msgs.map(m => `
       <div class="msg-row ${m.deleted ? 'msg-deleted' : ''}">
         <span class="msg-user${m.from_id ? ' clickable' : ''}" ${m.from_id ? `onclick="showUserProfile(${m.from_id})"` : ''}>${esc(m.from_user)}</span>${m.from_is_bot ? `<span class="msg-bot-badge">${t('bot_badge')}</span>` : ''}${m.sender_tag ? `<span class="msg-sender-tag">${esc(m.sender_tag)}</span>` : ''}
-        <span class="msg-text">${m.media_type ? renderMsgContent(m) : highlight(esc(m.text || m.rich_text || ''), esc(q))}</span>
+        <span class="msg-text">${m.media_type ? renderMsgContent(m) : highlight(esc(m.text || m.rich_text || ''), esc(q))}${renderKeyboard(m.reply_markup)}${renderRichButtons(m.rich_message)}</span>
         ${m.deleted ? `<span class="msg-deleted-badge">${t('deleted')}</span>` : ''}
         <span class="msg-time">${m.date_str}</span>
       </div>
@@ -3565,6 +3630,9 @@ async function composeSend() {
   try {
     const body = { bot_id: currentBotID, chat_id: currentChat.id, text };
     if (replyToMsgID) body.reply_to_message_id = replyToMsgID;
+    body.message_thread_id=Number(document.getElementById('composeThread').value||0);
+    const keyboard=document.getElementById('composeKeyboard').value.trim();
+    if(keyboard) body.reply_markup=JSON.parse(keyboard);
     await api('/api/messages/send', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(body)
@@ -4489,6 +4557,159 @@ function appendLogEntry(entry) {
 
 function clearLogsView() {
   document.getElementById('logsContainer').innerHTML = '';
+}
+function tgLabel(ru,en) {return currentLang==='ru'?ru:en;}
+let telegramInputResolve=null;
+function askTelegramText(title,initial='') {
+ if(telegramInputResolve)finishTelegramInput(null);
+ document.getElementById('telegramInputTitle').textContent=title;
+ document.getElementById('telegramInputLabel').textContent=title;
+ document.getElementById('telegramInputCancel').textContent=tgLabel('Отмена','Cancel');
+ const field=document.getElementById('telegramInputValue');field.value=initial;
+ document.getElementById('telegramInputModal').style.display='flex';field.focus();
+ return new Promise(resolve=>{telegramInputResolve=resolve;});
+}
+function finishTelegramInput(value) {
+ document.getElementById('telegramInputModal').style.display='none';
+ const resolve=telegramInputResolve;telegramInputResolve=null;if(resolve)resolve(value);
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(telegramInputResolve)finishTelegramInput(null);else if(document.getElementById('keyboardModal').style.display==='flex')closeKeyboardEditor();}});
+
+function safeTelegramURL(value) {
+ try {const u=new URL(value);return ['http:','https:','tg:'].includes(u.protocol)?u.href:'';}catch{return '';}
+}
+function buttonAction(b) {
+ if(b.disabled!=null) return tgLabel('Недоступна','Disabled');
+ if(b.callback_data!=null) return 'callback: '+b.callback_data;
+ if(b.copy_text) return tgLabel('Копировать: ','Copy: ')+b.copy_text.text;
+ if(b.web_app) return 'Mini App';
+ if(b.login_url) return 'Login';
+ if(b.switch_inline_query!=null || b.switch_inline_query_current_chat!=null || b.switch_inline_query_chosen_chat) return 'Inline query';
+ if(b.callback_game) return 'Game';
+ if(b.pay) return tgLabel('Оплатить','Pay');
+ return b.url||'';
+}
+function richTextLabel(value) {
+ if(typeof value==='string') return value;
+ if(Array.isArray(value)) return value.map(richTextLabel).join('');
+ if(value && typeof value==='object') return richTextLabel(value.text)||value.alt||'';
+ return '';
+}
+function renderKeyboard(markup) {
+ if(!markup?.inline_keyboard) return '';
+ return `<div class="telegram-keyboard">${markup.inline_keyboard.map(row=>`<div class="telegram-button-row">${row.map(b=>{
+  const label=esc(richTextLabel(b.text));
+  const title=esc(buttonAction(b));
+  const style=['primary','success','danger','link'].includes(b.style)?b.style:'';
+  const icon=b.icon_custom_emoji_id?'<span aria-label="custom emoji">◈</span> ':'';
+  if(b.disabled!=null) return `<button class="btn btn-sm ${style}" disabled title="${title}">${icon}${label}</button>`;
+  const url=b.url && safeTelegramURL(b.url);
+  if(url) return `<a class="btn btn-sm ${style}" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="${title}">${icon}${label}</a>`;
+  if(b.copy_text) return `<button class="btn btn-sm ${style}" data-copy-text="${esc(b.copy_text.text)}" onclick="copyTelegramText(this)" title="${title}">${icon}${label}</button>`;
+  return `<span class="btn btn-sm ${style}" role="img" aria-label="${title}" title="${title}">${icon}${label}</span>`;
+ }).join('')}</div>`).join('')}</div>`;
+}
+function renderRichButtons(rich) {
+ if(!rich) return '';
+ const buttons=[];
+ function visit(value) {
+  if(!value || typeof value!=='object') return;
+  if(value.type==='buttons' && value.buttons) buttons.push(value.buttons);
+  if(value.type==='button' && value.button) buttons.push([value.button]);
+  for(const [key,child] of Object.entries(value)) if(key!=='buttons' && key!=='button') {
+   if(Array.isArray(child)) child.forEach(visit);else visit(child);
+  }
+ }
+ visit(rich);return renderKeyboard({inline_keyboard:buttons});
+}
+async function copyTelegramText(button) {
+ try {await navigator.clipboard.writeText(button.dataset.copyText);toast(tgLabel('Скопировано','Copied'));}catch(e){toast(e.message,'error');}
+}
+function topicQuery() {
+ const value=document.getElementById('topicFilter')?.value||'';
+ return value!==''?`&message_thread_id=${encodeURIComponent(value)}`:'';
+}
+async function loadTopics() {
+ if(!currentChat) return;
+ const chat=currentChat.id,bot=currentBotID;
+ try {
+  const topics=await api(`/api/topics?bot_id=${bot}&chat_id=${chat}`);
+  if(currentChat?.id!==chat || currentBotID!==bot) return;
+  document.getElementById('topicFilter').innerHTML=`<option value="">${tgLabel('Все темы','All topics')}</option><option value="0">${tgLabel('Без темы','No topic')}</option>`+topics.filter(x=>x.message_thread_id!==0).map(x=>`<option value="${x.message_thread_id}">${esc(x.name||'#'+x.message_thread_id)}${x.closed?' 🔒':''}</option>`).join('');
+ }catch(e){toast(e.message,'error');}
+}
+function changeTopic() {
+ document.getElementById('composeThread').value=document.getElementById('topicFilter').value||'0';
+ renderedMsgIds.clear();messageOffset=0;
+ if(document.getElementById('searchInput').value.trim())doSearch();else loadMessages();
+}
+async function addComposeButton() {
+ const text=await askTelegramText(tgLabel('Текст кнопки','Button text'));if(!text) return;
+ const data=await askTelegramText(tgLabel('Callback data (1–64 байта)','Callback data (1–64 bytes)'));if(data===null) return;
+ const field=document.getElementById('composeKeyboard');
+ try {const kb=field.value.trim()?JSON.parse(field.value):{inline_keyboard:[]};kb.inline_keyboard.push([{text,callback_data:data}]);field.value=JSON.stringify(kb,null,2);previewKeyboard(field,'composeKeyboardPreview');}catch(e){toast(e.message,'error');}
+}
+function previewKeyboard(field,target) {
+ try {document.getElementById(target).innerHTML=renderKeyboard(field.value.trim()?JSON.parse(field.value):null);}catch{document.getElementById(target).textContent=tgLabel('Некорректный JSON','Invalid JSON');}
+}
+let keyboardEditTarget=null;
+function editMessageKeyboard(id) {
+ keyboardEditTarget={message_id:id,chat_id:currentChat.id,bot_id:currentBotID};
+ openKeyboardEditor(telegramMessages.get(id)?.reply_markup);
+}
+function editInlineKeyboard(index) {
+ keyboardEditTarget={inline_message_id:callbackEvents[index].inline_message_id,bot_id:currentBotID};
+ openKeyboardEditor(callbackEvents[index].reply_markup);
+}
+function openKeyboardEditor(markup) {
+ document.getElementById('keyboardEditorJSON').value=JSON.stringify(markup||{inline_keyboard:[]},null,2);
+ document.getElementById('keyboardEditorTitle').textContent=tgLabel('Inline-кнопки','Inline buttons');
+ document.getElementById('keyboardEditorLabel').textContent=tgLabel('JSON клавиатуры','Keyboard JSON');
+ document.getElementById('keyboardEditorSave').textContent=tgLabel('Сохранить','Save');
+ document.getElementById('keyboardEditorClear').textContent=tgLabel('Удалить кнопки','Remove buttons');
+ document.getElementById('keyboardEditorCancel').textContent=tgLabel('Отмена','Cancel');
+ document.getElementById('keyboardModal').style.display='flex';
+ document.getElementById('keyboardEditorJSON').focus();
+ previewKeyboard(document.getElementById('keyboardEditorJSON'),'keyboardEditorPreview');
+}
+function clearKeyboardEditor(){const f=document.getElementById('keyboardEditorJSON');f.value='{"inline_keyboard":[]}';previewKeyboard(f,'keyboardEditorPreview');}
+function closeKeyboardEditor(){document.getElementById('keyboardModal').style.display='none';keyboardEditTarget=null;}
+async function saveMessageKeyboard(){
+ try {
+  const markup=JSON.parse(document.getElementById('keyboardEditorJSON').value);
+  await api('/api/messages/keyboard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...keyboardEditTarget,reply_markup:markup})});
+  closeKeyboardEditor();loadMessages();toast(tgLabel('Кнопки обновлены','Buttons updated'));
+ }catch(e){toast(e.message,'error');}
+}
+let callbackEvents=[];
+let callbackPanelTarget="callbackList";
+async function loadCallbacks(target="callbackList"){
+ if(!currentBotID) return;
+ callbackPanelTarget=target;
+ try {
+  const bot=currentBotID;const events=await api(`/api/callbacks?bot_id=${bot}`);
+  if(bot!==currentBotID)return;callbackEvents=events;
+  document.getElementById(target).innerHTML=callbackEvents.map((e,index)=>`<div class="panel"><strong>${esc(e.from_user||String(e.from_id))}</strong> <span class="badge">${e.answered?tgLabel('Ответ отправлен','Answered'):tgLabel('Без ответа','Unanswered')}</span><p>${esc(e.data||e.game_short_name)}</p><small>${esc(e.callback_id)} · ${e.inline_message_id?'Inline: '+esc(e.inline_message_id):'#'+e.message_id}</small><div><button class="btn btn-sm" onclick="answerCallbackEvent(${index})">${tgLabel('Ответить на callback','Answer callback')}</button>${e.inline_message_id?`<button class="btn btn-sm" onclick="editInlineKeyboard(${index})">${tgLabel('Изменить кнопки','Edit buttons')}</button>`:''}</div></div>`).join('')||tgLabel('Нет нажатий','No callbacks');
+ }catch(e){toast(e.message,'error');}
+}
+async function answerCallbackEvent(index){
+ const event=callbackEvents[index];
+ const text=await askTelegramText(tgLabel('Ответ на callback (до 200 символов)','Callback answer (up to 200 characters)'),'');if(text===null)return;
+ try {await api('/api/callbacks/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bot_id:currentBotID,callback_id:event.callback_id,text})});loadCallbacks(callbackPanelTarget);}catch(e){toast(e.message,'error');}
+}
+document.getElementById('composeKeyboard').addEventListener('input',e=>previewKeyboard(e.target,'composeKeyboardPreview'));
+document.getElementById('keyboardEditorJSON').addEventListener('input',e=>previewKeyboard(e.target,'keyboardEditorPreview'));
+
+async function manageTopic(action){
+ let name='';
+ const thread=Number(document.getElementById('topicFilter').value||0);
+ if(action!=='create' && thread<=0){toast(tgLabel('Выберите тему','Select a topic'),'error');return;}
+ if(action==='create'||action==='edit'){name=await askTelegramText(tgLabel('Название темы','Topic name'));if(!name)return;}
+ try{await api('/api/topics/manage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bot_id:currentBotID,chat_id:currentChat.id,message_thread_id:thread,action,name})});await loadTopics();toast(tgLabel('Тема обновлена','Topic updated'));}catch(e){toast(e.message,'error');}
+}
+async function composeAlbum(){
+ const raw=await askTelegramText(tgLabel('Альбом: JSON-массив из 2–10 файлов. media — file_id или URL','Album: JSON array of 2–10 files. media is a file_id or URL'),'[{"type":"photo","media":"FILE_ID_1"},{"type":"photo","media":"FILE_ID_2"}]');if(raw===null)return;
+ try{const media=JSON.parse(raw);await api('/api/messages/album',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bot_id:currentBotID,chat_id:currentChat.id,message_thread_id:Number(document.getElementById('composeThread').value||0),media})});loadMessages();toast(tgLabel('Альбом отправлен','Album sent'));}catch(e){toast(e.message,'error');}
 }
 </script>
 

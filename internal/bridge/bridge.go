@@ -114,7 +114,8 @@ func (bm *Manager) HandleIncoming(bridgeID int64, msg models.BridgeIncomingMessa
 	syntheticMsgID := int(updateID & 0x7FFFFFFF)
 
 	update := map[string]any{
-		"update_id": float64(updateID),
+		"update_id":      float64(updateID),
+		"_botmux_bridge": true,
 		"message": map[string]any{
 			"message_id": float64(syntheticMsgID),
 			"text":       msg.Text,

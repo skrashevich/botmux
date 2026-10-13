@@ -1,5 +1,7 @@
 package models
 
+import "encoding/json"
+
 // OnMessageSentFunc is called when a bot sends a message (for bridge outgoing notifications)
 type OnMessageSentFunc func(botID int64, chatID int64, text string, msgID int, replyToMsgID int)
 
@@ -39,22 +41,44 @@ type Chat struct {
 	LastMsgDate int64  `json:"last_msg_date,omitempty"`
 }
 
+type CallbackEvent struct {
+	ReplyMarkup     json.RawMessage `json:"reply_markup,omitempty"`
+	Answered        bool            `json:"answered"`
+	ID              int64           `json:"id"`
+	BotID           int64           `json:"bot_id"`
+	CallbackID      string          `json:"callback_id"`
+	ChatID          int64           `json:"chat_id"`
+	MessageID       int             `json:"message_id"`
+	InlineMessageID string          `json:"inline_message_id,omitempty"`
+	FromID          int64           `json:"from_id"`
+	FromUser        string          `json:"from_user"`
+	Data            string          `json:"data,omitempty"`
+	GameShortName   string          `json:"game_short_name,omitempty"`
+	Date            int64           `json:"date"`
+}
+
 type Message struct {
-	ID        int    `json:"id"`
-	BotID     int64  `json:"bot_id"`
-	ChatID    int64  `json:"chat_id"`
-	FromUser  string `json:"from_user"`
-	FromID    int64  `json:"from_id"`
-	Text      string `json:"text"`
-	RichText  string `json:"rich_text,omitempty"`
-	Date      int64  `json:"date"`
-	DateStr   string `json:"date_str"`
-	ReplyToID int    `json:"reply_to_id,omitempty"`
-	Deleted   bool   `json:"deleted"`
-	MediaType string `json:"media_type,omitempty"`
-	FileID    string `json:"file_id,omitempty"`
-	FromIsBot bool   `json:"from_is_bot,omitempty"`
-	SenderTag string `json:"sender_tag,omitempty"`
+	ReplyMarkup  json.RawMessage `json:"reply_markup,omitempty"`
+	RichMessage  json.RawMessage `json:"rich_message,omitempty"`
+	ThreadID     int             `json:"message_thread_id,omitzero"`
+	MediaGroupID string          `json:"media_group_id,omitempty"`
+	CallbackID   string          `json:"callback_id,omitempty"`
+	Complete     bool            `json:"-"` // Full Telegram Message: absent fields clear previous state.
+	ID           int             `json:"id"`
+	BotID        int64           `json:"bot_id"`
+	ChatID       int64           `json:"chat_id"`
+	FromUser     string          `json:"from_user"`
+	FromID       int64           `json:"from_id"`
+	Text         string          `json:"text"`
+	RichText     string          `json:"rich_text,omitempty"`
+	Date         int64           `json:"date"`
+	DateStr      string          `json:"date_str"`
+	ReplyToID    int             `json:"reply_to_id,omitempty"`
+	Deleted      bool            `json:"deleted"`
+	MediaType    string          `json:"media_type,omitempty"`
+	FileID       string          `json:"file_id,omitempty"`
+	FromIsBot    bool            `json:"from_is_bot,omitempty"`
+	SenderTag    string          `json:"sender_tag,omitempty"`
 }
 
 type ChatStats struct {

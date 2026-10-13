@@ -20,7 +20,7 @@ import (
 const (
 	tgapiMaxBodyCapture = 50 * 1024 * 1024
 	tgapiMaxBodyLocal   = 2100 * 1024 * 1024
-	tgapiMaxBodyCloud   = 50 * 1024 * 1024
+	tgapiMaxBodyCloud   = 510 * 1024 * 1024 // Up to ten 50 MiB album items plus multipart overhead.
 )
 
 // validFilePath whitelists Telegram file paths. Cloud API returns relative paths

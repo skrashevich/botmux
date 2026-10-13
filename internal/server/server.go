@@ -53,11 +53,15 @@ type Server struct {
 }
 
 func NewServer(s *store.Store, p *proxy.Manager) *Server {
-	return &Server{
+	srv := &Server{
 		store: s,
 		proxy: p,
 		bots:  make(map[int64]*bot.Bot),
 	}
+	if p != nil {
+		p.SetResponseHook(srv.CaptureSentMessage)
+	}
+	return srv
 }
 
 // tgAPIURL returns the effective Telegram API base URL for this server instance.
@@ -301,6 +305,12 @@ func (s *Server) BuildMux() *http.ServeMux {
 	// Messages
 	mux.HandleFunc("/api/messages", s.authMiddleware(s.handleMessages))
 	mux.HandleFunc("/api/messages/search", s.authMiddleware(s.handleSearchMessages))
+	mux.HandleFunc("/api/callbacks/answer", s.authMiddleware(s.handleAnswerCallback))
+	mux.HandleFunc("/api/callbacks", s.authMiddleware(s.handleCallbacks))
+	mux.HandleFunc("/api/topics/manage", s.authMiddleware(s.handleManageTopic))
+	mux.HandleFunc("/api/topics", s.authMiddleware(s.handleTopics))
+	mux.HandleFunc("/api/messages/album", s.authMiddleware(s.handleSendAlbum))
+	mux.HandleFunc("/api/messages/keyboard", s.authMiddleware(s.handleEditKeyboard))
 	mux.HandleFunc("/api/messages/send", s.authMiddleware(s.handleSendMessage))
 	mux.HandleFunc("/api/messages/pin", s.authMiddleware(s.handlePinMessage))
 	mux.HandleFunc("/api/messages/unpin", s.authMiddleware(s.handleUnpinMessage))
@@ -812,6 +822,14 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		limit = 50
 	}
 	msgs, err := s.store.GetMessages(botID, chatID, limit, offset)
+	if raw := r.URL.Query().Get("message_thread_id"); raw != "" {
+		thread, e := strconv.Atoi(raw)
+		if e != nil || thread < 0 {
+			http.Error(w, "invalid thread id", 400)
+			return
+		}
+		msgs, err = s.store.GetMessagesByThread(botID, chatID, thread, limit, offset)
+	}
 	if err != nil {
 		writeError(w, err)
 		return
@@ -941,96 +959,53 @@ func longPollResponse(updates []models.QueuedUpdate) map[string]any {
 // handleLongPollGetUpdates serves updates from UpdateQueue for /tgapi/bot{TOKEN}/getUpdates.
 // No auth required — the bot token in the URL is the authorization (same as Telegram API).
 func (s *Server) handleLongPollGetUpdates(w http.ResponseWriter, r *http.Request, botCfg *models.BotConfig) {
-	// Parse params from query string (GET) or form/JSON body (POST) — Telegram supports all
-	var offset int64
-	var limit, timeout int
-	if r.Method == http.MethodPost {
-		// Read body once, then try JSON → form fallback
-		bodyBytes, _ := io.ReadAll(io.LimitReader(r.Body, 64*1024))
-		var parsed bool
-		if len(bodyBytes) > 0 {
-			var jsonBody struct {
-				Offset  json.Number `json:"offset"`
-				Limit   json.Number `json:"limit"`
-				Timeout json.Number `json:"timeout"`
-			}
-			if json.Unmarshal(bodyBytes, &jsonBody) == nil && (jsonBody.Offset != "" || jsonBody.Limit != "" || jsonBody.Timeout != "") {
-				parsed = true
-				if jsonBody.Offset != "" {
-					offset, _ = jsonBody.Offset.Int64()
-				}
-				if jsonBody.Limit != "" {
-					v, _ := jsonBody.Limit.Int64()
-					limit = int(v)
-				}
-				if jsonBody.Timeout != "" {
-					v, _ := jsonBody.Timeout.Int64()
-					timeout = int(v)
-				}
-			}
-		}
-		if !parsed {
-			// Restore body for form/multipart parsing
-			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-			offset, _ = strconv.ParseInt(r.FormValue("offset"), 10, 64)
-			limit, _ = strconv.Atoi(r.FormValue("limit"))
-			timeout, _ = strconv.Atoi(r.FormValue("timeout"))
-		}
+	params, err := telegramParams(r)
+	if err != nil {
+		telegramAPIError(w, err.Error(), 400)
+		return
 	}
-	// Query params take precedence (or fallback for GET)
-	if v := r.URL.Query().Get("offset"); v != "" {
-		offset, _ = strconv.ParseInt(v, 10, 64)
-	}
-	if v := r.URL.Query().Get("limit"); v != "" {
-		limit, _ = strconv.Atoi(v)
-	}
-	if v := r.URL.Query().Get("timeout"); v != "" {
-		timeout, _ = strconv.Atoi(v)
-	}
-
+	offset, _ := strconv.ParseInt(params.Get("offset"), 10, 64)
+	limit, _ := strconv.Atoi(params.Get("limit"))
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	if timeout < 0 {
-		timeout = 0
+	timeout, _ := strconv.Atoi(params.Get("timeout"))
+	timeout = min(max(timeout, 0), 60)
+	if raw, ok := params["allowed_updates"]; ok {
+		if len(raw) != 1 {
+			telegramAPIError(w, "invalid allowed_updates", 400)
+			return
+		}
+		allowed, err := parseAllowedUpdates(raw[0])
+		if err != nil {
+			telegramAPIError(w, err.Error(), 400)
+			return
+		}
+		if err := s.store.SetAllowedUpdates(botCfg.ID, allowed); err != nil {
+			telegramAPIError(w, "subscription save failed", 500)
+			return
+		}
 	}
-	if timeout > 60 {
-		timeout = 60
-	}
-
+	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(timeout)*time.Second)
+	defer cancel()
 	queue := s.proxy.GetOrCreateUpdateQueue(botCfg.ID)
-
-	updates := queue.Get(offset, limit)
-	if len(updates) > 0 || timeout == 0 {
-		if len(updates) > 0 {
-			log.Printf("[long-poll] botID=%d → immediate: %d updates (offset=%d)", botCfg.ID, len(updates), offset)
+	for {
+		notify := queue.Wait(ctx) // Register before reading to avoid missing an enqueue.
+		updates, err := queue.GetChecked(offset, limit)
+		if err != nil {
+			telegramAPIError(w, "update queue read failed", 500)
+			return
 		}
-		writeJSON(w, longPollResponse(updates))
-		return
-	}
-
-	ctx := r.Context()
-	timer := time.NewTimer(time.Duration(timeout) * time.Second)
-	defer timer.Stop()
-	notify := queue.Wait(ctx)
-
-	select {
-	case <-ctx.Done():
-		log.Printf("[long-poll] botID=%d → client disconnected", botCfg.ID)
-		writeJSON(w, longPollResponse(nil))
-	case <-timer.C:
-		updates = queue.Get(offset, limit)
-		if len(updates) > 0 {
-			log.Printf("[long-poll] botID=%d → timeout: %d updates (offset=%d)", botCfg.ID, len(updates), offset)
+		if len(updates) > 0 || timeout == 0 {
+			writeJSON(w, longPollResponse(updates))
+			return
 		}
-		writeJSON(w, longPollResponse(updates))
-	case <-notify:
-		time.Sleep(50 * time.Millisecond)
-		updates = queue.Get(offset, limit)
-		if len(updates) > 0 {
-			log.Printf("[long-poll] botID=%d → notified: %d updates (offset=%d)", botCfg.ID, len(updates), offset)
+		select {
+		case <-ctx.Done():
+			writeJSON(w, longPollResponse(nil))
+			return
+		case <-notify:
 		}
-		writeJSON(w, longPollResponse(updates))
 	}
 }
 
@@ -1044,7 +1019,16 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	query := r.URL.Query().Get("q")
-	msgs, err := s.store.SearchMessages(botID, chatID, query, 50)
+	thread := -1
+	if raw := r.URL.Query().Get("message_thread_id"); raw != "" {
+		var err error
+		thread, err = strconv.Atoi(raw)
+		if err != nil || thread < 0 {
+			http.Error(w, "invalid topic id", 400)
+			return
+		}
+	}
+	msgs, err := s.store.SearchMessages(botID, chatID, query, 50, thread)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -1073,10 +1057,12 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		BotID            int64  `json:"bot_id"`
-		ChatID           int64  `json:"chat_id"`
-		Text             string `json:"text"`
-		ReplyToMessageID int    `json:"reply_to_message_id,omitempty"`
+		BotID            int64           `json:"bot_id"`
+		ChatID           int64           `json:"chat_id"`
+		Text             string          `json:"text"`
+		ReplyToMessageID int             `json:"reply_to_message_id,omitempty"`
+		ThreadID         int             `json:"message_thread_id,omitzero"`
+		ReplyMarkup      json.RawMessage `json:"reply_markup,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, err)
@@ -1090,16 +1076,13 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, fmt.Errorf("bot not found"))
 		return
 	}
-	if req.ReplyToMessageID > 0 {
-		if _, err := bot.SendMessageReply(req.ChatID, req.Text, req.ReplyToMessageID); err != nil {
-			writeError(w, err)
-			return
-		}
-	} else {
-		if err := bot.SendMessage(req.ChatID, req.Text); err != nil {
-			writeError(w, err)
-			return
-		}
+	if req.ReplyToMessageID < 0 || req.ThreadID < 0 {
+		http.Error(w, "invalid message or topic id", 400)
+		return
+	}
+	if _, err := bot.SendConfiguredMessage(req.ChatID, req.Text, req.ReplyToMessageID, req.ThreadID, req.ReplyMarkup); err != nil {
+		writeError(w, err)
+		return
 	}
 	writeJSON(w, map[string]string{"status": "ok"})
 }
@@ -1122,13 +1105,21 @@ func (s *Server) handlePinMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
-	bot, _, err := s.getBotFromRequest(r)
+	bot, botID, err := s.getBotFromRequest(r)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	msgID, _ := strconv.Atoi(r.URL.Query().Get("message_id"))
+	if msgID <= 0 {
+		http.Error(w, "real Telegram message required", 400)
+		return
+	}
+	if m, err := s.store.GetMessage(botID, chatID, msgID); err == nil && m.MediaType == "callback" {
+		http.Error(w, "callback events cannot be used as Telegram messages", 400)
+		return
+	}
 	if err := bot.PinMessage(chatID, msgID); err != nil {
 		writeError(w, err)
 		return
@@ -1158,13 +1149,21 @@ func (s *Server) handleUnpinMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
-	bot, _, err := s.getBotFromRequest(r)
+	bot, botID, err := s.getBotFromRequest(r)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	msgID, _ := strconv.Atoi(r.URL.Query().Get("message_id"))
+	if msgID <= 0 {
+		http.Error(w, "real Telegram message required", 400)
+		return
+	}
+	if m, err := s.store.GetMessage(botID, chatID, msgID); err == nil && m.MediaType == "callback" {
+		http.Error(w, "callback events cannot be used as Telegram messages", 400)
+		return
+	}
 	if err := bot.UnpinMessage(chatID, msgID); err != nil {
 		writeError(w, err)
 		return
@@ -1197,6 +1196,14 @@ func (s *Server) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	chatID, _ := strconv.ParseInt(r.URL.Query().Get("chat_id"), 10, 64)
 	msgID, _ := strconv.Atoi(r.URL.Query().Get("message_id"))
+	if msgID <= 0 {
+		http.Error(w, "real Telegram message required", 400)
+		return
+	}
+	if m, err := s.store.GetMessage(botID, chatID, msgID); err == nil && m.MediaType == "callback" {
+		http.Error(w, "callback events cannot be used as Telegram messages", 400)
+		return
+	}
 	if err := bot.DeleteMessage(chatID, msgID); err != nil {
 		writeError(w, err)
 		return
@@ -3019,23 +3026,24 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 
 	// Read or stream request body. Send methods may need the body for message capture;
 	// large multipart uploads stream through without buffering.
-	needsCapture := sendMethods[method] || method == "copyMessage"
+	needsCapture := sendMethods[method] || method == "copyMessage" || method == "answerCallbackQuery"
 	var reqBody []byte
 	var bodyReader io.Reader = r.Body
-	skipCapture := false
-
 	if needsCapture && (r.ContentLength < 0 || r.ContentLength <= tgapiMaxBodyCapture) {
 		var err error
-		reqBody, err = io.ReadAll(io.LimitReader(r.Body, tgapiMaxBodyCapture))
+		reqBody, err = io.ReadAll(io.LimitReader(r.Body, tgapiMaxBodyCapture+1))
 		if err != nil {
 			http.Error(w, "Failed to read request body", 400)
 			return
 		}
-		bodyReader = bytes.NewReader(reqBody)
-	} else {
-		if needsCapture {
-			skipCapture = true
+		if int64(len(reqBody)) > tgapiMaxBodyCapture {
+			// A chunked upload has no Content-Length. Preserve the unread tail.
+			bodyReader = io.LimitReader(io.MultiReader(bytes.NewReader(reqBody), r.Body), s.tgapiMaxBodySize())
+			reqBody = nil
+		} else {
+			bodyReader = bytes.NewReader(reqBody)
 		}
+	} else {
 		bodyReader = io.LimitReader(r.Body, s.tgapiMaxBodySize())
 	}
 
@@ -3065,10 +3073,13 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 		maskedToken = maskedToken[:4] + "..." + maskedToken[len(maskedToken)-4:]
 	}
 	bodyPreview := string(reqBody)
+	if bytes.Contains(reqBody, []byte("ephemeral_message_parameters")) || r.URL.Query().Has("ephemeral_message_parameters") || strings.Contains(method, "Ephemeral") {
+		bodyPreview = "[ephemeral payload]"
+	}
 	if len(bodyPreview) > 512 {
 		bodyPreview = bodyPreview[:512] + "..."
 	}
-	log.Printf("[tgapi-proxy] %s %s bot=%s path=%s body=%s", r.Method, method, maskedToken, r.URL.Path, bodyPreview)
+	log.Printf("[tgapi-proxy] %s %s bot=%s body=%s", r.Method, method, maskedToken, bodyPreview)
 
 	// Forward to Telegram
 	tgURL := fmt.Sprintf("%s/bot%s/%s", s.tgAPIURL(), botToken, method)
@@ -3077,6 +3088,7 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Failed to create request", 500)
 		return
 	}
+	tgReq.URL.RawQuery = r.URL.RawQuery
 	tgReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
 	if cl := r.Header.Get("Content-Length"); cl != "" {
 		tgReq.Header.Set("Content-Length", cl)
@@ -3085,8 +3097,13 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 	client := &http.Client{Timeout: s.tgapiProxyTimeout()}
 	resp, err := client.Do(tgReq)
 	if err != nil {
-		log.Printf("[tgapi-proxy] %s FAILED: %v", method, err)
-		http.Error(w, fmt.Sprintf("Telegram API error: %v", err), 502)
+		safeError := err.Error()
+		if networkError, ok := errors.AsType[*url.Error](err); ok {
+			safeError = networkError.Err.Error()
+		}
+		safeError = strings.ReplaceAll(safeError, botToken, "[bot token]")
+		log.Printf("[tgapi-proxy] %s FAILED: %s", method, safeError)
+		http.Error(w, "Telegram API error: "+safeError, 502)
 		return
 	}
 	defer resp.Body.Close()
@@ -3107,8 +3124,15 @@ func (s *Server) handleTelegramAPIProxy(w http.ResponseWriter, r *http.Request) 
 	w.Write(respBody)
 
 	// Capture sent messages from the response
-	if resp.StatusCode == 200 && !skipCapture && len(reqBody) > 0 {
-		s.CaptureSentMessage(botToken, method, reqBody, r.Header.Get("Content-Type"), respBody)
+	if resp.StatusCode == 200 {
+		captureBody, captureType := reqBody, r.Header.Get("Content-Type")
+		if r.URL.RawQuery != "" {
+			if params, err := telegramParamsFromBody(reqBody, r.URL.Query(), captureType); err == nil {
+				captureBody = []byte(params.Encode())
+				captureType = "application/x-www-form-urlencoded"
+			}
+		}
+		s.CaptureSentMessage(botToken, method, captureBody, captureType, respBody)
 	}
 }
 
@@ -3311,6 +3335,19 @@ func (s *Server) handleInterceptSetWebhook(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	if params, err := telegramParamsFromBody(body, r.URL.Query(), r.Header.Get("Content-Type")); err == nil {
+		if raw, ok := params["allowed_updates"]; ok && len(raw) > 0 {
+			allowed, err := parseAllowedUpdates(raw[0])
+			if err != nil {
+				http.Error(w, err.Error(), 400)
+				return
+			}
+			if err := s.store.SetAllowedUpdates(botCfg.ID, allowed); err != nil {
+				http.Error(w, "subscription save failed", 500)
+				return
+			}
+		}
+	}
 	// Update bot config: enable proxy, set backend URL
 	botCfg.ProxyEnabled = true
 	botCfg.BackendURL = webhookURL
@@ -3583,6 +3620,29 @@ func InferTelegramMethod(body []byte) string {
 	if err := json.Unmarshal(body, &params); err != nil {
 		return ""
 	}
+	if params["ephemeral_message_id"] != nil {
+		switch {
+		case params["rich_message"] != nil || params["text"] != nil:
+			return "editEphemeralMessageText"
+		case params["media"] != nil:
+			return "editEphemeralMessageMedia"
+		case params["caption"] != nil || params["show_caption_above_media"] != nil:
+			return "editEphemeralMessageCaption"
+		case params["reply_markup"] != nil:
+			return "editEphemeralMessageReplyMarkup"
+		default:
+			return "" // Deletion requires an explicit method.
+		}
+	}
+	if params["draft_id"] != nil {
+		if params["rich_message"] != nil {
+			return "sendRichMessageDraft"
+		}
+		if params["text"] != nil {
+			return "sendMessageDraft"
+		}
+		return ""
+	}
 	switch {
 	case params["rich_message"] != nil:
 		if params["message_id"] != nil {
@@ -3629,27 +3689,31 @@ func InferTelegramMethod(body []byte) string {
 
 // sendMethods lists Telegram API methods that return a models.Message in the result
 var sendMethods = map[string]bool{
-	"sendMessage":          true,
-	"sendRichMessage":      true,
-	"sendRichMessageDraft": true,
-	"sendPhoto":            true,
-	"sendAudio":            true,
-	"sendDocument":         true,
-	"sendVideo":            true,
-	"sendAnimation":        true,
-	"sendVoice":            true,
-	"sendVideoNote":        true,
-	"sendSticker":          true,
-	"sendLivePhoto":        true,
-	"sendLocation":         true,
-	"sendVenue":            true,
-	"sendContact":          true,
-	"sendPoll":             true,
-	"sendDice":             true,
-	"forwardMessage":       true,
-	"editMessageText":      true,
-	"editMessageCaption":   true,
-	"editMessageMedia":     true,
+	"sendMessage":            true,
+	"sendInvoice":            true,
+	"sendGame":               true,
+	"sendPaidMedia":          true,
+	"sendRichMessage":        true,
+	"sendMediaGroup":         true,
+	"editMessageReplyMarkup": true,
+	"sendPhoto":              true,
+	"sendAudio":              true,
+	"sendDocument":           true,
+	"sendVideo":              true,
+	"sendAnimation":          true,
+	"sendVoice":              true,
+	"sendVideoNote":          true,
+	"sendSticker":            true,
+	"sendLivePhoto":          true,
+	"sendLocation":           true,
+	"sendVenue":              true,
+	"sendContact":            true,
+	"sendPoll":               true,
+	"sendDice":               true,
+	"forwardMessage":         true,
+	"editMessageText":        true,
+	"editMessageCaption":     true,
+	"editMessageMedia":       true,
 }
 
 type telegramRequestParams struct {
@@ -3661,6 +3725,38 @@ type telegramRequestParams struct {
 }
 
 func (s *Server) CaptureSentMessage(token, method string, reqBody []byte, contentType string, respBody []byte) {
+	params, paramErr := telegramParamsFromBody(reqBody, nil, contentType)
+	if strings.Contains(method, "Ephemeral") || (paramErr == nil && (params.Has("ephemeral_message_parameters") || params.Has("ephemeral_message_id"))) {
+		return
+	}
+	if method == "answerCallbackQuery" {
+		var resp struct {
+			OK bool `json:"ok"`
+		}
+		params, err := telegramParamsFromBody(reqBody, nil, contentType)
+		if err == nil && json.Unmarshal(respBody, &resp) == nil && resp.OK {
+			if cfg := s.findBotByToken(token); cfg != nil {
+				s.store.MarkCallbackAnswered(cfg.ID, params.Get("callback_query_id"))
+			}
+		}
+		return
+	}
+	if method == "sendMediaGroup" {
+		var result struct {
+			OK     bool              `json:"ok"`
+			Result []json.RawMessage `json:"result"`
+		}
+		if json.Unmarshal(respBody, &result) == nil && result.OK {
+			for _, message := range result.Result {
+				wrapped, _ := json.Marshal(map[string]any{"ok": true, "result": message})
+				s.CaptureSentMessage(token, "sendMessage", reqBody, contentType, wrapped)
+			}
+		}
+		return
+	}
+	if method == "editMessageReplyMarkup" {
+		s.captureKeyboardEdit(token, reqBody, contentType, respBody)
+	}
 	if method == "copyMessage" {
 		s.CaptureCopiedMessage(token, reqBody, contentType, respBody)
 		return
@@ -3679,8 +3775,10 @@ func (s *Server) CaptureSentMessage(token, method string, reqBody []byte, conten
 	}
 
 	var msg struct {
-		MessageID int `json:"message_id"`
-		Chat      struct {
+		MessageID          int              `json:"message_id"`
+		EphemeralMessageID int              `json:"ephemeral_message_id"`
+		ReceiverUser       *json.RawMessage `json:"receiver_user"`
+		Chat               struct {
 			ID    int64  `json:"id"`
 			Type  string `json:"type"`
 			Title string `json:"title"`
@@ -3718,11 +3816,26 @@ func (s *Server) CaptureSentMessage(token, method string, reqBody []byte, conten
 		VideoNote *struct {
 			FileID string `json:"file_id"`
 		} `json:"video_note"`
-		LivePhoto   map[string]any  `json:"live_photo"`
-		RichMessage map[string]any  `json:"rich_message"`
-		SenderTag   string          `json:"sender_tag"`
+		LivePhoto   map[string]any `json:"live_photo"`
+		RichMessage map[string]any `json:"rich_message"`
+		SenderTag   string         `json:"sender_tag"`
+		Invoice     *struct {
+			Title       string `json:"title"`
+			Description string `json:"description"`
+		} `json:"invoice"`
+		Game *struct {
+			Title       string `json:"title"`
+			Description string `json:"description"`
+			Text        string `json:"text"`
+		} `json:"game"`
+		ReplyMarkup  json.RawMessage `json:"reply_markup"`
+		ThreadID     int             `json:"message_thread_id"`
+		MediaGroupID string          `json:"media_group_id"`
+		ReplyTo      *struct {
+			MessageID int `json:"message_id"`
+		} `json:"reply_to_message"`
 	}
-	if err := json.Unmarshal(resp.Result, &msg); err != nil || msg.MessageID == 0 {
+	if err := json.Unmarshal(resp.Result, &msg); err != nil || msg.MessageID == 0 || msg.EphemeralMessageID != 0 || msg.ReceiverUser != nil {
 		return
 	}
 
@@ -3735,11 +3848,24 @@ func (s *Server) CaptureSentMessage(token, method string, reqBody []byte, conten
 	if text == "" {
 		text = msg.Caption
 	}
+	if text == "" && msg.Invoice != nil {
+		text = strings.TrimSpace(msg.Invoice.Title + "\n" + msg.Invoice.Description)
+	}
+	if text == "" && msg.Game != nil {
+		text = msg.Game.Text
+		if text == "" {
+			text = strings.TrimSpace(msg.Game.Title + "\n" + msg.Game.Description)
+		}
+	}
 	richText := bot.ExtractRichText(msg.RichMessage)
 
 	// Detect media type and file_id from response
 	var mediaType, fileID string
 	switch {
+	case msg.Invoice != nil:
+		mediaType = "invoice"
+	case msg.Game != nil:
+		mediaType = "game"
 	case msg.RichMessage != nil:
 		mediaType = "rich_message"
 	case msg.LivePhoto != nil:
@@ -3771,17 +3897,26 @@ func (s *Server) CaptureSentMessage(token, method string, reqBody []byte, conten
 	}
 
 	m := models.Message{
-		ID:        msg.MessageID,
-		BotID:     msgBotID,
-		ChatID:    msg.Chat.ID,
-		FromUser:  fromUser,
-		FromID:    msg.From.ID,
-		Text:      text,
-		RichText:  richText,
-		Date:      msg.Date * 1000,
-		MediaType: mediaType,
-		FileID:    fileID,
-		SenderTag: msg.SenderTag,
+		ID:           msg.MessageID,
+		BotID:        msgBotID,
+		ChatID:       msg.Chat.ID,
+		FromUser:     fromUser,
+		FromID:       msg.From.ID,
+		Text:         text,
+		RichText:     richText,
+		Date:         msg.Date * 1000,
+		MediaType:    mediaType,
+		FileID:       fileID,
+		SenderTag:    msg.SenderTag,
+		ReplyMarkup:  msg.ReplyMarkup,
+		RichMessage:  respRichMessage(resp.Result),
+		ThreadID:     msg.ThreadID,
+		MediaGroupID: msg.MediaGroupID,
+		FromIsBot:    msg.From.IsBot,
+		Complete:     true,
+	}
+	if msg.ReplyTo != nil {
+		m.ReplyToID = msg.ReplyTo.MessageID
 	}
 	if err := s.store.SaveMessage(m); err != nil {
 		log.Printf("[tgapi-proxy] Failed to save sent message: %v", err)
@@ -3838,15 +3973,23 @@ func (s *Server) CaptureCopiedMessage(token string, reqBody []byte, contentType 
 
 	fromUser, fromID := s.findBotSenderByToken(token)
 	msg := models.Message{
-		ID:        resp.Result.MessageID,
-		BotID:     copyBotID,
-		ChatID:    params.ChatID,
-		FromUser:  fromUser,
-		FromID:    fromID,
-		Text:      text,
-		Date:      time.Now().UnixMilli(),
-		MediaType: sourceMsg.MediaType,
-		FileID:    sourceMsg.FileID,
+		ID:          resp.Result.MessageID,
+		BotID:       copyBotID,
+		ChatID:      params.ChatID,
+		FromUser:    fromUser,
+		FromID:      fromID,
+		Text:        text,
+		Date:        time.Now().UnixMilli(),
+		MediaType:   sourceMsg.MediaType,
+		FileID:      sourceMsg.FileID,
+		RichText:    sourceMsg.RichText,
+		RichMessage: sourceMsg.RichMessage,
+		Complete:    true,
+		FromIsBot:   true,
+	}
+	if p, err := telegramParamsFromBody(reqBody, nil, contentType); err == nil {
+		msg.ReplyMarkup = json.RawMessage(p.Get("reply_markup"))
+		msg.ThreadID, _ = strconv.Atoi(p.Get("message_thread_id"))
 	}
 	if err := s.store.SaveMessage(msg); err != nil {
 		log.Printf("[tgapi-proxy] Failed to save copied message: %v", err)

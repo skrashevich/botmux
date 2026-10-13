@@ -15,23 +15,35 @@ import (
 
 // AllowedUpdateTypes is the shared list of update types requested from the Telegram API.
 // Used by both StartPolling (library path) and ProxyManager.getUpdates (raw HTTP path).
-// Kept in sync with github.com/OvyFlash/telegram-bot-api UpdateType* constants (Bot API 10.0).
+// Kept in sync with github.com/OvyFlash/telegram-bot-api UpdateType* constants (Bot API 10.3).
 var AllowedUpdateTypes = []string{
 	tgbotapi.UpdateTypeMessage,
 	tgbotapi.UpdateTypeEditedMessage,
 	tgbotapi.UpdateTypeChannelPost,
 	tgbotapi.UpdateTypeEditedChannelPost,
+	tgbotapi.UpdateTypeBusinessConnection,
+	tgbotapi.UpdateTypeBusinessMessage,
+	tgbotapi.UpdateTypeEditedBusinessMessage,
+	tgbotapi.UpdateTypeDeletedBusinessMessages,
+	tgbotapi.UpdateTypeGuestMessage,
+	tgbotapi.UpdateTypeMessageReaction,
+	tgbotapi.UpdateTypeMessageReactionCount,
+	tgbotapi.UpdateTypeInlineQuery,
+	tgbotapi.UpdateTypeChosenInlineResult,
 	tgbotapi.UpdateTypeCallbackQuery,
+	tgbotapi.UpdateTypeShippingQuery,
+	tgbotapi.UpdateTypePreCheckoutQuery,
+	tgbotapi.UpdateTypePurchasedPaidMedia,
+	tgbotapi.UpdateTypePoll,
+	tgbotapi.UpdateTypePollAnswer,
 	tgbotapi.UpdateTypeMyChatMember,
 	tgbotapi.UpdateTypeChatMember,
 	tgbotapi.UpdateTypeChatJoinRequest,
-	tgbotapi.UpdateTypeBusinessMessage,
-	tgbotapi.UpdateTypeEditedBusinessMessage,
-	tgbotapi.UpdateTypeGuestMessage,
+	tgbotapi.UpdateTypeChatBoost,
+	tgbotapi.UpdateTypeRemovedChatBoost,
 	tgbotapi.UpdateTypeManagedBot,
-	tgbotapi.UpdateTypeMessageReaction,
-	tgbotapi.UpdateTypePoll,
-	tgbotapi.UpdateTypePollAnswer,
+	tgbotapi.UpdateTypeSubscription,
+	tgbotapi.UpdateTypeStoppedMessageGeneration,
 }
 
 type Bot struct {
@@ -99,6 +111,7 @@ func (b *Bot) SetWebhook(url string) error {
 	if err != nil {
 		return fmt.Errorf("invalid webhook URL: %w", err)
 	}
+	wh.AllowedUpdates = AllowedUpdateTypes
 	_, err = b.api.Request(wh)
 	if err != nil {
 		return fmt.Errorf("setWebhook failed: %w", err)
@@ -209,41 +222,36 @@ func (b *Bot) processUpdate(update tgbotapi.Update) {
 
 // handleCallbackQuery tracks inline-button interactions so they appear in message
 // history / user profile and can participate in routing. Stored as a synthetic
-// message with MediaType="callback" and Text set to the callback data.
+// message with MediaType="callback" and a negative local ID. Telegram callback
+// IDs and inline callbacks are retained in callback_events.
 func (b *Bot) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 	if cb == nil || cb.From == nil {
 		return
 	}
-	var chatID int64
-	var replyToID int
+	e := models.CallbackEvent{BotID: b.botID, CallbackID: cb.ID, InlineMessageID: cb.InlineMessageID, FromID: cb.From.ID, FromUser: FormatUsername(cb.From), Data: cb.Data, GameShortName: cb.GameShortName, Date: time.Now().UnixMilli()}
 	if cb.Message != nil {
-		chatID = cb.Message.Chat.ID
+		if cb.Message.ReceiverUser != nil || cb.Message.EphemeralMessageID != 0 {
+			return
+		}
+		e.ChatID = cb.Message.Chat.ID
+		e.MessageID = cb.Message.MessageID
 		b.trackChat(&cb.Message.Chat)
-		replyToID = cb.Message.MessageID
 	}
-	if chatID == 0 {
+	if e.CallbackID == "" {
 		return
 	}
-	fromUser := FormatUsername(cb.From)
-	b.store.TrackUser(chatID, cb.From.ID, fromUser)
-
-	// Synthetic message id for callback tracking. Use high positive range (>= 2e9)
-	// so it never collides with real Telegram msg ids (~1e9 max in practice).
-	// Stable across runs for same (from, timestamp) so routing mappings are idempotent.
-	syntheticID := 2_000_000_000 + int(time.Now().UnixNano()%1_000_000_000)
-	m := models.Message{
-		ID:        syntheticID,
-		BotID:     b.botID,
-		ChatID:    chatID,
-		FromUser:  fromUser,
-		FromID:    cb.From.ID,
-		Text:      cb.Data,
-		Date:      time.Now().UnixMilli(),
-		ReplyToID: replyToID,
-		MediaType: "callback",
+	id, _, err := b.store.SaveCallbackEvent(e)
+	if err != nil {
+		log.Printf("callback save failed: %v", err)
+		return
 	}
-	if err := b.store.SaveMessage(m); err != nil {
-		log.Printf("[bot %d] handleCallbackQuery: SaveMessage failed: %v", b.botID, err)
+	if e.ChatID == 0 {
+		return
+	} // Inline callbacks are available via the event API.
+	b.store.TrackUser(e.ChatID, e.FromID, e.FromUser)
+	// Negative IDs are local events, never actionable Telegram message IDs.
+	if err := b.store.SaveMessage(models.Message{ID: -int(id), BotID: b.botID, ChatID: e.ChatID, FromUser: e.FromUser, FromID: e.FromID, Text: e.Data, Date: e.Date, ReplyToID: e.MessageID, MediaType: "callback", CallbackID: e.CallbackID}); err != nil {
+		log.Printf("callback history save failed: %v", err)
 	}
 }
 
@@ -260,7 +268,11 @@ func FormatUsername(user *tgbotapi.User) string {
 }
 
 func (b *Bot) handleMessage(msg *tgbotapi.Message) {
+	if msg.EphemeralMessageID != 0 || msg.ReceiverUser != nil {
+		return // Ephemeral messages do not belong in the shared message feed.
+	}
 	b.trackChat(&msg.Chat)
+	b.trackTopic(msg)
 
 	fromUser := ""
 	var fromID int64
@@ -288,22 +300,37 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 	if text == "" {
 		text = msg.Caption
 	}
+	if text == "" && msg.Invoice != nil {
+		text = msg.Invoice.Title
+	}
+	if text == "" && msg.Game != nil {
+		text = msg.Game.Text
+		if text == "" {
+			text = msg.Game.Title
+		}
+	}
 
 	mediaType, fileID := ExtractMedia(msg)
 
 	m := models.Message{
-		ID:        msg.MessageID,
-		BotID:     b.botID,
-		ChatID:    msg.Chat.ID,
-		FromUser:  fromUser,
-		FromID:    fromID,
-		Text:      text,
-		Date:      int64(msg.Date) * 1000,
-		ReplyToID: replyToID,
-		MediaType: mediaType,
-		FileID:    fileID,
-		FromIsBot: fromIsBot,
-		SenderTag: msg.SenderTag,
+		ID:           msg.MessageID,
+		BotID:        b.botID,
+		ChatID:       msg.Chat.ID,
+		FromUser:     fromUser,
+		FromID:       fromID,
+		Text:         text,
+		RichText:     ExtractRichText(msg.RichMessage),
+		ReplyMarkup:  marshalOptional(msg.ReplyMarkup),
+		RichMessage:  marshalOptional(msg.RichMessage),
+		ThreadID:     msg.MessageThreadID,
+		MediaGroupID: msg.MediaGroupID,
+		Complete:     true,
+		Date:         int64(msg.Date) * 1000,
+		ReplyToID:    replyToID,
+		MediaType:    mediaType,
+		FileID:       fileID,
+		FromIsBot:    fromIsBot,
+		SenderTag:    msg.SenderTag,
 	}
 	if err := b.store.SaveMessage(m); err != nil {
 		log.Printf("Error saving message: %v", err)
@@ -311,7 +338,11 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 }
 
 func (b *Bot) handleChannelPost(msg *tgbotapi.Message) {
+	if msg.EphemeralMessageID != 0 || msg.ReceiverUser != nil {
+		return
+	}
 	b.trackChat(&msg.Chat)
+	b.trackTopic(msg)
 
 	fromUser := "Channel"
 	if msg.AuthorSignature != "" {
@@ -322,19 +353,34 @@ func (b *Bot) handleChannelPost(msg *tgbotapi.Message) {
 	if text == "" {
 		text = msg.Caption
 	}
+	if text == "" && msg.Invoice != nil {
+		text = msg.Invoice.Title
+	}
+	if text == "" && msg.Game != nil {
+		text = msg.Game.Text
+		if text == "" {
+			text = msg.Game.Title
+		}
+	}
 
 	mediaType, fileID := ExtractMedia(msg)
 
 	m := models.Message{
-		ID:        msg.MessageID,
-		BotID:     b.botID,
-		ChatID:    msg.Chat.ID,
-		FromUser:  fromUser,
-		Text:      text,
-		Date:      int64(msg.Date) * 1000,
-		MediaType: mediaType,
-		FileID:    fileID,
-		SenderTag: msg.SenderTag,
+		ID:           msg.MessageID,
+		BotID:        b.botID,
+		ChatID:       msg.Chat.ID,
+		FromUser:     fromUser,
+		Text:         text,
+		RichText:     ExtractRichText(msg.RichMessage),
+		ReplyMarkup:  marshalOptional(msg.ReplyMarkup),
+		RichMessage:  marshalOptional(msg.RichMessage),
+		ThreadID:     msg.MessageThreadID,
+		MediaGroupID: msg.MediaGroupID,
+		Complete:     true,
+		Date:         int64(msg.Date) * 1000,
+		MediaType:    mediaType,
+		FileID:       fileID,
+		SenderTag:    msg.SenderTag,
 	}
 	if err := b.store.SaveMessage(m); err != nil {
 		log.Printf("Error saving channel post: %v", err)
@@ -460,13 +506,14 @@ func (b *Bot) SendMessage(chatID int64, text string) error {
 	// Save the sent message to DB
 	fromUser := "@" + b.api.Self.UserName
 	b.store.SaveMessage(models.Message{
-		ID:       sent.MessageID,
-		BotID:    b.botID,
-		ChatID:   sent.Chat.ID,
-		FromUser: fromUser,
-		FromID:   b.api.Self.ID,
-		Text:     text,
-		Date:     int64(sent.Date) * 1000,
+		ID:        sent.MessageID,
+		BotID:     b.botID,
+		ChatID:    sent.Chat.ID,
+		FromUser:  fromUser,
+		FromID:    b.api.Self.ID,
+		FromIsBot: true,
+		Text:      text,
+		Date:      int64(sent.Date) * 1000,
 	})
 	if b.onMessageSent != nil {
 		b.onMessageSent(b.botID, chatID, text, sent.MessageID, 0)
@@ -485,7 +532,7 @@ func (b *Bot) SendMessageGetID(chatID int64, text string) (int, error) {
 	fromUser := "@" + b.api.Self.UserName
 	b.store.SaveMessage(models.Message{
 		ID: sent.MessageID, BotID: b.botID, ChatID: sent.Chat.ID,
-		FromUser: fromUser, FromID: b.api.Self.ID,
+		FromUser: fromUser, FromID: b.api.Self.ID, FromIsBot: true,
 		Text: text, Date: int64(sent.Date) * 1000,
 	})
 	if b.onMessageSent != nil {
@@ -506,7 +553,7 @@ func (b *Bot) SendMessageReply(chatID int64, text string, replyToMsgID int) (int
 	fromUser := "@" + b.api.Self.UserName
 	b.store.SaveMessage(models.Message{
 		ID: sent.MessageID, BotID: b.botID, ChatID: sent.Chat.ID,
-		FromUser: fromUser, FromID: b.api.Self.ID,
+		FromUser: fromUser, FromID: b.api.Self.ID, FromIsBot: true,
 		Text: text, Date: int64(sent.Date) * 1000,
 		ReplyToID: replyToMsgID,
 	})

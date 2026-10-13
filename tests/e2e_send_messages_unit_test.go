@@ -66,6 +66,16 @@ func TestUnit_Send_S09_InferTelegramMethodTruthTable(t *testing.T) {
 		{"editMessageText", `{"text":"new","message_id":10,"chat_id":1}`, "editMessageText"},
 		{"sendMessage", `{"text":"hello","chat_id":1}`, "sendMessage"},
 
+		{"richDraft", `{"draft_id":1,"rich_message":{"markdown":"hello"},"can_stop":true,"keep_on_stop":true}`, "sendRichMessageDraft"},
+		{"textDraft", `{"draft_id":1,"text":""}`, "sendMessageDraft"},
+		{"ephemeralRichEdit", `{"ephemeral_message_id":1,"rich_message":{"markdown":"hello"}}`, "editEphemeralMessageText"},
+		{"ephemeralTextEdit", `{"ephemeral_message_id":1,"text":"hello"}`, "editEphemeralMessageText"},
+		{"ephemeralMediaEdit", `{"ephemeral_message_id":1,"media":{"type":"photo","media":"attach://photo"}}`, "editEphemeralMessageMedia"},
+		{"ephemeralCaptionEdit", `{"ephemeral_message_id":1,"caption":""}`, "editEphemeralMessageCaption"},
+		{"ephemeralCaptionPosition", `{"ephemeral_message_id":1,"show_caption_above_media":false}`, "editEphemeralMessageCaption"},
+		{"ephemeralMarkupEdit", `{"ephemeral_message_id":1,"reply_markup":{}}`, "editEphemeralMessageReplyMarkup"},
+		{"ephemeralSend", `{"ephemeral_message_parameters":{"receiver_user_id":42},"text":"hello"}`, "sendMessage"},
+		{"ephemeralNoImplicitDelete", `{"ephemeral_message_id":1}`, ""},
 		// Edge cases — must return empty string
 		{"empty_body", `{}`, ""},
 		{"empty_string", ``, ""},

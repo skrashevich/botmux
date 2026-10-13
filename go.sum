@@ -1,5 +1,5 @@
-github.com/OvyFlash/telegram-bot-api v0.0.0-20260614133753-78a1eb63fa7a h1:mhyUOaJ/pO1NYUjHazZaejDL7o0CsnWauhi1ndOHt3A=
-github.com/OvyFlash/telegram-bot-api v0.0.0-20260614133753-78a1eb63fa7a/go.mod h1:2nRUdsKyWhvezqW/rBGWEQdcTQeTtnbSNd2dgx76WYA=
+github.com/OvyFlash/telegram-bot-api v0.0.0-20260826195316-83c4eada97a1 h1:mqNSQIrF/wfAj4yJfeVWJPXqk+XqMwDYB1zHbVfltj0=
+github.com/OvyFlash/telegram-bot-api v0.0.0-20260826195316-83c4eada97a1/go.mod h1:2nRUdsKyWhvezqW/rBGWEQdcTQeTtnbSNd2dgx76WYA=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
