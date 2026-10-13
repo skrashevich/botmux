@@ -3,6 +3,8 @@ package bot
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -47,7 +49,8 @@ func ValidateInlineMarkup(markup json.RawMessage) error {
 		return nil
 	}
 	var value struct {
-		Rows [][]map[string]json.RawMessage `json:"inline_keyboard"`
+		Rows       [][]map[string]json.RawMessage `json:"inline_keyboard"`
+		ForceReply *bool                          `json:"force_reply,omitempty"`
 	}
 	if err := json.Unmarshal(markup, &value); err != nil {
 		return fmt.Errorf("invalid keyboard: %w", err)
@@ -71,25 +74,83 @@ func ValidateInlineMarkup(markup json.RawMessage) error {
 			if n != 1 {
 				return fmt.Errorf("button %d:%d must have exactly one action", row+1, col+1)
 			}
-			if raw, ok := button["callback_data"]; ok {
+			if raw, ok := button["callback_data"]; ok && string(raw) != "null" {
 				var data string
 				if json.Unmarshal(raw, &data) != nil || len(data) < 1 || len(data) > 64 {
 					return fmt.Errorf("callback_data must contain 1–64 bytes")
 				}
 			}
-			if raw, ok := button["style"]; ok {
+			if raw, ok := button["icon_custom_emoji_id"]; ok && string(raw) != "null" {
+				var id string
+				if json.Unmarshal(raw, &id) != nil || id == "" {
+					return fmt.Errorf("custom emoji id must be a string")
+				}
+				for _, c := range id {
+					if c < '0' || c > '9' {
+						return fmt.Errorf("custom emoji id must contain digits")
+					}
+				}
+			}
+			for _, key := range []string{"url", "switch_inline_query", "switch_inline_query_current_chat"} {
+				if raw, ok := button[key]; ok && string(raw) != "null" {
+					var v string
+					if json.Unmarshal(raw, &v) != nil {
+						return fmt.Errorf("%s must be text", key)
+					}
+					if key == "url" && !validButtonURL(v, false) {
+						return fmt.Errorf("invalid button URL")
+					}
+				}
+			}
+			for _, key := range []string{"web_app", "login_url", "copy_text", "switch_inline_query_chosen_chat", "disabled", "callback_game"} {
+				if raw, ok := button[key]; ok && string(raw) != "null" {
+					var v map[string]json.RawMessage
+					if json.Unmarshal(raw, &v) != nil || v == nil {
+						return fmt.Errorf("%s must be an object", key)
+					}
+					if key == "web_app" || key == "login_url" {
+						var u string
+						if json.Unmarshal(v["url"], &u) != nil || !validButtonURL(u, true) {
+							return fmt.Errorf("%s requires an HTTPS URL", key)
+						}
+					}
+					if key == "copy_text" {
+						var t string
+						if json.Unmarshal(v["text"], &t) != nil || utf8.RuneCountInString(t) < 1 || utf8.RuneCountInString(t) > 256 {
+							return fmt.Errorf("copy_text must contain 1–256 characters")
+						}
+					}
+					for _, field := range []string{"query", "forward_text", "bot_username"} {
+						if raw, ok := v[field]; ok && string(raw) != "null" {
+							var text string
+							if json.Unmarshal(raw, &text) != nil {
+								return fmt.Errorf("%s must be text", field)
+							}
+						}
+					}
+					for _, field := range []string{"request_write_access", "allow_user_chats", "allow_bot_chats", "allow_group_chats", "allow_channel_chats"} {
+						if raw, ok := v[field]; ok && string(raw) != "null" {
+							var flag bool
+							if json.Unmarshal(raw, &flag) != nil {
+								return fmt.Errorf("%s must be boolean", field)
+							}
+						}
+					}
+				}
+			}
+			if raw, ok := button["style"]; ok && string(raw) != "null" {
 				var style string
 				if json.Unmarshal(raw, &style) != nil || (style != "" && style != "primary" && style != "success" && style != "danger") {
 					return fmt.Errorf("invalid inline button style")
 				}
 			}
-			if raw, ok := button["pay"]; ok {
+			if raw, ok := button["pay"]; ok && string(raw) != "null" {
 				var pay bool
 				if json.Unmarshal(raw, &pay) != nil || !pay || row != 0 || col != 0 {
 					return fmt.Errorf("pay must be true on the first button")
 				}
 			}
-			if _, ok := button["callback_game"]; ok && (row != 0 || col != 0) {
+			if raw, ok := button["callback_game"]; ok && string(raw) != "null" && (row != 0 || col != 0) {
 				return fmt.Errorf("game button must be first")
 			}
 		}
@@ -134,6 +195,14 @@ func (b *Bot) EditKeyboard(chatID int64, messageID int, markup json.RawMessage) 
 	if err := ValidateInlineMarkup(markup); err != nil {
 		return err
 	}
+	original, err := b.store.GetMessage(b.botID, chatID, messageID)
+	if err != nil {
+		return err
+	}
+	markup, err = PreserveForceReply(original.ReplyMarkup, markup)
+	if err != nil {
+		return err
+	}
 	var kb tgbotapi.InlineKeyboardMarkup
 	if len(markup) > 0 {
 		if err := json.Unmarshal(markup, &kb); err != nil {
@@ -174,6 +243,16 @@ func (b *Bot) EditInlineKeyboard(id string, markup json.RawMessage) error {
 	if err := ValidateInlineMarkup(markup); err != nil {
 		return err
 	}
+	original, err := b.store.InlineKeyboard(b.botID, id)
+	if err != nil {
+		return err
+	}
+	if len(original) > 0 {
+		markup, err = PreserveForceReply(original, markup)
+		if err != nil {
+			return err
+		}
+	}
 	var kb tgbotapi.InlineKeyboardMarkup
 	if len(markup) > 0 {
 		if err := json.Unmarshal(markup, &kb); err != nil {
@@ -181,7 +260,7 @@ func (b *Bot) EditInlineKeyboard(id string, markup json.RawMessage) error {
 		}
 	}
 	config := tgbotapi.EditMessageReplyMarkupConfig{BaseEdit: tgbotapi.BaseEdit{InlineMessageID: id, ReplyMarkup: &kb}}
-	_, err := b.api.Request(config)
+	_, err = b.api.Request(config)
 	if err != nil {
 		return err
 	}
@@ -286,4 +365,48 @@ func (b *Bot) ManageTopic(chatID int64, threadID int, action, name string) (int,
 		}
 	}
 	return threadID, nil
+}
+
+func validButtonURL(value string, httpsOnly bool) bool {
+	u, err := url.Parse(value)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	if httpsOnly {
+		return u.Scheme == "https"
+	}
+	return slices.Contains([]string{"http", "https", "tg"}, u.Scheme)
+}
+
+// PreserveForceReply keeps the immutable reply behavior when editing a keyboard.
+func PreserveForceReply(original, modified json.RawMessage) (json.RawMessage, error) {
+	var old struct {
+		ForceReply bool `json:"force_reply"`
+	}
+	if len(original) > 0 {
+		if err := json.Unmarshal(original, &old); err != nil {
+			return nil, err
+		}
+	}
+	next := map[string]json.RawMessage{"inline_keyboard": json.RawMessage("[]")}
+	if len(modified) > 0 && string(modified) != "null" {
+		if err := json.Unmarshal(modified, &next); err != nil {
+			return nil, err
+		}
+	}
+	if value, exists := next["force_reply"]; exists && string(value) != "null" {
+		var flag bool
+		if err := json.Unmarshal(value, &flag); err != nil {
+			return nil, err
+		}
+		if flag != old.ForceReply {
+			return nil, fmt.Errorf("force_reply cannot be changed on an existing message")
+		}
+	}
+	if old.ForceReply {
+		next["force_reply"] = json.RawMessage("true")
+	} else {
+		delete(next, "force_reply")
+	}
+	return json.Marshal(next)
 }

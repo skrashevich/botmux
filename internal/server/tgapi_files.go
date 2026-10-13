@@ -160,12 +160,12 @@ func serveLocalFile(w http.ResponseWriter, r *http.Request, localPath, displayPa
 		img, err := webp.Decode(bytes.NewReader(body))
 		if err != nil {
 			w.Header().Set("Content-Type", "image/webp")
-			w.Header().Set("Cache-Control", "public, max-age=86400")
+			w.Header().Set("Cache-Control", "private, max-age=86400")
 			w.Write(body)
 			return
 		}
 		w.Header().Set("Content-Type", "image/png")
-		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Header().Set("Cache-Control", "private, max-age=86400")
 		png.Encode(w, img)
 		return
 	}
@@ -182,7 +182,7 @@ func serveLocalFile(w http.ResponseWriter, r *http.Request, localPath, displayPa
 		ct = "application/octet-stream"
 	}
 	w.Header().Set("Content-Type", ct)
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Cache-Control", "private, max-age=86400")
 	if fileSize > 0 {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", fileSize))
 	}

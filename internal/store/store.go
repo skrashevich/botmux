@@ -687,8 +687,8 @@ func (s *Store) SaveMessage(m models.Message) error {
 		fromIsBot = 1
 	}
 	res, err := s.db.Exec(`
-		INSERT INTO messages (id, bot_id, chat_id, from_user, from_id, text, rich_text, date, reply_to_id, media_type, file_id, from_is_bot, sender_tag, reply_markup, rich_message, thread_id, media_group_id, callback_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO messages (id, bot_id, chat_id, from_user, from_id, text, rich_text, date, reply_to_id, media_type, file_id, from_is_bot, sender_tag, reply_markup, rich_message, thread_id, media_group_id, callback_id, has_media_spoiler)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(bot_id, chat_id, id) DO UPDATE SET
 			text       = excluded.text,
 			rich_text  = CASE WHEN ? OR excluded.rich_text != '' THEN excluded.rich_text ELSE messages.rich_text END,
@@ -700,9 +700,10 @@ func (s *Store) SaveMessage(m models.Message) error {
             rich_message = CASE WHEN ? THEN excluded.rich_message ELSE messages.rich_message END,
             thread_id = CASE WHEN ? THEN excluded.thread_id ELSE messages.thread_id END,
             media_group_id = CASE WHEN ? THEN excluded.media_group_id ELSE messages.media_group_id END,
-            callback_id = excluded.callback_id
+            callback_id = excluded.callback_id,
+ has_media_spoiler = CASE WHEN ? THEN excluded.has_media_spoiler ELSE messages.has_media_spoiler END
 		WHERE messages.deleted = 0
-	`, m.ID, m.BotID, m.ChatID, m.FromUser, m.FromID, m.Text, m.RichText, m.Date, m.ReplyToID, m.MediaType, m.FileID, fromIsBot, m.SenderTag, jsonText(m.ReplyMarkup), jsonText(m.RichMessage), m.ThreadID, m.MediaGroupID, m.CallbackID, m.Complete, m.Complete, m.Complete, m.Complete, m.Complete, m.Complete, m.Complete, m.Complete)
+	`, m.ID, m.BotID, m.ChatID, m.FromUser, m.FromID, m.Text, m.RichText, m.Date, m.ReplyToID, m.MediaType, m.FileID, fromIsBot, m.SenderTag, jsonText(m.ReplyMarkup), jsonText(m.RichMessage), m.ThreadID, m.MediaGroupID, m.CallbackID, m.HasMediaSpoiler, m.Complete, m.Complete, m.Complete, m.Complete, m.Complete, m.Complete, m.Complete, m.Complete, m.Complete)
 	if err != nil {
 		return err
 	}
@@ -716,8 +717,8 @@ func (s *Store) SaveMessage(m models.Message) error {
 
 func (s *Store) GetMessages(botID, chatID int64, limit, offset int) ([]models.Message, error) {
 	rows, err := s.db.Query(`
-		SELECT id, bot_id, chat_id, from_user, from_id, text, rich_text, date, reply_to_id, deleted, media_type, file_id, from_is_bot, sender_tag, reply_markup, rich_message, thread_id, media_group_id, callback_id
-		FROM messages WHERE bot_id = ? AND chat_id = ? ORDER BY date DESC LIMIT ? OFFSET ?
+		SELECT id, bot_id, chat_id, from_user, from_id, text, rich_text, date, reply_to_id, deleted, media_type, file_id, from_is_bot, sender_tag, reply_markup, rich_message, thread_id, media_group_id, callback_id, has_media_spoiler
+		FROM messages WHERE bot_id = ? AND chat_id = ? ORDER BY date DESC,id DESC LIMIT ? OFFSET ?
 	`, botID, chatID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -727,7 +728,7 @@ func (s *Store) GetMessages(botID, chatID int64, limit, offset int) ([]models.Me
 	var msgs []models.Message
 	for rows.Next() {
 		var m models.Message
-		if err := rows.Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.RichText, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID, &m.FromIsBot, &m.SenderTag, jsonScan(&m.ReplyMarkup), jsonScan(&m.RichMessage), &m.ThreadID, &m.MediaGroupID, &m.CallbackID); err != nil {
+		if err := rows.Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.RichText, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID, &m.FromIsBot, &m.SenderTag, jsonScan(&m.ReplyMarkup), jsonScan(&m.RichMessage), &m.ThreadID, &m.MediaGroupID, &m.CallbackID, &m.HasMediaSpoiler); err != nil {
 			return nil, err
 		}
 		m.DateStr = time.UnixMilli(m.Date).Format("2006-01-02 15:04:05")
@@ -739,9 +740,9 @@ func (s *Store) GetMessages(botID, chatID int64, limit, offset int) ([]models.Me
 func (s *Store) GetMessage(botID, chatID int64, messageID int) (*models.Message, error) {
 	var m models.Message
 	err := s.db.QueryRow(`
-		SELECT id, bot_id, chat_id, from_user, from_id, text, rich_text, date, reply_to_id, deleted, media_type, file_id, from_is_bot, sender_tag, reply_markup, rich_message, thread_id, media_group_id, callback_id
+		SELECT id, bot_id, chat_id, from_user, from_id, text, rich_text, date, reply_to_id, deleted, media_type, file_id, from_is_bot, sender_tag, reply_markup, rich_message, thread_id, media_group_id, callback_id, has_media_spoiler
 		FROM messages WHERE bot_id = ? AND chat_id = ? AND id = ?
-	`, botID, chatID, messageID).Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.RichText, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID, &m.FromIsBot, &m.SenderTag, jsonScan(&m.ReplyMarkup), jsonScan(&m.RichMessage), &m.ThreadID, &m.MediaGroupID, &m.CallbackID)
+	`, botID, chatID, messageID).Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.RichText, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID, &m.FromIsBot, &m.SenderTag, jsonScan(&m.ReplyMarkup), jsonScan(&m.RichMessage), &m.ThreadID, &m.MediaGroupID, &m.CallbackID, &m.HasMediaSpoiler)
 	if err != nil {
 		return nil, err
 	}
@@ -801,7 +802,7 @@ func (s *Store) SearchMessages(botID, chatID int64, query string, limit int, thr
 		thread = threads[0]
 	}
 	rows, err := s.db.Query(`
-		SELECT id, bot_id, chat_id, from_user, from_id, text, rich_text, date, reply_to_id, deleted, media_type, file_id, from_is_bot, sender_tag, reply_markup, rich_message, thread_id, media_group_id, callback_id
+		SELECT id, bot_id, chat_id, from_user, from_id, text, rich_text, date, reply_to_id, deleted, media_type, file_id, from_is_bot, sender_tag, reply_markup, rich_message, thread_id, media_group_id, callback_id, has_media_spoiler
 		FROM messages WHERE bot_id = ? AND chat_id = ? AND (text LIKE ? OR rich_text LIKE ?) AND (?<0 OR thread_id=?)
 		ORDER BY date DESC LIMIT ?
 	`, botID, chatID, "%"+query+"%", "%"+query+"%", thread, thread, limit)
@@ -813,7 +814,7 @@ func (s *Store) SearchMessages(botID, chatID int64, query string, limit int, thr
 	var msgs []models.Message
 	for rows.Next() {
 		var m models.Message
-		if err := rows.Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.RichText, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID, &m.FromIsBot, &m.SenderTag, jsonScan(&m.ReplyMarkup), jsonScan(&m.RichMessage), &m.ThreadID, &m.MediaGroupID, &m.CallbackID); err != nil {
+		if err := rows.Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.RichText, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID, &m.FromIsBot, &m.SenderTag, jsonScan(&m.ReplyMarkup), jsonScan(&m.RichMessage), &m.ThreadID, &m.MediaGroupID, &m.CallbackID, &m.HasMediaSpoiler); err != nil {
 			return nil, err
 		}
 		m.DateStr = time.UnixMilli(m.Date).Format("2006-01-02 15:04:05")

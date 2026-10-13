@@ -223,7 +223,10 @@ func TestTelegramMigrationPreservesExistingMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, col := range []string{"reply_markup", "rich_message", "thread_id", "media_group_id", "callback_id"} {
+	if _, err := db.Exec("DROP INDEX IF EXISTS idx_messages_album"); err != nil {
+		t.Fatal(err)
+	}
+	for _, col := range []string{"reply_markup", "rich_message", "thread_id", "media_group_id", "callback_id", "has_media_spoiler"} {
 		if _, err := db.Exec("ALTER TABLE messages DROP COLUMN " + col); err != nil {
 			t.Fatal(err)
 		}

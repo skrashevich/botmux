@@ -58,27 +58,28 @@ type CallbackEvent struct {
 }
 
 type Message struct {
-	ReplyMarkup  json.RawMessage `json:"reply_markup,omitempty"`
-	RichMessage  json.RawMessage `json:"rich_message,omitempty"`
-	ThreadID     int             `json:"message_thread_id,omitzero"`
-	MediaGroupID string          `json:"media_group_id,omitempty"`
-	CallbackID   string          `json:"callback_id,omitempty"`
-	Complete     bool            `json:"-"` // Full Telegram Message: absent fields clear previous state.
-	ID           int             `json:"id"`
-	BotID        int64           `json:"bot_id"`
-	ChatID       int64           `json:"chat_id"`
-	FromUser     string          `json:"from_user"`
-	FromID       int64           `json:"from_id"`
-	Text         string          `json:"text"`
-	RichText     string          `json:"rich_text,omitempty"`
-	Date         int64           `json:"date"`
-	DateStr      string          `json:"date_str"`
-	ReplyToID    int             `json:"reply_to_id,omitempty"`
-	Deleted      bool            `json:"deleted"`
-	MediaType    string          `json:"media_type,omitempty"`
-	FileID       string          `json:"file_id,omitempty"`
-	FromIsBot    bool            `json:"from_is_bot,omitempty"`
-	SenderTag    string          `json:"sender_tag,omitempty"`
+	HasMediaSpoiler bool            `json:"has_media_spoiler,omitzero"`
+	ReplyMarkup     json.RawMessage `json:"reply_markup,omitempty"`
+	RichMessage     json.RawMessage `json:"rich_message,omitempty"`
+	ThreadID        int             `json:"message_thread_id,omitzero"`
+	MediaGroupID    string          `json:"media_group_id,omitempty"`
+	CallbackID      string          `json:"callback_id,omitempty"`
+	Complete        bool            `json:"-"` // Full Telegram Message: absent fields clear previous state.
+	ID              int             `json:"id"`
+	BotID           int64           `json:"bot_id"`
+	ChatID          int64           `json:"chat_id"`
+	FromUser        string          `json:"from_user"`
+	FromID          int64           `json:"from_id"`
+	Text            string          `json:"text"`
+	RichText        string          `json:"rich_text,omitempty"`
+	Date            int64           `json:"date"`
+	DateStr         string          `json:"date_str"`
+	ReplyToID       int             `json:"reply_to_id,omitempty"`
+	Deleted         bool            `json:"deleted"`
+	MediaType       string          `json:"media_type,omitempty"`
+	FileID          string          `json:"file_id,omitempty"`
+	FromIsBot       bool            `json:"from_is_bot,omitempty"`
+	SenderTag       string          `json:"sender_tag,omitempty"`
 }
 
 type ChatStats struct {

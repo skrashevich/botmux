@@ -1,10 +1,12 @@
 package store
 
 import (
+	"cmp"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/skrashevich/botmux/internal/models"
@@ -24,6 +26,7 @@ func (s *Store) migrateTelegram() error {
 		{"thread_id", "INTEGER NOT NULL DEFAULT 0"},
 		{"media_group_id", "TEXT NOT NULL DEFAULT ''"},
 		{"callback_id", "TEXT NOT NULL DEFAULT ''"},
+		{"has_media_spoiler", "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		var exists int
 		if err := s.db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name=?", col.name).Scan(&exists); err != nil {
@@ -36,6 +39,7 @@ func (s *Store) migrateTelegram() error {
 		}
 	}
 	_, err := s.db.Exec(`
+ CREATE INDEX IF NOT EXISTS idx_messages_album ON messages(bot_id,chat_id,thread_id,media_group_id);
  CREATE TABLE IF NOT EXISTS topics (bot_id INTEGER,chat_id INTEGER,thread_id INTEGER,name TEXT,closed INTEGER DEFAULT 0,PRIMARY KEY(bot_id,chat_id,thread_id));
  CREATE TABLE IF NOT EXISTS callback_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id INTEGER NOT NULL, callback_id TEXT NOT NULL,
@@ -328,7 +332,7 @@ func (s *Store) AllowsTelegramUpdate(botID int64, update map[string]any) (bool, 
 }
 
 func (s *Store) GetMessagesByThread(botID, chatID int64, threadID, limit, offset int) ([]models.Message, error) {
-	rows, err := s.db.Query(`SELECT id,bot_id,chat_id,from_user,from_id,text,rich_text,date,reply_to_id,deleted,media_type,file_id,from_is_bot,sender_tag,reply_markup,rich_message,thread_id,media_group_id,callback_id FROM messages WHERE bot_id=? AND chat_id=? AND thread_id=? ORDER BY date DESC LIMIT ? OFFSET ?`, botID, chatID, threadID, limit, offset)
+	rows, err := s.db.Query(`SELECT id,bot_id,chat_id,from_user,from_id,text,rich_text,date,reply_to_id,deleted,media_type,file_id,from_is_bot,sender_tag,reply_markup,rich_message,thread_id,media_group_id,callback_id,has_media_spoiler FROM messages WHERE bot_id=? AND chat_id=? AND thread_id=? ORDER BY date DESC,id DESC LIMIT ? OFFSET ?`, botID, chatID, threadID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -336,7 +340,7 @@ func (s *Store) GetMessagesByThread(botID, chatID int64, threadID, limit, offset
 	result := make([]models.Message, 0)
 	for rows.Next() {
 		var m models.Message
-		if err := rows.Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.RichText, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID, &m.FromIsBot, &m.SenderTag, jsonScan(&m.ReplyMarkup), jsonScan(&m.RichMessage), &m.ThreadID, &m.MediaGroupID, &m.CallbackID); err != nil {
+		if err := rows.Scan(&m.ID, &m.BotID, &m.ChatID, &m.FromUser, &m.FromID, &m.Text, &m.RichText, &m.Date, &m.ReplyToID, &m.Deleted, &m.MediaType, &m.FileID, &m.FromIsBot, &m.SenderTag, jsonScan(&m.ReplyMarkup), jsonScan(&m.RichMessage), &m.ThreadID, &m.MediaGroupID, &m.CallbackID, &m.HasMediaSpoiler); err != nil {
 			return nil, err
 		}
 		m.DateStr = time.UnixMilli(m.Date).Format("2006-01-02 15:04:05")
@@ -386,4 +390,60 @@ func (s *Store) InlineKeyboard(botID int64, id string) (json.RawMessage, error) 
 func (s *Store) AdvanceTelegramOffset(botID, offset int64) error {
 	_, err := s.db.Exec("UPDATE bots SET offset_id=MAX(offset_id,?) WHERE id=?", offset, botID)
 	return err
+}
+
+// ExpandMessageAlbums supplies all members of an album even at page boundaries.
+// The caller's row offset still advances by its requested base page size.
+func (s *Store) ExpandMessageAlbums(messages []models.Message) ([]models.Message, error) {
+	type albumKey struct {
+		bot, chat int64
+		thread    int
+		group     string
+	}
+	seen := make(map[albumKey]bool)
+	ids := make(map[[3]int64]bool)
+	out := make([]models.Message, 0, len(messages))
+	for _, m := range messages {
+		id := [3]int64{m.BotID, m.ChatID, int64(m.ID)}
+		if !ids[id] {
+			out = append(out, m)
+			ids[id] = true
+		}
+	}
+	for _, m := range messages {
+		key := albumKey{m.BotID, m.ChatID, m.ThreadID, m.MediaGroupID}
+		if key.group == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		rows, err := s.db.Query(`SELECT id,bot_id,chat_id,from_user,from_id,text,rich_text,date,reply_to_id,deleted,media_type,file_id,from_is_bot,sender_tag,reply_markup,rich_message,thread_id,media_group_id,callback_id,has_media_spoiler FROM messages WHERE bot_id=? AND chat_id=? AND thread_id=? AND media_group_id=? ORDER BY date,id`, key.bot, key.chat, key.thread, key.group)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var v models.Message
+			if err := rows.Scan(&v.ID, &v.BotID, &v.ChatID, &v.FromUser, &v.FromID, &v.Text, &v.RichText, &v.Date, &v.ReplyToID, &v.Deleted, &v.MediaType, &v.FileID, &v.FromIsBot, &v.SenderTag, jsonScan(&v.ReplyMarkup), jsonScan(&v.RichMessage), &v.ThreadID, &v.MediaGroupID, &v.CallbackID, &v.HasMediaSpoiler); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			v.DateStr = time.UnixMilli(v.Date).Format("2006-01-02 15:04:05")
+			id := [3]int64{v.BotID, v.ChatID, int64(v.ID)}
+			if !ids[id] {
+				out = append(out, v)
+				ids[id] = true
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	slices.SortFunc(out, func(a, b models.Message) int {
+		if n := cmp.Compare(b.Date, a.Date); n != 0 {
+			return n
+		}
+		return cmp.Compare(b.ID, a.ID)
+	})
+	return out, nil
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"image/png"
 	"io"
+	"io/fs"
 	"log"
 	"math"
 	"mime"
@@ -285,6 +286,9 @@ func (s *Server) BuildMux() *http.ServeMux {
 	// i18n — no auth (served from embedded FS)
 	mux.HandleFunc("/i18n/", s.handleI18n)
 
+	assetFS, _ := fs.Sub(templateFS, "templates/assets")
+	mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assetFS))))
+
 	// SPA — no auth (SPA handles it client-side)
 	mux.HandleFunc("/", s.handleIndex)
 
@@ -303,6 +307,8 @@ func (s *Server) BuildMux() *http.ServeMux {
 	mux.HandleFunc("/api/chats/delete", s.authMiddleware(s.handleDeleteChat))
 
 	// Messages
+	mux.HandleFunc("/api/messages/upload", s.authMiddleware(s.handleUpload))
+	mux.HandleFunc("/api/emoji", s.authMiddleware(s.handleCustomEmoji))
 	mux.HandleFunc("/api/messages", s.authMiddleware(s.handleMessages))
 	mux.HandleFunc("/api/messages/search", s.authMiddleware(s.handleSearchMessages))
 	mux.HandleFunc("/api/callbacks/answer", s.authMiddleware(s.handleAnswerCallback))
@@ -835,6 +841,11 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	msgs, err = s.store.ExpandMessageAlbums(msgs)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	if msgs == nil {
 		msgs = []models.Message{}
 	}
@@ -1030,6 +1041,11 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	msgs, err := s.store.SearchMessages(botID, chatID, query, 50, thread)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	msgs, err = s.store.ExpandMessageAlbums(msgs)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -3535,12 +3551,12 @@ func proxyFileDownload(w http.ResponseWriter, r *http.Request, downloadURL strin
 		if err != nil {
 			// Fallback: serve original WebP
 			w.Header().Set("Content-Type", ct)
-			w.Header().Set("Cache-Control", "public, max-age=86400")
+			w.Header().Set("Cache-Control", "private, max-age=86400")
 			w.Write(body)
 			return
 		}
 		w.Header().Set("Content-Type", "image/png")
-		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Header().Set("Cache-Control", "private, max-age=86400")
 		png.Encode(w, img)
 		return
 	}
@@ -3559,14 +3575,14 @@ func proxyFileDownload(w http.ResponseWriter, r *http.Request, downloadURL strin
 				buf.Write(sniffBytes[:n])
 			}
 			w.Header().Set("Content-Type", ct)
-			w.Header().Set("Cache-Control", "public, max-age=86400")
+			w.Header().Set("Cache-Control", "private, max-age=86400")
 			io.Copy(w, io.MultiReader(&buf, resp.Body))
 			return
 		}
 	}
 
 	w.Header().Set("Content-Type", ct)
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Cache-Control", "private, max-age=86400")
 	w.Header().Set("Accept-Ranges", "bytes")
 
 	// Forward range-related headers from upstream for proper 206 responses.
@@ -3829,10 +3845,11 @@ func (s *Server) CaptureSentMessage(token, method string, reqBody []byte, conten
 			Description string `json:"description"`
 			Text        string `json:"text"`
 		} `json:"game"`
-		ReplyMarkup  json.RawMessage `json:"reply_markup"`
-		ThreadID     int             `json:"message_thread_id"`
-		MediaGroupID string          `json:"media_group_id"`
-		ReplyTo      *struct {
+		HasMediaSpoiler bool            `json:"has_media_spoiler"`
+		ReplyMarkup     json.RawMessage `json:"reply_markup"`
+		ThreadID        int             `json:"message_thread_id"`
+		MediaGroupID    string          `json:"media_group_id"`
+		ReplyTo         *struct {
 			MessageID int `json:"message_id"`
 		} `json:"reply_to_message"`
 	}
@@ -3898,23 +3915,24 @@ func (s *Server) CaptureSentMessage(token, method string, reqBody []byte, conten
 	}
 
 	m := models.Message{
-		ID:           msg.MessageID,
-		BotID:        msgBotID,
-		ChatID:       msg.Chat.ID,
-		FromUser:     fromUser,
-		FromID:       msg.From.ID,
-		Text:         text,
-		RichText:     richText,
-		Date:         msg.Date * 1000,
-		MediaType:    mediaType,
-		FileID:       fileID,
-		SenderTag:    msg.SenderTag,
-		ReplyMarkup:  msg.ReplyMarkup,
-		RichMessage:  respRichMessage(resp.Result),
-		ThreadID:     msg.ThreadID,
-		MediaGroupID: msg.MediaGroupID,
-		FromIsBot:    msg.From.IsBot,
-		Complete:     true,
+		ID:              msg.MessageID,
+		BotID:           msgBotID,
+		ChatID:          msg.Chat.ID,
+		FromUser:        fromUser,
+		FromID:          msg.From.ID,
+		Text:            text,
+		RichText:        richText,
+		Date:            msg.Date * 1000,
+		MediaType:       mediaType,
+		FileID:          fileID,
+		SenderTag:       msg.SenderTag,
+		ReplyMarkup:     msg.ReplyMarkup,
+		RichMessage:     respRichMessage(resp.Result),
+		ThreadID:        msg.ThreadID,
+		MediaGroupID:    msg.MediaGroupID,
+		HasMediaSpoiler: msg.HasMediaSpoiler,
+		FromIsBot:       msg.From.IsBot,
+		Complete:        true,
 	}
 	if msg.ReplyTo != nil {
 		m.ReplyToID = msg.ReplyTo.MessageID

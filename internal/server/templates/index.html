@@ -1326,7 +1326,36 @@ body::before { display: none; }
 .profile-action-date { color: var(--text3); font-size: 10px; white-space: nowrap; }
 .msg-user.clickable { cursor: pointer; }
 .msg-user.clickable:hover { color: var(--cyan); text-decoration: underline; }
+.msg-row{align-items:flex-start}.msg-text{min-width:0}.msg-actions{align-items:flex-start;flex-wrap:wrap}
+.msg-row.rich-row .msg-text{flex-basis:100%;order:2}.msg-row.rich-row .msg-actions{flex-basis:100%;order:3}
+.msg-row:focus-within .msg-actions{display:flex}
+@media(hover:none){.msg-actions{display:flex}}
+.keyboard-editor { max-width:900px;width:min(900px,96vw);max-height:90vh;overflow:auto; }
+.keyboard-editor-grid {display:grid;grid-template-columns:minmax(260px,1fr) minmax(240px,1fr);gap:20px;margin:16px 0;}
+.kb-row {padding:10px;border:1px solid var(--border);margin-bottom:8px;border-radius:6px;}
+.kb-row-head,.kb-position-actions,.attachment-toolbar {display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;margin-bottom:8px;}
+.kb-button-choices {display:flex;gap:6px;flex-wrap:wrap;}
+.kb-choice {flex:1;min-width:85px;padding:9px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer;overflow-wrap:anywhere;}
+.kb-choice.selected {border:2px solid var(--cyan);padding:8px;}.kb-choice small {display:block;color:var(--text3);font-size:10px;margin-top:4px;}
+.kb-choice.primary{color:var(--cyan)}.kb-choice.success{color:var(--green)}.kb-choice.danger{color:var(--magenta)}
+.kb-properties label {display:block;font-size:12px;margin-bottom:12px;color:var(--text2);}.kb-properties input:not([type=checkbox]),.kb-properties select,.kb-properties textarea {width:100%;margin-top:5px;}
+ .kb-properties input:not([type=checkbox]),.kb-properties select,.kb-properties textarea,#keyboardEditorJSON,.attachment-item select,.attachment-item textarea,#uploadThread {background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;font-family:var(--ff-display);font-size:14px;line-height:1.4;min-width:0;}
+.kb-properties input:focus,.kb-properties select:focus,.kb-properties textarea:focus,#keyboardEditorJSON:focus,.attachment-item select:focus,.attachment-item textarea:focus{outline:2px solid var(--cyan);outline-offset:1px}
+.kb-checkbox{display:flex;align-items:center;gap:8px;margin:10px 0;font-size:12px;color:var(--text2)}
+@media(max-width:650px){.kb-properties input:not([type=checkbox]),.kb-properties select,.kb-properties textarea,.attachment-item select,.attachment-item textarea,#keyboardEditorJSON{font-size:16px}}
+.kb-properties .kb-checkbox {display:flex;align-items:center;gap:8px;}.kb-checkbox input{width:auto;}.kb-note{font-size:12px;color:var(--text3)}
+.kb-errors{white-space:pre-wrap;color:var(--magenta);font-size:12px;margin:8px 0}.keyboard-editor-preview{padding:12px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;min-height:45px;}
+.tg-custom-emoji{width:1.3em;height:1.3em;object-fit:contain;vertical-align:middle;}.telegram-button-row{flex-wrap:wrap}.telegram-button-row>*{white-space:normal;overflow-wrap:anywhere}
+.msg-album{display:block;border-bottom:1px solid var(--border);padding:12px;}.album-header{display:flex;gap:8px;align-items:center;margin-bottom:10px;}.album-items{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:10px;}.album-item{min-width:0;padding:6px;border:1px solid var(--border);border-radius:6px}.album-item .msg-actions{position:static;opacity:1;display:flex;flex-wrap:wrap;margin-top:8px}.album-item .msg-media-img{max-width:100%}.album-item img,.album-item video{width:100%;max-height:260px;object-fit:contain}
+.rich-message{display:block;white-space:normal;overflow-wrap:anywhere;line-height:1.5;max-width:100%;}.rich-message p{margin:8px 0}.rich-message h1,.rich-message h2,.rich-message h3,.rich-message h4,.rich-message h5,.rich-message h6{margin:12px 0 6px;line-height:1.3}.rich-message h1{font-size:24px}.rich-message h2{font-size:21px}.rich-message h3{font-size:18px}.rich-message pre{white-space:pre-wrap;overflow:auto;background:var(--bg2);padding:12px;border-radius:4px}.rich-message figure{margin:10px 0;min-width:0}.rich-message figure img,.rich-message figure video{max-width:100%;max-height:420px;border-radius:4px}.rich-message audio{max-width:100%}.rich-message figcaption{font-size:12px;margin-top:6px}.rich-message figcaption small{display:block;color:var(--text3)}.rich-message blockquote{border-inline-start:3px solid var(--cyan);margin:10px 0;padding-inline-start:12px;color:var(--text2)}.rich-message cite{display:block;font-size:12px;margin-top:8px}.rich-pull{font-size:1.15em}.rich-message footer,.rich-thinking{color:var(--text3);font-size:12px}.rich-message hr{border:0;border-top:1px solid var(--border);margin:12px 0}.rich-message a{color:var(--cyan)}
+.rich-spoiler{filter:blur(4px);cursor:pointer;background:var(--bg3)}.rich-spoiler[aria-expanded=true]{filter:none}.rich-list{padding:0;list-style:none}.rich-list li{display:flex;align-items:baseline;gap:8px}.rich-list li>div{flex:1}.rich-list input{width:auto}.rich-collage{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}.rich-slideshow{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory}.rich-slideshow>figure,.rich-slideshow>div{flex:0 0 85%;scroll-snap-align:start}.rich-table-scroll{overflow:auto}.rich-table{border-collapse:collapse;width:100%;margin:10px 0}.rich-table th,.rich-table td{padding:8px;min-width:60px}.rich-table.bordered td,.rich-table.bordered th{border:1px solid var(--border)}.rich-table.striped tr:nth-child(even){background:var(--bg2)}.rich-table.compact th,.rich-table.compact td{padding:4px}.rich-message details{margin:8px 0}.rich-message summary{cursor:pointer;color:var(--cyan)}.rich-map{width:100%;height:240px;border:1px solid var(--border);border-radius:4px}.rich-math{overflow-x:auto;padding:8px}.rich-entity{color:var(--cyan)}.rich-message .katex{font-size:1.1em}
+.attachment-list{max-height:48vh;overflow:auto}.attachment-item{display:grid;grid-template-columns:70px minmax(0,1fr) auto;gap:10px;align-items:start;padding:10px 0;border-bottom:1px solid var(--border)}.attachment-item img,.attachment-item video{width:70px;height:70px;object-fit:cover;border-radius:4px}.attachment-item textarea,.attachment-item select{width:100%;margin-top:6px}.attachment-name{overflow-wrap:anywhere}.upload-progress{width:100%;margin-top:12px}.upload-status{font-size:12px;color:var(--text3);margin:8px 0}.attachment-drop{padding:20px;border:1px dashed var(--cyan);text-align:center;margin:10px 0;cursor:pointer}.attachment-drop.dragover{background:var(--cyan-dim)}
+@media(max-width:650px){.keyboard-editor-grid{grid-template-columns:1fr}.album-items{grid-template-columns:1fr}.attachment-item{grid-template-columns:50px minmax(0,1fr) auto}.attachment-item img,.attachment-item video{width:50px;height:50px}}
+
+.album-item .msg-row{display:block;border:0;padding:4px}.album-item .msg-text{display:block;margin-top:8px}.album-item .msg-time{display:block;margin-top:6px}
 </style>
+<script async src="https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/katex.min.js" integrity="sha384-QFFtAGzvvj+bfgCGxXJlNZZR1nXEZgvG8tDLCCY1F19xl20WlfTYgguB4VcNdxYk" crossorigin="anonymous" referrerpolicy="no-referrer" onload="document.dispatchEvent(new Event('telegram-math-ready'))"></script>
+<script src="/assets/telegram-ui.js"></script>
 <script>
 // Apply theme and language immediately to prevent flash
 (function() {
@@ -1338,6 +1367,7 @@ body::before { display: none; }
   document.documentElement.setAttribute('lang', lang);
 })();
 </script>
+<link id="telegramMathCSS" rel="stylesheet" media="print" href="https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/katex.min.css" integrity="sha384-3rdsX6e5mueWyoweR9NIVmtEsUkokpBT/0ALqKKIBMr9j4qhHkaIkAcGgsE6uVlp" crossorigin="anonymous" referrerpolicy="no-referrer" onload="this.media='all';document.dispatchEvent(new Event('telegram-math-ready'))">
 </head>
 <body>
 
@@ -1544,15 +1574,13 @@ body::before { display: none; }
        <summary id="composeOptionsLabel">Inline buttons and topic</summary>
        <label for="composeThread" id="composeThreadLabel">Topic ID (0 = default)</label>
        <input id="composeThread" type="number" min="0" value="0">
-       <label for="composeKeyboard" id="composeKeyboardLabel">Inline keyboard (JSON)</label>
-       <textarea id="composeKeyboard" rows="4" style="width:100%" placeholder='{"inline_keyboard":[[{"text":"Yes","callback_data":"yes"}]]}'></textarea>
-       <button class="btn btn-sm" onclick="composeAlbum()">Album</button>
-       <button class="btn btn-sm" onclick="addComposeButton()" id="addComposeButton">Add button</button>
+       <button type="button" class="btn btn-sm" onclick="addComposeButton()" id="addComposeButton">Inline buttons</button>
+       <details><summary id="composeKeyboardLabel">Keyboard JSON</summary><textarea id="composeKeyboard" rows="4" style="width:100%" aria-label="Compose keyboard JSON"></textarea></details>
        <div id="composeKeyboardPreview"></div>
       </details>
       <div class="msg-compose">
         <input class="msg-compose-input" id="msgComposeInput" type="text" placeholder="Send a message..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();composeSend()}">
-        <button class="btn btn-primary btn-sm" onclick="composeSend()">SEND</button>
+        <button type="button" class="btn btn-sm" aria-label="Attach files" title="Attach files" id="attachFilesButton" onclick="openAttachments()">📎</button><button class="btn btn-primary btn-sm" onclick="composeSend()">SEND</button>
       </div>
     </div>
 
@@ -1641,16 +1669,18 @@ body::before { display: none; }
  </div>
 </div>
 <div id="keyboardModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeKeyboardEditor()">
- <div class="modal" role="dialog" aria-modal="true" aria-labelledby="keyboardEditorTitle">
-  <h3 id="keyboardEditorTitle">Inline buttons</h3>
-  <label for="keyboardEditorJSON" id="keyboardEditorLabel">Keyboard JSON</label>
-  <textarea id="keyboardEditorJSON" rows="10" style="width:100%"></textarea>
-  <div id="keyboardEditorPreview"></div>
-  <button class="btn btn-primary" id="keyboardEditorSave" onclick="saveMessageKeyboard()">Save</button>
-  <button class="btn" id="keyboardEditorClear" onclick="clearKeyboardEditor()">Remove buttons</button>
-  <button class="btn" id="keyboardEditorCancel" onclick="closeKeyboardEditor()">Cancel</button>
+ <div class="modal keyboard-editor" role="dialog" aria-modal="true" aria-labelledby="keyboardEditorTitle">
+ <h3 id="keyboardEditorTitle">Inline buttons</h3>
+ <div class="keyboard-editor-grid"><div><div id="kbRows"></div><button type="button" id="kbAddRow" class="btn btn-sm" onclick="addKBRow()">Add row</button><label class="kb-checkbox"><input type="checkbox" id="kbForce" onchange="kbState.force_reply=this.checked;kbRefresh()"><span id="kbForceLabel">Force reply</span></label></div><div class="kb-properties" id="kbProperties"></div></div>
+ <div id="keyboardEditorPreview" class="keyboard-editor-preview"></div><div id="kbErrors" class="kb-errors" role="alert"></div>
+ <details id="kbJSONDetails"><summary id="kbJSONSummary">Advanced: JSON</summary><textarea id="keyboardEditorJSON" rows="8" style="width:100%" aria-label="Keyboard JSON"></textarea><button type="button" id="kbImportJSON" class="btn btn-sm" onclick="importKeyboardJSON()">Apply JSON</button></details>
+ <button type="button" class="btn btn-primary" id="keyboardEditorSave" onclick="saveMessageKeyboard()">Save</button><button type="button" class="btn" id="keyboardEditorClear" onclick="clearKeyboardEditor()">Remove buttons</button><button type="button" class="btn" id="keyboardEditorCancel" onclick="closeKeyboardEditor()">Cancel</button>
  </div>
 </div>
+<div id="attachmentModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeAttachments()"><div class="modal" style="max-width:700px;width:95vw" role="dialog" aria-modal="true" aria-labelledby="attachmentTitle">
+<h3 id="attachmentTitle">Send files</h3><p id="uploadDestination"></p><input type="file" id="attachmentInput" multiple hidden><button type="button" class="attachment-drop" id="attachmentDrop" onclick="if(!uploadBusy)document.getElementById('attachmentInput').click()">Choose files</button><div class="attachment-list" id="attachmentList"></div>
+<div class="attachment-toolbar"><label><input type="checkbox" id="uploadAsAlbum"><span id="uploadAlbumLabel">Send as album</span></label><label><span id="uploadTopicLabel">Topic ID</span><input type="number" id="uploadThread" min="0" value="0" style="width:90px"></label></div><progress id="uploadProgress" class="upload-progress" value="0" max="100" hidden></progress><div id="uploadStatus" class="upload-status" role="status"></div><button type="button" id="uploadSubmit" class="btn btn-primary" onclick="sendAttachments()">Send</button><button type="button" id="uploadCancel" class="btn" onclick="closeAttachments()">Cancel</button>
+</div></div>
 <div id="botModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeBotModal()">
   <div class="modal" style="max-width:500px">
     <h3 id="botModalTitle">Add Bot</h3>
@@ -2444,7 +2474,8 @@ function applyLang() {
   // compose
   const composeInput = document.getElementById('msgComposeInput');
   if (composeInput) composeInput.placeholder = t('send_placeholder');
-  const composeBtn = document.querySelector('.msg-compose .btn');
+  const composeBtn = document.querySelector('.msg-compose .btn-primary');
+  const attachBtn=document.getElementById('attachFilesButton');if(attachBtn){attachBtn.title=attachBtn.ariaLabel=tgLabel('Прикрепить файлы','Attach files');}
   if (composeBtn) composeBtn.textContent = t('send');
   // load more buttons
   const loadMoreBtn = document.getElementById('loadMoreBtn');
@@ -2646,6 +2677,7 @@ const mediaIcons = {
 };
 
 function renderMsgContent(m) {
+ if(m.rich_message?.blocks)return TelegramUI.richMessage(m.rich_message,telegramRenderContext(m.id));
   let html = '';
   if (m.media_type && m.file_id) {
     const icon = mediaIcons[m.media_type] || '📎';
@@ -2674,6 +2706,7 @@ function renderMsgContent(m) {
       html += `<a href="${mediaUrl}" target="_blank" class="msg-media-link">${icon} ${label}</a>`;
     }
   }
+  if(m.has_media_spoiler && html)html=`<details class="rich-media-spoiler"><summary>${tgLabel('Показать скрытое медиа','Reveal media spoiler')}</summary>${html}</details>`;
   const bodyText = m.text || m.rich_text || '';
   if (bodyText) {
     html += esc(bodyText).replace(/\n/g, '<br>');
@@ -3434,10 +3467,10 @@ const telegramMessages = new Map();
 let messageEventSource = null;
 
 function renderMsgRow(m, msgMap) {
-  return `<div class="msg-row ${m.deleted ? 'msg-deleted' : ''}" id="msg-${m.id}">
+  return `<div class="msg-row ${m.rich_message?.blocks ? 'rich-row' : ''} ${m.deleted ? 'msg-deleted' : ''}" id="msg-${m.id}" tabindex="0">
     ${m.reply_to_id ? `<span class="msg-reply-badge" onclick="scrollToMsg(${m.reply_to_id})">↩ ${t('replying_to')} ${msgMap[m.reply_to_id] ? esc(msgMap[m.reply_to_id].from_user) : '#' + m.reply_to_id}</span>` : ''}
     <span class="msg-user${m.from_id ? ' clickable' : ''}" title="ID: ${m.from_id}" ${m.from_id ? `onclick="showUserProfile(${m.from_id})"` : ''}>${esc(m.from_user)}</span>${m.from_is_bot ? `<span class="msg-bot-badge">${t('bot_badge')}</span>` : ''}${m.sender_tag ? `<span class="msg-sender-tag">${esc(m.sender_tag)}</span>` : ''}
-    <span class="msg-text">${m.callback_id ? `<small class="badge">Callback</small> ` : ''}${m.message_thread_id ? `<small class="badge">#${m.message_thread_id}</small> ` : ''}${m.media_group_id ? `<small class="badge" title="${esc(m.media_group_id)}">Album</small> ` : ''}${renderMsgContent(m)}${renderKeyboard(m.reply_markup)}${renderRichButtons(m.rich_message)}</span>
+    <div class="msg-text">${m.callback_id ? `<small class="badge">Callback</small> ` : ''}${m.message_thread_id ? `<small class="badge">#${m.message_thread_id}</small> ` : ''}${renderMsgContent(m)}${renderKeyboard(m.reply_markup)}</div>
     ${m.deleted ? `<span class="msg-deleted-badge">${t('deleted')}</span>` : ''}
     <span class="msg-time">${m.date_str}</span>
     <div class="msg-actions">
@@ -3455,135 +3488,52 @@ function renderMsgRow(m, msgMap) {
   </div>`;
 }
 
-async function loadMessages(append = false, preserveScroll = false) {
-  if (!currentChat) return;
-  if (!append) messageOffset = 0;
-  try {
-    const msgs = await api(`/api/messages?bot_id=${currentBotID}&chat_id=${currentChat.id}&limit=50&offset=${messageOffset}${topicQuery()}`);
-    if (!msgs) return;
-    const list = document.getElementById('messagesList');
-    const content = document.getElementById('messagesContent');
-    msgs.forEach(m=>telegramMessages.set(m.id,m));
-    const reversed = [...msgs].reverse();
-    const msgMap = {};
-    reversed.forEach(m => { msgMap[m.id] = m; });
-
-    if (preserveScroll && !append && renderedMsgIds.size > 0) {
-      // Incremental update: only add new messages at the bottom
-      reversed.filter(m=>renderedMsgIds.has(m.id)).forEach(m=>{
-       const existing=document.getElementById('msg-'+m.id);if(existing){const temp=document.createElement('div');temp.innerHTML=renderMsgRow(m,msgMap);existing.replaceWith(temp.firstElementChild);}
-      });
-      const newMsgs = reversed.filter(m => !renderedMsgIds.has(m.id));
-      if (newMsgs.length === 0) return; // nothing new
-
-      // Check if user is near the bottom (within 60px)
-      const wasAtBottom = (content.scrollHeight - content.scrollTop - content.clientHeight) < 60;
-
-      const fragment = document.createDocumentFragment();
-      const temp = document.createElement('div');
-      newMsgs.forEach(m => {
-        temp.innerHTML = renderMsgRow(m, msgMap);
-        const el = temp.firstElementChild;
-        el.style.opacity = '0';
-        el.style.transform = 'translateY(8px)';
-        fragment.appendChild(el);
-        renderedMsgIds.add(m.id);
-      });
-      list.appendChild(fragment);
-
-      // Animate new messages in
-      requestAnimationFrame(() => {
-        list.querySelectorAll('.msg-row').forEach(el => {
-          if (el.style.opacity === '0') {
-            el.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
-            el.style.opacity = '1';
-            el.style.transform = 'translateY(0)';
-          }
-        });
-      });
-
-      // Only auto-scroll if user was at bottom
-      if (wasAtBottom) {
-        requestAnimationFrame(() => { content.scrollTop = content.scrollHeight; });
-      }
-    } else {
-      // Full render: initial load, chat switch, load-more, search clear
-      const prevScrollHeight = content.scrollHeight;
-      const prevScrollTop = content.scrollTop;
-      const html = reversed.map(m => renderMsgRow(m, msgMap)).join('');
-
-      if (append) {
-        list.innerHTML = html + list.innerHTML;
-      } else {
-        renderedMsgIds = new Set();
-        list.innerHTML = html || `<div style="text-align:center;color:var(--text3);padding:40px;font-family:var(--ff-mono);font-size:12px">${t('no_messages')}</div>`;
-      }
-      reversed.forEach(m => renderedMsgIds.add(m.id));
-
-      if (append) {
-        // Keep scroll position when loading older messages
-        content.scrollTop = prevScrollTop + (content.scrollHeight - prevScrollHeight);
-      } else {
-        // Scroll to bottom on initial load / chat switch
-        content.scrollTop = content.scrollHeight;
-      }
-    }
-    document.getElementById('loadMoreBtn').style.display = msgs.length >= 50 ? 'inline-flex' : 'none';
-  } catch(e) { toast(e.message, 'error'); }
+function renderMessageGroups(messages){
+ const list=document.getElementById('messagesList'),content=document.getElementById('messagesContent');
+ const beforeHeight=content.scrollHeight,beforeTop=content.scrollTop,wasBottom=beforeHeight-beforeTop-content.clientHeight<60;
+ const anchor=[...list.children].find(el=>el.getBoundingClientRect().bottom>content.getBoundingClientRect().top),anchorKey=anchor?.dataset.renderKey,anchorY=anchor?.getBoundingClientRect().top;
+ const msgMap=Object.fromEntries(messages.map(m=>[m.id,m]));
+ const existing=new Map([...list.children].map(el=>[el.dataset.renderKey,el]));
+ const nodes=[];
+ for(const group of TelegramUI.groupMessages(messages)){
+  const key=group.key||'single:'+group.messages[0].id,signature=JSON.stringify([currentLang,group.messages]);
+  let node=existing.get(key);existing.delete(key);
+  if(!node||node.dataset.signature!==signature){
+   if(group.key){
+    if(!node||!node.classList.contains('msg-album')){node=document.createElement('div');node.className='msg-album';node.innerHTML='<div class="album-header"></div><div class="album-items"></div>';}
+    node.querySelector('.album-header').textContent=tgLabel('Альбом','Album')+' · '+group.messages.length+' · '+(group.messages[0].from_user||'');
+    const items=node.querySelector('.album-items'),old=new Map([...items.children].map(x=>[x.dataset.messageID,x]));
+    let itemIndex=0;for(const m of group.messages){const sig=JSON.stringify([currentLang,m]);let item=old.get(String(m.id));old.delete(String(m.id));if(!item){item=document.createElement('div');item.className='album-item';item.dataset.messageID=m.id;}if(item.dataset.signature!==sig){item.innerHTML=renderMsgRow(m,msgMap);item.dataset.signature=sig;}if(items.children[itemIndex]!==item)items.insertBefore(item,items.children[itemIndex]||null);itemIndex++;}for(const item of old.values())item.remove();
+   }else{const temp=document.createElement('div');temp.innerHTML=renderMsgRow(group.messages[0],msgMap);node=temp.firstElementChild;}
+   node.dataset.signature=signature;node.dataset.renderKey=key;
+  }
+  nodes.push(node);
+ }
+ nodes.forEach((node,i)=>{if(list.children[i]!==node)list.insertBefore(node,list.children[i]||null);});const keep=new Set(nodes);[...list.children].forEach(el=>{if(!keep.has(el))el.remove();});renderedMsgIds=new Set(messages.map(m=>m.id));
+ if(!messages.length)list.innerHTML=`<div style="text-align:center;padding:40px;color:var(--text3)">${t('no_messages')}</div>`;
+ if(wasBottom)content.scrollTop=content.scrollHeight;else {const nextAnchor=[...list.children].find(el=>el.dataset.renderKey===anchorKey);content.scrollTop=beforeTop+(nextAnchor&&anchorY!=null?nextAnchor.getBoundingClientRect().top-anchorY:0);}
 }
-
-function loadMoreMessages() { messageOffset += 50; loadMessages(true); }
-
-function connectMessageStream(chatID) {
-  disconnectMessageStream();
-  messageEventSource = new EventSource(`/api/messages/stream?bot_id=${currentBotID}&chat_id=${chatID}`);
-  messageEventSource.onmessage = (e) => {
-    try {
-      const m = JSON.parse(e.data);
-      telegramMessages.set(m.id,m);
-      const topic=document.getElementById('topicFilter').value;
-      if(topic!=='' && Number(topic)!==Number(m.message_thread_id||0)) return;
-      const list = document.getElementById('messagesList');
-      const content = document.getElementById('messagesContent');
-      const msgMap = {};
-      msgMap[m.id] = m;
-
-      // Streaming edits: replace the existing row in place so text updates surface.
-      const existing = document.getElementById('msg-' + m.id);
-      if (existing) {
-        const temp = document.createElement('div');
-        temp.innerHTML = renderMsgRow(m, msgMap);
-        const replacement = temp.firstElementChild;
-        if (replacement) existing.replaceWith(replacement);
-        renderedMsgIds.add(m.id);
-        return;
-      }
-      if (renderedMsgIds.has(m.id)) return;
-      renderedMsgIds.add(m.id);
-
-      const wasAtBottom = (content.scrollHeight - content.scrollTop - content.clientHeight) < 60;
-
-      const temp = document.createElement('div');
-      temp.innerHTML = renderMsgRow(m, msgMap);
-      const el = temp.firstElementChild;
-      el.style.opacity = '0';
-      el.style.transform = 'translateY(8px)';
-      list.appendChild(el);
-
-      requestAnimationFrame(() => {
-        el.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
-        el.style.opacity = '1';
-        el.style.transform = 'translateY(0)';
-      });
-
-      if (wasAtBottom) {
-        requestAnimationFrame(() => { content.scrollTop = content.scrollHeight; });
-      }
-    } catch(err) {}
-  };
-  messageEventSource.onerror = () => {
-    // Reconnect handled automatically by EventSource
-  };
+async function loadMessages(append=false,preserveScroll=false){
+ if(!currentChat)return;
+ const bot=currentBotID,chat=currentChat.id,topic=topicQuery();if(!append)messageOffset=0;
+ try{const msgs=await api(`/api/messages?bot_id=${bot}&chat_id=${chat}&limit=50&offset=${messageOffset}${topic}`);
+ if(bot!==currentBotID||chat!==currentChat?.id||topic!==topicQuery())return;
+ if(!append&&!preserveScroll)telegramMessages.clear();msgs.forEach(m=>telegramMessages.set(m.id,m));
+ const selected=document.getElementById('topicFilter').value;
+ renderMessageGroups([...telegramMessages.values()].filter(m=>selected===''||Number(selected)===Number(m.message_thread_id||0)));
+ if(!append&&!preserveScroll){const c=document.getElementById('messagesContent');c.scrollTop=c.scrollHeight;}
+ document.getElementById('loadMoreBtn').style.display=msgs.length>=50?'inline-flex':'none';
+ }catch(e){toast(e.message,'error');}
+}
+function loadMoreMessages(){messageOffset+=50;loadMessages(true);}
+function connectMessageStream(chatID){
+ disconnectMessageStream();const bot=currentBotID;
+ messageEventSource=new EventSource(`/api/messages/stream?bot_id=${bot}&chat_id=${chatID}`);
+ messageEventSource.onmessage=e=>{try{
+ if(bot!==currentBotID||chatID!==currentChat?.id)return;
+ const m=JSON.parse(e.data),selected=document.getElementById('topicFilter').value;telegramMessages.set(m.id,m);
+ renderMessageGroups([...telegramMessages.values()].filter(x=>selected===''||Number(selected)===Number(x.message_thread_id||0)));
+ }catch(err){console.error('Message rendering failed',err);}};
 }
 
 function disconnectMessageStream() {
@@ -3595,28 +3545,17 @@ function disconnectMessageStream() {
 
 function debounceSearch() { clearTimeout(searchTimeout); searchTimeout = setTimeout(doSearch, 300); }
 
-async function doSearch() {
-  const q = document.getElementById('searchInput').value.trim();
-  if (!q) { loadMessages(); if(currentChat)connectMessageStream(currentChat.id); return; }
-  disconnectMessageStream();
-  try {
-    const msgs = await api(`/api/messages/search?bot_id=${currentBotID}&chat_id=${currentChat.id}&q=${encodeURIComponent(q)}${topicQuery()}`);
-    document.getElementById('messagesList').innerHTML = msgs.map(m => `
-      <div class="msg-row ${m.deleted ? 'msg-deleted' : ''}">
-        <span class="msg-user${m.from_id ? ' clickable' : ''}" ${m.from_id ? `onclick="showUserProfile(${m.from_id})"` : ''}>${esc(m.from_user)}</span>${m.from_is_bot ? `<span class="msg-bot-badge">${t('bot_badge')}</span>` : ''}${m.sender_tag ? `<span class="msg-sender-tag">${esc(m.sender_tag)}</span>` : ''}
-        <span class="msg-text">${m.media_type ? renderMsgContent(m) : highlight(esc(m.text || m.rich_text || ''), esc(q))}${renderKeyboard(m.reply_markup)}${renderRichButtons(m.rich_message)}</span>
-        ${m.deleted ? `<span class="msg-deleted-badge">${t('deleted')}</span>` : ''}
-        <span class="msg-time">${m.date_str}</span>
-      </div>
-    `).join('') || `<div style="text-align:center;color:var(--text3);padding:40px;font-family:var(--ff-mono);font-size:12px">${t('no_results')}</div>`;
-    document.getElementById('loadMoreBtn').style.display = 'none';
-  } catch(e) { toast(e.message, 'error'); }
+async function doSearch(){
+ if(!currentChat)return;const q=document.getElementById('searchInput').value.trim();
+ if(!q){loadMessages();connectMessageStream(currentChat.id);return;}
+ disconnectMessageStream();const bot=currentBotID,chat=currentChat.id,topic=topicQuery();
+ try{const msgs=await api(`/api/messages/search?bot_id=${bot}&chat_id=${chat}&q=${encodeURIComponent(q)}${topic}`);
+ if(bot!==currentBotID||chat!==currentChat?.id||q!==document.getElementById('searchInput').value.trim()||topic!==topicQuery())return;
+ msgs.forEach(m=>telegramMessages.set(m.id,m));renderMessageGroups(msgs);document.getElementById('loadMoreBtn').style.display='none';
+ }catch(e){toast(e.message,'error');}
 }
 
-// ===== ACTIONS =====
-
-let replyToMsgID = null;
-
+let replyToMsgID=null;
 function setReply(msgID, fromUser) {
   replyToMsgID = msgID;
   const preview = document.getElementById('replyPreview');
@@ -4585,7 +4524,7 @@ function finishTelegramInput(value) {
  document.getElementById('telegramInputModal').style.display='none';
  const resolve=telegramInputResolve;telegramInputResolve=null;if(resolve)resolve(value);
 }
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(telegramInputResolve)finishTelegramInput(null);else if(document.getElementById('keyboardModal').style.display==='flex')closeKeyboardEditor();}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(telegramInputResolve)finishTelegramInput(null);else if(document.getElementById('keyboardModal').style.display==='flex')closeKeyboardEditor();else if(document.getElementById('attachmentModal').style.display==='flex')closeAttachments();}});
 
 function safeTelegramURL(value) {
  try {const u=new URL(value);return ['http:','https:','tg:'].includes(u.protocol)?u.href:'';}catch{return '';}
@@ -4607,33 +4546,13 @@ function richTextLabel(value) {
  if(value && typeof value==='object') return richTextLabel(value.text)||value.alt||'';
  return '';
 }
-function renderKeyboard(markup) {
- if(!markup?.inline_keyboard) return '';
- return `<div class="telegram-keyboard">${markup.inline_keyboard.map(row=>`<div class="telegram-button-row">${row.map(b=>{
-  const label=esc(richTextLabel(b.text));
-  const title=esc(buttonAction(b));
-  const style=['primary','success','danger','link'].includes(b.style)?b.style:'';
-  const icon=b.icon_custom_emoji_id?'<span aria-label="custom emoji">◈</span> ':'';
-  if(b.disabled!=null) return `<button class="btn btn-sm ${style}" disabled title="${title}">${icon}${label}</button>`;
-  const url=b.url && safeTelegramURL(b.url);
-  if(url) return `<a class="btn btn-sm ${style}" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="${title}">${icon}${label}</a>`;
-  if(b.copy_text) return `<button class="btn btn-sm ${style}" data-copy-text="${esc(b.copy_text.text)}" onclick="copyTelegramText(this)" title="${title}">${icon}${label}</button>`;
-  return `<span class="btn btn-sm ${style}" role="img" aria-label="${title}" title="${title}">${icon}${label}</span>`;
- }).join('')}</div>`).join('')}</div>`;
+function telegramRenderContext(messageID='preview'){return {botID:currentBotID,prefix:'rich-'+messageID,label:tgLabel,katex:document.getElementById('telegramMathCSS')?.media==='all'?window.katex:null};}
+function renderTelegramMath(){
+ const ctx=telegramRenderContext();if(!ctx.katex)return;
+ document.querySelectorAll('.rich-math-fallback').forEach(node=>{node.outerHTML=TelegramUI.math(node.dataset.expression,node.dataset.display==='true',ctx);});
 }
-function renderRichButtons(rich) {
- if(!rich) return '';
- const buttons=[];
- function visit(value) {
-  if(!value || typeof value!=='object') return;
-  if(value.type==='buttons' && value.buttons) buttons.push(value.buttons);
-  if(value.type==='button' && value.button) buttons.push([value.button]);
-  for(const [key,child] of Object.entries(value)) if(key!=='buttons' && key!=='button') {
-   if(Array.isArray(child)) child.forEach(visit);else visit(child);
-  }
- }
- visit(rich);return renderKeyboard({inline_keyboard:buttons});
-}
+document.addEventListener('telegram-math-ready',renderTelegramMath);
+function renderKeyboard(markup){return TelegramUI.keyboard(markup,telegramRenderContext());}
 async function copyTelegramText(button) {
  try {await navigator.clipboard.writeText(button.dataset.copyText);toast(tgLabel('Скопировано','Copied'));}catch(e){toast(e.message,'error');}
 }
@@ -4651,48 +4570,80 @@ async function loadTopics() {
  }catch(e){toast(e.message,'error');}
 }
 function changeTopic() {
+ telegramMessages.clear();
  document.getElementById('composeThread').value=document.getElementById('topicFilter').value||'0';
  renderedMsgIds.clear();messageOffset=0;
  if(document.getElementById('searchInput').value.trim())doSearch();else loadMessages();
 }
-async function addComposeButton() {
- const text=await askTelegramText(tgLabel('Текст кнопки','Button text'));if(!text) return;
- const data=await askTelegramText(tgLabel('Callback data (1–64 байта)','Callback data (1–64 bytes)'));if(data===null) return;
- const field=document.getElementById('composeKeyboard');
- try {const kb=field.value.trim()?JSON.parse(field.value):{inline_keyboard:[]};kb.inline_keyboard.push([{text,callback_data:data}]);field.value=JSON.stringify(kb,null,2);previewKeyboard(field,'composeKeyboardPreview');}catch(e){toast(e.message,'error');}
-}
-function previewKeyboard(field,target) {
- try {document.getElementById(target).innerHTML=renderKeyboard(field.value.trim()?JSON.parse(field.value):null);}catch{document.getElementById(target).textContent=tgLabel('Некорректный JSON','Invalid JSON');}
-}
-let keyboardEditTarget=null;
-function editMessageKeyboard(id) {
- keyboardEditTarget={message_id:id,chat_id:currentChat.id,bot_id:currentBotID};
- openKeyboardEditor(telegramMessages.get(id)?.reply_markup);
-}
-function editInlineKeyboard(index) {
- keyboardEditTarget={inline_message_id:callbackEvents[index].inline_message_id,bot_id:currentBotID};
- openKeyboardEditor(callbackEvents[index].reply_markup);
-}
-function openKeyboardEditor(markup) {
- document.getElementById('keyboardEditorJSON').value=JSON.stringify(markup||{inline_keyboard:[]},null,2);
+function previewKeyboard(field,target) {try{document.getElementById(target).innerHTML=renderKeyboard(field.value.trim()?JSON.parse(field.value):null);}catch{document.getElementById(target).textContent=tgLabel('Некорректный JSON','Invalid JSON');}}
+const kbActionLabels={callback_data:['Callback','Callback'],url:['Ссылка','URL'],web_app:['Mini App','Mini App'],login_url:['Вход через Telegram','Telegram login'],switch_inline_query:['Inline-запрос: выбор чата','Inline query: choose chat'],switch_inline_query_current_chat:['Inline-запрос: текущий чат','Inline query: current chat'],switch_inline_query_chosen_chat:['Inline-запрос: типы чатов','Inline query: chat types'],copy_text:['Копировать текст','Copy text'],callback_game:['Игра','Game'],pay:['Оплата','Payment'],disabled:['Недоступная кнопка','Disabled button']};
+let keyboardEditTarget=null,kbState={inline_keyboard:[]},kbSelected=null,kbReturnFocus=null,kbDrag=null;
+function editMessageKeyboard(id){keyboardEditTarget={message_id:id,chat_id:currentChat.id,bot_id:currentBotID};openKeyboardEditor(telegramMessages.get(id)?.reply_markup);}
+function editInlineKeyboard(index){keyboardEditTarget={inline_message_id:callbackEvents[index].inline_message_id,bot_id:currentBotID};openKeyboardEditor(callbackEvents[index].reply_markup);}
+function addComposeButton(){keyboardEditTarget={compose:true,bot_id:currentBotID,chat_id:currentChat.id};try{openKeyboardEditor(JSON.parse(document.getElementById('composeKeyboard').value||'{"inline_keyboard":[]}'));}catch(e){toast(e.message,'error');}}
+function openKeyboardEditor(markup){
+ kbState=TelegramUI.clone(markup||{inline_keyboard:[]});if(!Array.isArray(kbState.inline_keyboard)||!kbState.inline_keyboard.every(row=>Array.isArray(row)&&row.every(b=>b&&typeof b==='object'&&!Array.isArray(b)))){toast(tgLabel('Нужна inline-клавиатура','An inline keyboard is required'),'error');return;}
+ kbSelected=kbState.inline_keyboard[0]?.length?{r:0,c:0}:null;kbReturnFocus=document.activeElement;
  document.getElementById('keyboardEditorTitle').textContent=tgLabel('Inline-кнопки','Inline buttons');
- document.getElementById('keyboardEditorLabel').textContent=tgLabel('JSON клавиатуры','Keyboard JSON');
- document.getElementById('keyboardEditorSave').textContent=tgLabel('Сохранить','Save');
- document.getElementById('keyboardEditorClear').textContent=tgLabel('Удалить кнопки','Remove buttons');
- document.getElementById('keyboardEditorCancel').textContent=tgLabel('Отмена','Cancel');
- document.getElementById('keyboardModal').style.display='flex';
- document.getElementById('keyboardEditorJSON').focus();
- previewKeyboard(document.getElementById('keyboardEditorJSON'),'keyboardEditorPreview');
+ document.getElementById('kbAddRow').textContent=tgLabel('Добавить ряд','Add row');
+ document.getElementById('kbForceLabel').textContent=tgLabel('Открыть поле ответа в Telegram','Open Telegram reply interface');
+ document.getElementById('kbForce').checked=!!kbState.force_reply;document.getElementById('kbForce').disabled=!keyboardEditTarget?.compose;
+ document.getElementById('keyboardEditorSave').textContent=keyboardEditTarget?.compose?tgLabel('Добавить к сообщению','Apply to message'):tgLabel('Сохранить кнопки','Save buttons');
+ document.getElementById('keyboardEditorClear').textContent=tgLabel('Удалить все кнопки','Remove all buttons');document.getElementById('keyboardEditorCancel').textContent=tgLabel('Отмена','Cancel');
+ document.getElementById('kbJSONSummary').textContent=tgLabel('Дополнительно: JSON','Advanced: JSON');document.getElementById('kbImportJSON').textContent=tgLabel('Применить JSON','Apply JSON');
+ document.getElementById('kbJSONDetails').open=false;document.getElementById('keyboardModal').style.display='flex';renderKeyboardEditor();document.getElementById('kbAddRow').focus();
 }
-function clearKeyboardEditor(){const f=document.getElementById('keyboardEditorJSON');f.value='{"inline_keyboard":[]}';previewKeyboard(f,'keyboardEditorPreview');}
-function closeKeyboardEditor(){document.getElementById('keyboardModal').style.display='none';keyboardEditTarget=null;}
+function kbCurrent(){return kbSelected?kbState.inline_keyboard[kbSelected.r]?.[kbSelected.c]:null;}
+function kbFieldLabel(ru,en){return tgLabel(ru,en);}
+function kbInput(name,value,ru,en,type='text'){return `<label>${esc(tgLabel(ru,en))}<input data-kb-field="${name}" type="${type}" value="${esc(value??'')}" oninput="setKBField('${name}',this.value)"></label>`;}
+function kbCheck(name,checked,ru,en){return `<label class="kb-checkbox"><input data-kb-field="${name}" type="checkbox" ${checked?'checked':''} onchange="setKBField('${name}',this.checked)">${esc(tgLabel(ru,en))}</label>`;}
+function kbRefresh(){
+ document.getElementById('kbRows').innerHTML=kbState.inline_keyboard.map((row,r)=>`<section class="kb-row" ondragover="event.preventDefault()" ondrop="dropKB(event,${r},${row.length})"><div class="kb-row-head"><span>${tgLabel('Ряд','Row')} ${r+1}</span><div><button type="button" class="btn btn-sm" aria-label="${tgLabel('Ряд выше','Move row up')}" onclick="moveKBRow(${r},-1)" ${r===0?'disabled':''}>↑</button><button type="button" class="btn btn-sm" aria-label="${tgLabel('Ряд ниже','Move row down')}" onclick="moveKBRow(${r},1)" ${r===kbState.inline_keyboard.length-1?'disabled':''}>↓</button><button type="button" class="btn btn-danger btn-sm" aria-label="${tgLabel('Удалить ряд','Delete row')} ${r+1}" onclick="deleteKBRow(${r})">×</button></div></div><div class="kb-button-choices">${row.map((b,c)=>`<button type="button" class="kb-choice ${kbSelected?.r===r&&kbSelected?.c===c?'selected':''} ${['primary','success','danger'].includes(b.style)?b.style:''}" draggable="true" ondragstart="kbDrag={r:${r},c:${c}}" ondragover="event.preventDefault()" ondrop="dropKB(event,${r},${c})" onclick="selectKB(${r},${c})" aria-label="${esc(tgLabel('Редактировать: ','Edit: ')+b.text)}">${esc(b.text||tgLabel('Без текста','No label'))}<small>${esc(tgLabel(...(kbActionLabels[TelegramUI.action(b)]||['Действие','Action'])))}</small></button>`).join('')}<button type="button" class="btn btn-sm kb-add" onclick="addKBButton(${r})">＋ ${tgLabel('Кнопка','Button')}</button></div></section>`).join('')||`<p>${tgLabel('Добавьте первый ряд кнопок.','Add the first button row.')}</p>`;
+ document.getElementById('keyboardEditorPreview').innerHTML=renderKeyboard(kbState);
+ const errors=TelegramUI.validateKeyboard(kbState);document.getElementById('kbErrors').textContent=errors.join('\n');document.getElementById('keyboardEditorSave').disabled=errors.length>0;
+ if(document.activeElement!==document.getElementById('keyboardEditorJSON'))document.getElementById('keyboardEditorJSON').value=JSON.stringify(kbState,null,2);
+}
+function renderKeyboardEditor(){
+ kbRefresh();const b=kbCurrent(),form=document.getElementById('kbProperties');
+ if(!b){form.innerHTML=`<p>${tgLabel('Выберите кнопку, чтобы изменить её.','Select a button to edit it.')}</p>`;return;}
+ const key=TelegramUI.action(b),p=b[key]||{};
+ let html=kbInput('text',b.text,'Надпись','Label')+`<label>${tgLabel('Действие','Action')}<select id="kbAction" onchange="changeKBAction(this.value)">${TelegramUI.actions.map(k=>`<option value="${k}" ${key===k?'selected':''}>${esc(tgLabel(...kbActionLabels[k]))}</option>`).join('')}</select></label>`;
+ if(['callback_data','url','switch_inline_query','switch_inline_query_current_chat'].includes(key))html+=kbInput(key,b[key],key==='callback_data'?'Callback data (1–64 байта)':key==='url'?'Адрес ссылки':'Inline-запрос',key==='callback_data'?'Callback data (1–64 bytes)':key==='url'?'Link URL':'Inline query');
+ if(key==='web_app'||key==='login_url')html+=kbInput(key+'.url',p.url,'HTTPS-адрес','HTTPS URL');
+ if(key==='login_url')html+=kbInput('login_url.forward_text',p.forward_text,'Надпись при пересылке','Forwarded label')+kbInput('login_url.bot_username',p.bot_username,'Имя бота для входа','Login bot username')+kbCheck('login_url.request_write_access',p.request_write_access,'Разрешить боту писать пользователю','Request permission to message the user');
+ if(key==='copy_text')html+=`<label>${tgLabel('Текст для копирования (до 256 символов)','Copy text (up to 256 characters)')}<textarea data-kb-field="copy_text.text" rows="3" oninput="setKBField('copy_text.text',this.value)">${esc(p.text||'')}</textarea></label>`;
+ if(key==='switch_inline_query_chosen_chat')html+=kbInput(key+'.query',p.query,'Inline-запрос','Inline query')+kbCheck(key+'.allow_user_chats',p.allow_user_chats,'Личные чаты','Private chats')+kbCheck(key+'.allow_bot_chats',p.allow_bot_chats,'Чаты с ботами','Bot chats')+kbCheck(key+'.allow_group_chats',p.allow_group_chats,'Группы','Groups')+kbCheck(key+'.allow_channel_chats',p.allow_channel_chats,'Каналы','Channels');
+ if(key==='pay'||key==='callback_game')html+=`<p class="kb-note">${key==='pay'?tgLabel('Первая кнопка счёта на оплату.','Must be the first button on an invoice.'):tgLabel('Первая кнопка сообщения с игрой.','Must be the first button on a game message.')}</p>`;
+ html+=`<label>${tgLabel('Стиль','Style')}<select id="kbStyle" onchange="setKBField('style',this.value)">${[['',tgLabel('Обычный','Default')],['primary',tgLabel('Основной','Primary')],['success',tgLabel('Успех','Success')],['danger',tgLabel('Опасное действие','Danger')]].map(([k,v])=>`<option value="${k}" ${b.style===k?'selected':''}>${v}</option>`).join('')}</select></label>`+kbInput('icon_custom_emoji_id',b.icon_custom_emoji_id,'ID custom emoji (необязательно)','Custom emoji ID (optional)');
+ html+=`<div class="kb-position-actions"><button type="button" class="btn btn-sm" onclick="moveKBButton(-1)" ${kbSelected.c===0?'disabled':''}>← ${tgLabel('Влево','Left')}</button><button type="button" class="btn btn-sm" onclick="moveKBButton(1)" ${kbSelected.c===kbState.inline_keyboard[kbSelected.r].length-1?'disabled':''}>${tgLabel('Вправо','Right')} →</button><button type="button" class="btn btn-sm" onclick="duplicateKBButton()">${tgLabel('Дублировать','Duplicate')}</button><button type="button" class="btn btn-danger btn-sm" onclick="deleteKBButton()">${tgLabel('Удалить','Delete')}</button></div><label>${tgLabel('Переместить в ряд','Move to row')}<select id="kbMoveRow" onchange="moveKBToRow(Number(this.value))">${kbState.inline_keyboard.map((_,r)=>`<option value="${r}" ${r===kbSelected.r?'selected':''}>${r+1}</option>`).join('')}</select></label>`;
+ form.innerHTML=html;
+}
+function selectKB(r,c){kbSelected={r,c};renderKeyboardEditor();}
+function addKBRow(){kbState.inline_keyboard.push([]);renderKeyboardEditor();}
+function addKBButton(r){kbState.inline_keyboard[r].push({text:tgLabel('Новая кнопка','New button'),callback_data:''});kbSelected={r,c:kbState.inline_keyboard[r].length-1};renderKeyboardEditor();document.querySelector('[data-kb-field="text"]')?.focus();}
+function setKBField(name,value){const b=kbCurrent();if(!b)return;const [key,child]=name.split('.');if(child){b[key]??={};b[key][child]=value;}else if(value===''&&['style','icon_custom_emoji_id'].includes(key))delete b[key];else b[key]=value;kbRefresh();}
+function changeKBAction(key){if(!kbSelected)return;kbState.inline_keyboard[kbSelected.r][kbSelected.c]=TelegramUI.changeAction(kbCurrent(),key);renderKeyboardEditor();}
+function deleteKBButton(){if(!kbSelected)return;kbState.inline_keyboard[kbSelected.r].splice(kbSelected.c,1);kbSelected=null;renderKeyboardEditor();}
+function duplicateKBButton(){if(!kbSelected)return;kbState.inline_keyboard[kbSelected.r].splice(kbSelected.c+1,0,TelegramUI.clone(kbCurrent()));kbSelected.c++;renderKeyboardEditor();}
+function deleteKBRow(r){kbState.inline_keyboard.splice(r,1);kbSelected=null;renderKeyboardEditor();}
+function moveKBRow(r,delta){const to=r+delta;if(to<0||to>=kbState.inline_keyboard.length)return;[kbState.inline_keyboard[r],kbState.inline_keyboard[to]]=[kbState.inline_keyboard[to],kbState.inline_keyboard[r]];if(kbSelected){if(kbSelected.r===r)kbSelected.r=to;else if(kbSelected.r===to)kbSelected.r=r;}renderKeyboardEditor();}
+function moveKBButton(delta){if(!kbSelected)return;const {r,c}=kbSelected;kbState=TelegramUI.moveButton(kbState,r,c,r,c+delta);kbSelected.c+=delta;renderKeyboardEditor();}
+function moveKBToRow(to){if(!kbSelected||to===kbSelected.r)return;const c=kbState.inline_keyboard[to].length;kbState=TelegramUI.moveButton(kbState,kbSelected.r,kbSelected.c,to,c);kbSelected={r:to,c};renderKeyboardEditor();}
+function dropKB(event,r,c){event.preventDefault();event.stopPropagation();if(!kbDrag)return;if(kbDrag.r===r&&kbDrag.c<c)c--;kbState=TelegramUI.moveButton(kbState,kbDrag.r,kbDrag.c,r,c);kbSelected={r,c:Math.min(c,kbState.inline_keyboard[r].length-1)};kbDrag=null;renderKeyboardEditor();}
+function importKeyboardJSON(){try{const parsed=JSON.parse(document.getElementById('keyboardEditorJSON').value);if(!Array.isArray(parsed.inline_keyboard)||!parsed.inline_keyboard.every(row=>Array.isArray(row)&&row.every(b=>b&&typeof b==='object'&&!Array.isArray(b))))throw Error('inline_keyboard must contain rows of buttons');kbState=parsed;kbSelected=null;renderKeyboardEditor();}catch(e){document.getElementById('kbErrors').textContent=e.message;document.getElementById('keyboardEditorSave').disabled=true;}}
+function clearKeyboardEditor(){kbState.inline_keyboard=[];kbSelected=null;renderKeyboardEditor();}
+function closeKeyboardEditor(){document.getElementById('keyboardModal').style.display='none';keyboardEditTarget=null;kbReturnFocus?.focus();}
 async function saveMessageKeyboard(){
- try {
-  const markup=JSON.parse(document.getElementById('keyboardEditorJSON').value);
-  await api('/api/messages/keyboard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...keyboardEditTarget,reply_markup:markup})});
-  closeKeyboardEditor();loadMessages();toast(tgLabel('Кнопки обновлены','Buttons updated'));
- }catch(e){toast(e.message,'error');}
+ const target={...keyboardEditTarget},markup=TelegramUI.clone(kbState);markup.inline_keyboard=markup.inline_keyboard.filter(row=>row.length);
+ const errors=TelegramUI.validateKeyboard(markup);if(errors.length){document.getElementById('kbErrors').textContent=errors.join('\n');return;}
+ document.getElementById('keyboardEditorSave').disabled=true;
+ try{
+ if(target.compose){if(target.chat_id!==currentChat?.id||target.bot_id!==currentBotID)throw Error(tgLabel('Чат изменился. Откройте редактор заново.','Chat changed. Reopen the editor.'));document.getElementById('composeKeyboard').value=JSON.stringify(markup);previewKeyboard(document.getElementById('composeKeyboard'),'composeKeyboardPreview');}
+ else await api('/api/messages/keyboard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...target,reply_markup:markup})});
+ closeKeyboardEditor();if(!target.compose){if(target.inline_message_id)loadCallbacks(callbackPanelTarget);else loadMessages(false,true);}toast(tgLabel('Кнопки сохранены','Buttons saved'));
+ }catch(e){document.getElementById('kbErrors').textContent=e.message;document.getElementById('keyboardEditorSave').disabled=false;}
 }
+document.addEventListener('keydown',e=>{const modal=document.getElementById('keyboardModal');if(modal.style.display!=='flex'||e.key!=='Tab')return;const nodes=[...modal.querySelectorAll('button:not(:disabled),input:not(:disabled),select,textarea,summary')].filter(x=>x.offsetParent!==null);if(!nodes.length)return;const first=nodes[0],last=nodes.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}});
 let callbackEvents=[];
 let callbackPanelTarget="callbackList";
 async function loadCallbacks(target="callbackList"){
@@ -4709,8 +4660,10 @@ async function answerCallbackEvent(index){
  const text=await askTelegramText(tgLabel('Ответ на callback (до 200 символов)','Callback answer (up to 200 characters)'),'');if(text===null)return;
  try {await api('/api/callbacks/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bot_id:currentBotID,callback_id:event.callback_id,text})});loadCallbacks(callbackPanelTarget);}catch(e){toast(e.message,'error');}
 }
+document.addEventListener('click',e=>{const spoiler=e.target.closest('.rich-spoiler');if(spoiler)spoiler.setAttribute('aria-expanded',spoiler.getAttribute('aria-expanded')==='true'?'false':'true');});
+document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.classList.contains('rich-spoiler')){e.preventDefault();e.target.click();}});
 document.getElementById('composeKeyboard').addEventListener('input',e=>previewKeyboard(e.target,'composeKeyboardPreview'));
-document.getElementById('keyboardEditorJSON').addEventListener('input',e=>previewKeyboard(e.target,'keyboardEditorPreview'));
+document.getElementById('keyboardEditorJSON').addEventListener('input',()=>{document.getElementById('keyboardEditorSave').disabled=true;document.getElementById('kbErrors').textContent=tgLabel('Нажмите «Применить JSON», чтобы проверить изменения.','Apply JSON to validate these changes.');});
 
 async function manageTopic(action){
  let name='';
@@ -4719,10 +4672,59 @@ async function manageTopic(action){
  if(action==='create'||action==='edit'){name=await askTelegramText(tgLabel('Название темы','Topic name'));if(!name)return;}
  try{await api('/api/topics/manage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bot_id:currentBotID,chat_id:currentChat.id,message_thread_id:thread,action,name})});await loadTopics();toast(tgLabel('Тема обновлена','Topic updated'));}catch(e){toast(e.message,'error');}
 }
-async function composeAlbum(){
- const raw=await askTelegramText(tgLabel('Альбом: JSON-массив из 2–10 файлов. media — file_id или URL','Album: JSON array of 2–10 files. media is a file_id or URL'),'[{"type":"photo","media":"FILE_ID_1"},{"type":"photo","media":"FILE_ID_2"}]');if(raw===null)return;
- try{const media=JSON.parse(raw);await api('/api/messages/album',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bot_id:currentBotID,chat_id:currentChat.id,message_thread_id:Number(document.getElementById('composeThread').value||0),media})});loadMessages();toast(tgLabel('Альбом отправлен','Album sent'));}catch(e){toast(e.message,'error');}
+let attachmentItems=[],attachmentTarget=null,uploadBusy=false;
+const uploadTypes={photo:['Фото','Photo'],video:['Видео','Video'],audio:['Аудио','Audio'],document:['Документ','Document'],voice:['Голосовое','Voice'],animation:['Анимация','Animation'],video_note:['Видеосообщение','Video note'],sticker:['Стикер','Sticker']};
+function openAttachments(){
+ if(!currentChat)return;attachmentTarget={bot:currentBotID,chat:currentChat.id};
+ document.getElementById('attachmentTitle').textContent=tgLabel('Отправить файлы','Send files');document.getElementById('attachmentDrop').textContent=tgLabel('Выберите файлы или перетащите их сюда','Choose files or drop them here');
+ document.getElementById('uploadAlbumLabel').textContent=tgLabel('Отправить несколько файлов одним альбомом','Send multiple files as one album');document.getElementById('uploadSubmit').textContent=tgLabel('Отправить','Send');document.getElementById('uploadCancel').textContent=tgLabel('Отмена','Cancel');
+ document.getElementById('uploadTopicLabel').textContent=tgLabel('Номер темы','Topic ID');document.getElementById('uploadThread').value=document.getElementById('composeThread').value;
+ document.getElementById('uploadDestination').textContent=(currentChat.title||currentChat.id)+' · '+(currentBot?.bot_username||currentBotID);
+ document.getElementById('attachmentModal').style.display='flex';document.getElementById('uploadStatus').textContent='';renderAttachments();document.getElementById('attachmentDrop').focus();
 }
+function inferUploadType(file){if(file.type==='image/gif')return 'animation';if(['image/jpeg','image/png','image/webp'].includes(file.type))return 'photo';if(file.type.startsWith('video/'))return 'video';if(file.type.startsWith('audio/'))return 'audio';return 'document';}
+function addAttachmentFiles(files){
+ if(uploadBusy)return;
+ for(const file of files){if(attachmentItems.length>=10){toast(tgLabel('Не больше 10 файлов за один раз','Select at most 10 files'),'error');break;}attachmentItems.push({file,type:inferUploadType(file),caption:'',spoiler:false,url:URL.createObjectURL(file)});}
+ document.getElementById('uploadAsAlbum').checked=attachmentItems.length>1;renderAttachments();
+}
+function renderAttachments(){
+ document.getElementById('attachmentList').innerHTML=attachmentItems.map((item,i)=>`<div class="attachment-item"><div>${item.file.type.startsWith('image/')?`<img src="${esc(item.url)}" alt="${esc(item.file.name)}">`:item.file.type.startsWith('video/')?`<video src="${esc(item.url)}" muted preload="metadata"></video>`:'📎'}</div><div><strong class="attachment-name">${esc(item.file.name)}</strong><small> · ${(item.file.size/1048576).toFixed(2)} MiB</small><label>${tgLabel('Отправить как','Send as')}<select aria-label="${tgLabel('Тип файла','File type')} ${i+1}" onchange="setAttachmentType(${i},this.value)">${Object.entries(uploadTypes).map(([k,v])=>`<option value="${k}" ${item.type===k?'selected':''}>${esc(tgLabel(...v))}</option>`).join('')}</select></label><textarea rows="2" aria-label="${tgLabel('Подпись','Caption')} ${i+1}" placeholder="${tgLabel('Подпись к файлу','File caption')}" oninput="attachmentItems[${i}].caption=this.value" ${['video_note','sticker'].includes(item.type)?'disabled':''}>${esc(item.caption)}</textarea>${['photo','video','animation'].includes(item.type)?`<label><input type="checkbox" ${item.spoiler?'checked':''} onchange="attachmentItems[${i}].spoiler=this.checked"> ${tgLabel('Скрыть медиа под спойлером','Hide media behind a spoiler')}</label>`:''}</div><div><button type="button" class="btn btn-sm" aria-label="${tgLabel('Файл выше','Move file up')}" onclick="moveAttachment(${i},-1)" ${i===0?'disabled':''}>↑</button><button type="button" class="btn btn-sm" aria-label="${tgLabel('Файл ниже','Move file down')}" onclick="moveAttachment(${i},1)" ${i===attachmentItems.length-1?'disabled':''}>↓</button><button type="button" class="btn btn-danger btn-sm" aria-label="${tgLabel('Удалить файл','Remove file')} ${i+1}" onclick="removeAttachment(${i})">×</button></div></div>`).join('');
+ document.querySelectorAll('#attachmentModal input,#attachmentModal select,#attachmentModal textarea,#attachmentModal button').forEach(el=>{if(!el.dataset.uploadDisabled)el.dataset.uploadDisabled=el.disabled?'1':'0';el.disabled=uploadBusy||el.dataset.uploadDisabled==='1';if(!uploadBusy)delete el.dataset.uploadDisabled;});
+ document.getElementById('uploadSubmit').disabled=!attachmentItems.length||uploadBusy;
+}
+function setAttachmentType(i,type){if(uploadBusy)return;const item=attachmentItems[i];item.type=type;item.spoiler=false;if(['sticker','video_note'].includes(type))item.caption='';renderAttachments();}
+function moveAttachment(i,d){if(uploadBusy)return;const to=i+d;if(to<0||to>=attachmentItems.length)return;[attachmentItems[i],attachmentItems[to]]=[attachmentItems[to],attachmentItems[i]];renderAttachments();}
+function removeAttachment(i){if(uploadBusy)return;URL.revokeObjectURL(attachmentItems[i].url);attachmentItems.splice(i,1);renderAttachments();}
+function closeAttachments(){if(uploadBusy)return;attachmentItems.forEach(x=>URL.revokeObjectURL(x.url));attachmentItems=[];document.getElementById('attachmentInput').value='';document.getElementById('attachmentModal').style.display='none';document.getElementById('attachFilesButton').focus();}
+function uploadRequest(items,markup){
+ const form=new FormData();items.forEach(x=>form.append('files',x.file));form.append('types',JSON.stringify(items.map(x=>x.type)));form.append('captions',JSON.stringify(items.map(x=>x.caption)));form.append('spoilers',JSON.stringify(items.map(x=>x.spoiler)));form.append('message_thread_id',document.getElementById('uploadThread').value||'0');
+ if(replyToMsgID)form.append('reply_to_message_id',String(replyToMsgID));if(markup)form.append('reply_markup',JSON.stringify(markup));
+ return new Promise((resolve,reject)=>{
+ const xhr=new XMLHttpRequest();xhr.open('POST',`/api/messages/upload?bot_id=${attachmentTarget.bot}&chat_id=${attachmentTarget.chat}`);xhr.responseType='json';xhr.timeout=300000;
+ xhr.upload.onprogress=e=>{if(e.lengthComputable){document.getElementById('uploadProgress').value=e.loaded/e.total*100;document.getElementById('uploadStatus').textContent=tgLabel('Загрузка','Uploading')+': '+Math.round(e.loaded/e.total*100)+'%';}};
+ xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300)resolve(xhr.response);else{const error=new Error(xhr.response?.error||tgLabel('Файл не отправлен','Upload failed'));error.sentCount=xhr.response?.sent_count||0;reject(error);}};
+ xhr.onerror=xhr.ontimeout=()=>{const e=new Error(tgLabel('Соединение прервалось. Проверьте историю перед повторной отправкой.','Connection interrupted. Check history before sending again.'));e.ambiguous=true;reject(e);};xhr.send(form);
+ });
+}
+async function sendAttachments(){
+ if(uploadBusy||!attachmentItems.length)return;
+ const group=document.getElementById('uploadAsAlbum').checked&&attachmentItems.length>1;
+ const bad=attachmentItems.find(x=>x.file.size<=0||x.file.size>(x.type==='photo'?10:50)*1048576||[...x.caption].length>1024);
+ if(bad){document.getElementById('uploadStatus').textContent=tgLabel('Проверьте размеры: фото до 10 MiB, другие файлы до 50 MiB; подпись до 1024 символов.','Check sizes: photos up to 10 MiB, other files up to 50 MiB; captions up to 1024 characters.');return;}
+ if(group){const families=new Set(attachmentItems.map(x=>['photo','video'].includes(x.type)?'visual':x.type));if(families.size!==1||![...families].every(x=>['visual','audio','document'].includes(x))){document.getElementById('uploadStatus').textContent=tgLabel('В альбоме можно смешивать фото и видео. Аудио и документы — отдельными альбомами. Снимите флажок для отправки по одному.','Albums allow photos/videos together, audio only, or documents only. Uncheck album mode to send separately.');return;}}
+ let markup=null;try{const raw=document.getElementById('composeKeyboard').value.trim();if(raw)markup=JSON.parse(raw);if(markup){const errors=TelegramUI.validateKeyboard(markup);if(errors.length)throw Error(errors.join('\n'));if(group&&markup.inline_keyboard.length)throw Error(tgLabel('У альбома не может быть inline-клавиатуры. Отправьте файлы по одному или удалите кнопки.','Albums cannot have an inline keyboard. Send separately or remove the buttons.'));if(group)markup=null;}}catch(e){document.getElementById('uploadStatus').textContent=e.message;return;}
+ uploadBusy=true;document.getElementById('uploadProgress').value=0;document.getElementById('uploadProgress').hidden=false;renderAttachments();
+ try{
+ if(group){await uploadRequest(attachmentItems,markup);attachmentItems.forEach(x=>URL.revokeObjectURL(x.url));attachmentItems=[];}
+ else while(attachmentItems.length){await uploadRequest([attachmentItems[0]],markup);URL.revokeObjectURL(attachmentItems[0].url);attachmentItems.shift();renderAttachments();}
+ uploadBusy=false;closeAttachments();toast(tgLabel('Файлы отправлены','Files sent'));loadMessages(false,true);
+ }catch(e){if(e.sentCount>0){const completed=group?attachmentItems.splice(0):attachmentItems.splice(0,1);completed.forEach(x=>URL.revokeObjectURL(x.url));}document.getElementById('uploadStatus').textContent=e.sentCount>0?tgLabel('Файлы отправлены, но история не сохранена. Не отправляйте их повторно.','Files were sent but history was not saved. Do not resend them.'):e.message;}
+ finally{uploadBusy=false;document.getElementById('uploadCancel').disabled=false;renderAttachments();loadMessages(false,true);}
+}
+document.getElementById('attachmentInput').addEventListener('change',e=>{addAttachmentFiles(e.target.files);e.target.value='';});
+const attachmentDrop=document.getElementById('attachmentDrop');attachmentDrop.addEventListener('dragover',e=>{e.preventDefault();attachmentDrop.classList.add('dragover');});attachmentDrop.addEventListener('dragleave',()=>attachmentDrop.classList.remove('dragover'));attachmentDrop.addEventListener('drop',e=>{e.preventDefault();attachmentDrop.classList.remove('dragover');if(!uploadBusy)addAttachmentFiles(e.dataTransfer.files);});
+
 </script>
 
 <!-- User Profile Modal -->
