@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -10,8 +11,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -214,6 +213,12 @@ func (e *rateLimitError) Error() string {
 // Manager manages polling and forwarding for all bots
 type Manager struct {
 	store             *store.Store
+	deliveryMu        sync.Mutex
+	deliveryOwner     string
+	deliveryResults   map[int64]json.RawMessage
+	maintenanceCancel context.CancelFunc
+	stopped           bool
+	maintenanceDone   chan struct{}
 	deliveryLocks     sync.Map // bot ID -> *sync.Mutex
 	mu                sync.Mutex
 	runners           map[int64]*proxyRunner
@@ -259,6 +264,8 @@ func validTelegramMethod(m string) bool {
 func NewManager(s *store.Store, tgAPIBaseURL string) *Manager {
 	return &Manager{
 		store:             s,
+		deliveryOwner:     fmt.Sprintf("%x", rand.Text()),
+		deliveryResults:   make(map[int64]json.RawMessage),
 		runners:           make(map[int64]*proxyRunner),
 		managedBots:       make(map[int64]*bot.Bot),
 		webhookBots:       make(map[int64]bool),
@@ -404,20 +411,30 @@ func (pm *Manager) ProcessUpdate(botID int64, rawUpdate map[string]any) bool {
 			return pm.store.AdvanceTelegramOffset(botID, int64(updateID)+1) == nil
 		}
 	}
-	// Enqueue for long-poll consumers (before any other processing)
-	if b.LongPollEnabled {
-		if err := pm.GetOrCreateUpdateQueue(botID).EnqueueChecked(rawUpdate); err != nil {
-			pm.store.UpdateBotStatus(botID, "queue persist error: "+err.Error(), "")
-			return false
-		}
-	}
 
 	updateSummary := summarizeUpdate(rawUpdate)
 
 	// Management: process update for chat/message tracking (before forwarding,
 	// so incoming message is saved to DB before backend's response via /tgapi/)
 	if b.ManageEnabled {
-		pm.processForManagement(botID, rawUpdate)
+		if err := pm.processForManagement(botID, rawUpdate); err != nil {
+			pm.store.UpdateBotStatus(botID, "history save failed: "+err.Error(), "")
+			return false
+		}
+	}
+
+	// Enqueue for long-poll consumers (before any other processing)
+	if b.LongPollEnabled {
+		allowed, err := pm.store.AllowsTelegramUpdate(botID, rawUpdate)
+		if err != nil {
+			return false
+		}
+		if allowed {
+			if err := pm.GetOrCreateUpdateQueue(botID).EnqueueChecked(rawUpdate); err != nil {
+				pm.store.UpdateBotStatus(botID, "queue persist error: "+err.Error(), "")
+				return false
+			}
+		}
 	}
 
 	// Proxy: forward to backend (skip if long poll enabled — backend pulls via queue)
@@ -440,24 +457,30 @@ func (pm *Manager) ProcessUpdate(botID int64, rawUpdate map[string]any) bool {
 		log.Printf("[proxy] ProcessUpdate: botID=%d proxy enabled but no backend_url!", botID)
 	}
 
-	// Skip routing when proxy forward failed — Telegram will redeliver the update
-	// and routing actions would otherwise run twice (duplicate forwards/copies).
+	// Persist route planning and the acknowledgement receipt atomically. Remote
+	// route failures no longer block or silently lose the originating event.
 	if ackOffset {
-		// Reverse routing (Source-NAT): check if this is a reply in a routed chat
-		pm.applyReverseRoutes(botID, rawUpdate)
-
-		// Routing: check rules and forward to other bots
-		pm.applyRoutes(botID, rawUpdate)
-
-		// LLM-based routing
-		pm.applyLLMRoutes(botID, rawUpdate)
-	}
-
-	// Persist successful delivery before acknowledging it to Telegram.
-	if ackOffset && realUpdate {
-		if err := pm.store.MarkTelegramUpdateHandled(botID, int64(updateID)); err != nil {
-			pm.store.UpdateBotStatus(botID, "delivery receipt save failed: "+err.Error(), "")
+		key, id, err := deliveryEvent(rawUpdate)
+		if err != nil {
 			return false
+		}
+		if !realUpdate {
+			id = 0
+		}
+		payload, err := json.Marshal(rawUpdate)
+		if err != nil {
+			return false
+		}
+		// Ephemeral payloads must not be persisted in the route outbox.
+		if updateMessagePayload(rawUpdate) == nil {
+			payload = []byte(`{}`)
+		}
+		if err := pm.store.ScheduleRouting(store.DeliveryJob{BotID: botID, EventKey: key, Operation: "plan", Payload: payload}, id); err != nil {
+			pm.store.UpdateBotStatus(botID, "route scheduling failed: "+err.Error(), "")
+			return false
+		}
+		if err := pm.RetryRouteDeliveries(context.Background()); err != nil {
+			log.Printf("route dispatcher: %v", err)
 		}
 	}
 	// Bridge updates are marked explicitly; Telegram update IDs have no artificial ceiling.
@@ -475,6 +498,7 @@ func (pm *Manager) ProcessUpdate(botID int64, rawUpdate map[string]any) bool {
 
 // Start launches goroutines for all active bots
 func (pm *Manager) Start() {
+	pm.startMaintenance()
 	bots, err := pm.store.GetBotConfigs()
 	if err != nil {
 		log.Printf("[proxy] Start: failed to load bots: %v", err)
@@ -566,11 +590,33 @@ func (pm *Manager) StopBot(botID int64) {
 
 func (pm *Manager) StopAll() {
 	pm.mu.Lock()
-	defer pm.mu.Unlock()
-
+	if pm.stopped {
+		pm.mu.Unlock()
+		return
+	}
+	pm.stopped = true
+	cancel, done := pm.maintenanceCancel, pm.maintenanceDone
+	pm.maintenanceCancel = nil
+	if cancel != nil {
+		cancel()
+	}
+	var runners []*proxyRunner
 	for id, r := range pm.runners {
 		r.cancel()
+		runners = append(runners, r)
 		delete(pm.runners, id)
+	}
+	pm.mu.Unlock()
+	for _, r := range runners {
+		<-r.done
+	}
+	if done != nil {
+		<-done
+	}
+	pm.deliveryMu.Lock()
+	defer pm.deliveryMu.Unlock()
+	if err := pm.store.ReleaseDeliveryLeases(pm.deliveryOwner); err != nil {
+		log.Printf("route lease release: %v", err)
 	}
 	log.Printf("[proxy] StopAll: all runners stopped")
 }
@@ -587,6 +633,7 @@ func (pm *Manager) IsRunning(botID int64) bool {
 
 // RestartBot restarts a bot after config changes
 func (pm *Manager) RestartBot(botID int64) error {
+	pm.startMaintenance()
 	b, err := pm.store.GetBotConfig(botID)
 	if err != nil {
 		log.Printf("[proxy] RestartBot: failed to get config for botID=%d: %v", botID, err)
@@ -772,388 +819,25 @@ func (pm *Manager) pollLoop(ctx context.Context, botID int64) {
 	}
 }
 
-func (pm *Manager) processForManagement(botID int64, rawUpdate map[string]any) {
+func (pm *Manager) processForManagement(botID int64, rawUpdate map[string]any) error {
 	pm.mu.Lock()
 	b := pm.managedBots[botID]
 	pm.mu.Unlock()
 	if b == nil {
-		log.Printf("[proxy] processForManagement: botID=%d has no managed Bot instance!", botID)
-		return
+		return fmt.Errorf("managed bot %d unavailable", botID)
 	}
-
 	data, err := json.Marshal(rawUpdate)
 	if err != nil {
-		log.Printf("[proxy] processForManagement: botID=%d marshal error: %v", botID, err)
-		return
+		return err
 	}
 	var update tgbotapi.Update
 	if err := json.Unmarshal(data, &update); err != nil {
-		log.Printf("[proxy] processForManagement: botID=%d unmarshal to tgbotapi.Update error: %v", botID, err)
-		return
+		return err
 	}
-	b.ProcessUpdate(update)
-	b.ProcessRawUpdate(rawUpdate)
-}
-
-// applyLLMRoutes uses LLM to decide routing for an incoming update
-func (pm *Manager) applyLLMRoutes(botID int64, rawUpdate map[string]any) {
-	if pm.llmRouter == nil {
-		return
+	if err := b.ProcessUpdate(update); err != nil {
+		return err
 	}
-
-	msg := updateMessagePayload(rawUpdate)
-	if msg == nil {
-		return
-	}
-
-	var msgText string
-	if t, ok := msg["text"].(string); ok {
-		msgText = t
-	}
-	if caption, ok := msg["caption"].(string); ok && msgText == "" {
-		msgText = caption
-	}
-	if msgText == "" {
-		msgText = bot.ExtractRichText(msg["rich_message"])
-	}
-	if msgText == "" {
-		return
-	}
-
-	var chatID int64
-	if chat, ok := msg["chat"].(map[string]any); ok {
-		if id, ok := chat["id"].(float64); ok {
-			chatID = int64(id)
-		}
-	}
-
-	var fromID int64
-	var fromUser string
-	if from, ok := msg["from"].(map[string]any); ok {
-		if id, ok := from["id"].(float64); ok {
-			fromID = int64(id)
-		}
-		if uname, ok := from["username"].(string); ok {
-			fromUser = "@" + uname
-		}
-	}
-
-	result, err := pm.llmRouter.RouteMessage(context.Background(), botID, msgText, chatID, fromID, fromUser)
-	if err != nil {
-		log.Printf("[llm-routing] error: %v", err)
-		return
-	}
-	if result == nil || result.TargetBotID == 0 || result.Action == "drop" {
-		return
-	}
-
-	pm.mu.Lock()
-	targetBot := pm.managedBots[result.TargetBotID]
-	pm.mu.Unlock()
-	if targetBot == nil {
-		log.Printf("[llm-routing] target bot %d has no managed instance", result.TargetBotID)
-		return
-	}
-
-	destChatID := result.TargetChatID
-	if destChatID == 0 {
-		destChatID = chatID
-	}
-	if destChatID == 0 {
-		return
-	}
-
-	var sourceMsgID int
-	if msgIDFloat, ok := msg["message_id"].(float64); ok {
-		sourceMsgID = int(msgIDFloat)
-	}
-
-	var targetMsgID int
-	switch result.Action {
-	case "forward":
-		if msgText != "" {
-			sentID, err := targetBot.SendMessageGetID(destChatID, msgText)
-			if err != nil {
-				log.Printf("[llm-routing] forward FAILED: %v", err)
-			} else {
-				targetMsgID = sentID
-				log.Printf("[llm-routing] forwarded text to bot %d chat %d (msg %d), reason: %s",
-					result.TargetBotID, destChatID, sentID, result.Reason)
-			}
-		}
-	case "copy":
-		if sourceMsgID != 0 {
-			sentID, err := targetBot.CopyMessageGetID(destChatID, chatID, sourceMsgID)
-			if err != nil {
-				log.Printf("[llm-routing] copy FAILED: %v", err)
-			} else {
-				targetMsgID = sentID
-				log.Printf("[llm-routing] copied msg to bot %d chat %d (msg %d), reason: %s",
-					result.TargetBotID, destChatID, sentID, result.Reason)
-			}
-		}
-	default:
-		log.Printf("[llm-routing] unknown action %q, skipping", result.Action)
-	}
-
-	if targetMsgID != 0 && sourceMsgID != 0 {
-		pm.store.SaveRouteMapping(models.RouteMapping{
-			RouteID:      0,
-			SourceBotID:  botID,
-			SourceChatID: chatID,
-			SourceMsgID:  sourceMsgID,
-			TargetBotID:  result.TargetBotID,
-			TargetChatID: destChatID,
-			TargetMsgID:  targetMsgID,
-			CreatedAt:    time.Now().Format(time.RFC3339),
-		})
-	}
-}
-
-// applyRoutes checks routing rules for the source bot and forwards matching updates to target bots
-func (pm *Manager) applyRoutes(sourceBotID int64, rawUpdate map[string]any) {
-	routes, err := pm.store.GetRoutes(sourceBotID)
-	if err != nil {
-		return
-	}
-
-	// Extract message info from raw update
-	var msgText string
-	var fromID int64
-	var chatID int64
-
-	msg := updateMessagePayload(rawUpdate)
-	if msg == nil {
-		return // no message to route
-	}
-
-	if t, ok := msg["text"].(string); ok {
-		msgText = t
-	}
-	if caption, ok := msg["caption"].(string); ok && msgText == "" {
-		msgText = caption
-	}
-	if msgText == "" {
-		msgText = bot.ExtractRichText(msg["rich_message"])
-	}
-	if from, ok := msg["from"].(map[string]any); ok {
-		if id, ok := from["id"].(float64); ok {
-			fromID = int64(id)
-		}
-	}
-	if chat, ok := msg["chat"].(map[string]any); ok {
-		if id, ok := chat["id"].(float64); ok {
-			chatID = int64(id)
-		}
-	}
-
-	for _, route := range routes {
-		if !route.Enabled {
-			continue
-		}
-
-		// Filter by source chat if specified
-		if route.SourceChatID != 0 && route.SourceChatID != chatID {
-			continue
-		}
-
-		matched := false
-		switch route.ConditionType {
-		case "text":
-			if msgText != "" && route.ConditionValue != "" {
-				re, err := regexp.Compile("(?i)" + route.ConditionValue)
-				if err != nil {
-					log.Printf("[routing] route id=%d invalid regex %q: %v", route.ID, route.ConditionValue, err)
-					continue
-				}
-				matched = re.MatchString(msgText)
-			}
-		case "user_id":
-			if fromID != 0 {
-				targetUID, _ := strconv.ParseInt(route.ConditionValue, 10, 64)
-				matched = fromID == targetUID
-			}
-		case "chat_id":
-			if chatID != 0 {
-				targetCID, _ := strconv.ParseInt(route.ConditionValue, 10, 64)
-				matched = chatID == targetCID
-			}
-		}
-
-		if !matched {
-			continue
-		}
-
-		log.Printf("[routing] route id=%d MATCHED: %s=%q on bot %d → bot %d",
-			route.ID, route.ConditionType, route.ConditionValue, sourceBotID, route.TargetBotID)
-
-		pm.mu.Lock()
-		targetBot := pm.managedBots[route.TargetBotID]
-		pm.mu.Unlock()
-
-		if targetBot == nil {
-			log.Printf("[routing] route id=%d target bot %d has no managed instance", route.ID, route.TargetBotID)
-			continue
-		}
-
-		destChatID := route.TargetChatID
-		if destChatID == 0 {
-			destChatID = chatID
-		}
-		if destChatID == 0 {
-			continue
-		}
-
-		var sourceMsgID int
-		if msgIDFloat, ok := msg["message_id"].(float64); ok {
-			sourceMsgID = int(msgIDFloat)
-		}
-
-		var targetMsgID int
-		switch route.Action {
-		case "drop":
-			log.Printf("[routing] route id=%d DROP: %s=%q on bot %d — message ignored",
-				route.ID, route.ConditionType, route.ConditionValue, sourceBotID)
-			return
-		case "forward":
-			if msgText != "" {
-				sentID, err := targetBot.SendMessageGetID(destChatID, msgText)
-				if err != nil {
-					log.Printf("[routing] route id=%d forward FAILED: %v", route.ID, err)
-				} else {
-					targetMsgID = sentID
-					log.Printf("[routing] route id=%d forwarded to chat %d via bot %d (msg %d)", route.ID, destChatID, route.TargetBotID, sentID)
-				}
-			}
-		case "copy":
-			if sourceMsgID != 0 {
-				sentID, err := targetBot.CopyMessageGetID(destChatID, chatID, sourceMsgID)
-				if err != nil {
-					log.Printf("[routing] route id=%d copy FAILED: %v", route.ID, err)
-				} else {
-					targetMsgID = sentID
-					log.Printf("[routing] route id=%d copied msg %d to chat %d via bot %d (msg %d)", route.ID, sourceMsgID, destChatID, route.TargetBotID, sentID)
-				}
-			}
-		}
-
-		// Save mapping for reverse routing (Source-NAT)
-		if targetMsgID != 0 && sourceMsgID != 0 {
-			pm.store.SaveRouteMapping(models.RouteMapping{
-				RouteID:      route.ID,
-				SourceBotID:  sourceBotID,
-				SourceChatID: chatID,
-				SourceMsgID:  sourceMsgID,
-				TargetBotID:  route.TargetBotID,
-				TargetChatID: destChatID,
-				TargetMsgID:  targetMsgID,
-				CreatedAt:    time.Now().Format(time.RFC3339),
-			})
-			log.Printf("[routing] saved mapping: bot%d/chat%d/msg%d ↔ bot%d/chat%d/msg%d",
-				sourceBotID, chatID, sourceMsgID, route.TargetBotID, destChatID, targetMsgID)
-		}
-	}
-}
-
-// applyReverseRoutes checks if a message on a target bot is a reply to a routed message,
-// and if so, sends the reply back via the source bot to the original chat (Source-NAT return path)
-func (pm *Manager) applyReverseRoutes(botID int64, rawUpdate map[string]any) {
-	msg := updateMessagePayload(rawUpdate)
-	if msg == nil {
-		return
-	}
-
-	// Get the chat ID for this message
-	var chatID int64
-	if chat, ok := msg["chat"].(map[string]any); ok {
-		if id, ok := chat["id"].(float64); ok {
-			chatID = int64(id)
-		}
-	}
-	if chatID == 0 {
-		return
-	}
-
-	// Get reply info — if it's a reply to a routed message, we do exact matching
-	// If not a reply, check if there's any mapping for this bot+chat (conversation mode)
-	var mapping *models.RouteMapping
-	var err error
-
-	if replyTo, ok := msg["reply_to_message"].(map[string]any); ok {
-		if replyMsgID, ok := replyTo["message_id"].(float64); ok {
-			mapping, err = pm.store.FindReverseMappingByReply(botID, chatID, int(replyMsgID))
-		}
-		if mapping == nil || err != nil {
-			return // explicit reply but no matching route mapping
-		}
-	} else {
-		// Require an explicit reply — using the latest mapping for the whole chat
-		// misroutes unrelated messages in active shared chats.
-		return
-	}
-
-	// Don't reverse-route messages sent by the target bot itself (avoid loops)
-	if from, ok := msg["from"].(map[string]any); ok {
-		if isBot, ok := from["is_bot"].(bool); ok && isBot {
-			return
-		}
-	}
-
-	var msgText string
-	if t, ok := msg["text"].(string); ok {
-		msgText = t
-	}
-	if caption, ok := msg["caption"].(string); ok && msgText == "" {
-		msgText = caption
-	}
-	if msgText == "" {
-		msgText = bot.ExtractRichText(msg["rich_message"])
-	}
-	if msgText == "" {
-		return
-	}
-
-	// Send reply back via source bot
-	pm.mu.Lock()
-	sourceBot := pm.managedBots[mapping.SourceBotID]
-	pm.mu.Unlock()
-
-	if sourceBot == nil {
-		log.Printf("[routing-reverse] source bot %d has no managed instance", mapping.SourceBotID)
-		return
-	}
-
-	sentID, sendErr := sourceBot.SendMessageReply(mapping.SourceChatID, msgText, mapping.SourceMsgID)
-	if sendErr != nil {
-		// Fallback: send without reply if original message is too old
-		sentID, sendErr = sourceBot.SendMessageGetID(mapping.SourceChatID, msgText)
-		if sendErr != nil {
-			log.Printf("[routing-reverse] FAILED to send reply via bot %d to chat %d: %v",
-				mapping.SourceBotID, mapping.SourceChatID, sendErr)
-			return
-		}
-	}
-
-	log.Printf("[routing-reverse] bot%d/chat%d → bot%d/chat%d (reply to msg %d, sent msg %d)",
-		botID, chatID, mapping.SourceBotID, mapping.SourceChatID, mapping.SourceMsgID, sentID)
-
-	// Save reverse mapping so the conversation can continue
-	var thisMsgID int
-	if msgIDFloat, ok := msg["message_id"].(float64); ok {
-		thisMsgID = int(msgIDFloat)
-	}
-	if sentID != 0 && thisMsgID != 0 {
-		pm.store.SaveRouteMapping(models.RouteMapping{
-			RouteID:      mapping.RouteID,
-			SourceBotID:  mapping.SourceBotID,
-			SourceChatID: mapping.SourceChatID,
-			SourceMsgID:  sentID,
-			TargetBotID:  botID,
-			TargetChatID: chatID,
-			TargetMsgID:  thisMsgID,
-			CreatedAt:    time.Now().Format(time.RFC3339),
-		})
-	}
+	return b.ProcessRawUpdate(rawUpdate)
 }
 
 func (pm *Manager) getUpdates(ctx context.Context, token string, offset int64, timeout int) ([]map[string]any, error) {

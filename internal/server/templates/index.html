@@ -1478,7 +1478,7 @@ body::before { display: none; }
     <div class="content" style="flex:1;">
       <div class="panel">
         <div class="panel-title">Bot Configuration</div>
-        <div class="bot-detail-grid" id="botDetailGrid"></div>
+        <div class="bot-detail-grid" id="botDetailGrid"></div><div id="botQueueHealth" role="status" style="margin-top:12px"></div>
       </div>
       <div class="panel route-panel" style="margin-top:16px;">
         <div class="route-header">
@@ -2726,6 +2726,17 @@ document.getElementById('loginUsername').addEventListener('keydown', e => { if (
 
 // ===== BOT LIST =====
 
+async function loadQueueHealth(botID) {
+ const element=document.getElementById('botQueueHealth');if(!element)return;
+ element.textContent='';
+ try {const h=await api('/api/queues/status?bot_id='+botID);
+ if(currentBotID!==botID)return;
+ element.textContent=tgLabel('Очередь событий','Update queue')+': '+h.pending_updates+' ('+h.pending_bytes+' B); '+tgLabel('Маршруты','Routes')+': '+h.pending_routes+'; '+tgLabel('С ошибками','Failed')+': '+h.failed_routes+(h.warning?' — '+h.warning:'');
+ element.style.color=h.warning?'var(--magenta)':'var(--text3)';
+ }catch(e){if(currentBotID===botID){element.textContent=tgLabel('Не удалось проверить очередь','Queue health unavailable');element.style.color='var(--magenta)';}}
+}
+setInterval(()=>{if(currentBotID&&document.getElementById('botDetailView').style.display==='flex')loadQueueHealth(currentBotID);},10000);
+
 async function loadBots() {
   try {
     allBots = await api('/api/bots');
@@ -2784,6 +2795,7 @@ async function selectBot(botID) {
 }
 
 function showBotDetail() {
+ loadQueueHealth(currentBotID);
  document.getElementById('botCallbackList').innerHTML='';
  callbackEvents=[];
   document.getElementById('chatView').style.display = 'none';

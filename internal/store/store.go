@@ -12,9 +12,11 @@ import (
 )
 
 type Store struct {
-	db     *sql.DB
-	subsMu sync.RWMutex
-	subs   map[chan models.Message]struct{}
+	db          *sql.DB
+	policyMu    sync.RWMutex
+	queuePolicy QueuePolicy
+	subsMu      sync.RWMutex
+	subs        map[chan models.Message]struct{}
 }
 
 func NewStore(path string) (*Store, error) {
@@ -23,12 +25,16 @@ func NewStore(path string) (*Store, error) {
 		return nil, err
 	}
 
-	s := &Store{db: db, subs: make(map[chan models.Message]struct{})}
+	s := &Store{db: db, subs: make(map[chan models.Message]struct{}), queuePolicy: DefaultQueuePolicy()}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, err
 	}
 	if err := s.migrateTelegram(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := s.migrateDelivery(); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -517,7 +523,7 @@ func (s *Store) DeleteBotConfig(id int64) error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"pending_updates", "update_consumers", "inline_keyboards", "handled_updates", "callback_events", "topics"} {
+	for _, table := range []string{"route_deliveries", "handled_update_ranges", "pending_updates", "update_consumers", "inline_keyboards", "handled_updates", "callback_events", "topics"} {
 		if _, err := tx.Exec("DELETE FROM "+table+" WHERE bot_id=?", id); err != nil {
 			return err
 		}
@@ -919,15 +925,16 @@ func (s *Store) GetUserTagsByUser(chatID int64, userID int64) ([]models.UserTag,
 	return tags, nil
 }
 
-func (s *Store) TrackUser(chatID int64, userID int64, username string) {
+func (s *Store) TrackUser(chatID int64, userID int64, username string) error {
 	if userID == 0 {
-		return
+		return nil
 	}
-	s.db.Exec(`
+	_, err := s.db.Exec(`
 		INSERT INTO known_users (chat_id, user_id, username, first_seen)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(chat_id, user_id) DO UPDATE SET username=excluded.username
 	`, chatID, userID, username, time.Now().Format(time.RFC3339))
+	return err
 }
 
 func (s *Store) GetChatUsers(botID, chatID int64, search string, limit, offset int) ([]models.ChatUser, error) {

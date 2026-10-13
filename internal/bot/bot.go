@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -54,17 +55,31 @@ type Bot struct {
 	onMessageSent models.OnMessageSentFunc
 }
 
+type initializationClient struct {
+	ctx    context.Context
+	client *http.Client
+}
+
+func (c initializationClient) Do(r *http.Request) (*http.Response, error) {
+	return c.client.Do(r.WithContext(c.ctx))
+}
 func NewBot(token string, s *store.Store, botID int64, baseURL string) (*Bot, error) {
-	var api *tgbotapi.BotAPI
-	var err error
-	if baseURL != "" && baseURL != "https://api.telegram.org" {
-		api, err = tgbotapi.NewBotAPIWithAPIEndpoint(token, baseURL+"/bot%s/%s")
-		if err == nil {
-			api.SetFileEndpoint(baseURL + "/file/bot%s/%s")
-		}
-	} else {
-		api, err = tgbotapi.NewBotAPI(token)
+	return NewBotWithContext(context.Background(), token, s, botID, baseURL)
+}
+func NewBotWithContext(ctx context.Context, token string, s *store.Store, botID int64, baseURL string) (*Bot, error) {
+	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	endpoint := baseURL
+	if endpoint == "" {
+		endpoint = "https://api.telegram.org"
 	}
+	client := &http.Client{Timeout: 75 * time.Second}
+	api, err := tgbotapi.NewBotAPIWithOptions(token, tgbotapi.WithAPIEndpoint(endpoint+"/bot%s/%s"), tgbotapi.WithHTTPClient(initializationClient{initCtx, client}))
+	if err == nil {
+		api.Client = client
+		api.SetFileEndpoint(endpoint + "/file/bot%s/%s")
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -165,94 +180,127 @@ func (b *Bot) WebhookHandler() http.HandlerFunc {
 			http.Error(w, "Bad request", 400)
 			return
 		}
-		b.processUpdate(update)
+		if err := b.processUpdate(update); err != nil {
+			http.Error(w, "history save failed", 503)
+			return
+		}
 		var rawUpdate map[string]any
 		if err := json.Unmarshal(body, &rawUpdate); err == nil {
-			b.ProcessRawUpdate(rawUpdate)
+			if err := b.ProcessRawUpdate(rawUpdate); err != nil {
+				http.Error(w, "history save failed", 503)
+				return
+			}
 		}
 		w.WriteHeader(200)
 	}
 }
 
 // ProcessUpdate dispatches an incoming Telegram update (exported for proxy package use).
-func (b *Bot) ProcessUpdate(update tgbotapi.Update) {
-	b.processUpdate(update)
+func (b *Bot) ProcessUpdate(update tgbotapi.Update) error {
+	return b.processUpdate(update)
 }
 
-func (b *Bot) processUpdate(update tgbotapi.Update) {
+func (b *Bot) processUpdate(update tgbotapi.Update) error {
 	if update.Message != nil {
-		b.handleMessage(update.Message)
+		if err := b.handleMessage(update.Message); err != nil {
+			return err
+		}
 	}
 	if update.EditedMessage != nil {
 		// Treat edited messages as updates to an existing message (save latest state)
-		b.handleMessage(update.EditedMessage)
+		if err := b.handleMessage(update.EditedMessage); err != nil {
+			return err
+		}
 	}
 	if update.ChannelPost != nil {
-		b.handleChannelPost(update.ChannelPost)
+		if err := b.handleChannelPost(update.ChannelPost); err != nil {
+			return err
+		}
 	}
 	if update.EditedChannelPost != nil {
-		b.handleChannelPost(update.EditedChannelPost)
+		if err := b.handleChannelPost(update.EditedChannelPost); err != nil {
+			return err
+		}
 	}
 	if update.BusinessMessage != nil {
-		b.handleMessage(update.BusinessMessage)
+		if err := b.handleMessage(update.BusinessMessage); err != nil {
+			return err
+		}
 	}
 	if update.EditedBusinessMessage != nil {
-		b.handleMessage(update.EditedBusinessMessage)
+		if err := b.handleMessage(update.EditedBusinessMessage); err != nil {
+			return err
+		}
 	}
 	if update.GuestMessage != nil {
-		b.handleMessage(update.GuestMessage)
+		if err := b.handleMessage(update.GuestMessage); err != nil {
+			return err
+		}
 	}
 	if update.ManagedBot != nil {
 		log.Printf("Bot [%d] managed_bot update: bot_id=%d user_id=%d",
 			b.botID, update.ManagedBot.Bot.ID, update.ManagedBot.User.ID)
 	}
 	if update.MyChatMember != nil {
-		b.handleMyChatMember(update.MyChatMember)
+		if err := b.handleMyChatMember(update.MyChatMember); err != nil {
+			return err
+		}
 	}
 	if update.ChatMember != nil {
-		b.handleChatMember(update.ChatMember)
+		if err := b.handleChatMember(update.ChatMember); err != nil {
+			return err
+		}
 	}
 	if update.ChatJoinRequest != nil {
-		b.trackChat(&update.ChatJoinRequest.Chat)
+		if err := b.trackChat(&update.ChatJoinRequest.Chat); err != nil {
+			return err
+		}
 	}
 	if update.CallbackQuery != nil {
-		b.handleCallbackQuery(update.CallbackQuery)
+		if err := b.handleCallbackQuery(update.CallbackQuery); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // handleCallbackQuery tracks inline-button interactions so they appear in message
 // history / user profile and can participate in routing. Stored as a synthetic
 // message with MediaType="callback" and a negative local ID. Telegram callback
 // IDs and inline callbacks are retained in callback_events.
-func (b *Bot) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
+func (b *Bot) handleCallbackQuery(cb *tgbotapi.CallbackQuery) error {
 	if cb == nil || cb.From == nil {
-		return
+		return nil
 	}
 	e := models.CallbackEvent{BotID: b.botID, CallbackID: cb.ID, InlineMessageID: cb.InlineMessageID, FromID: cb.From.ID, FromUser: FormatUsername(cb.From), Data: cb.Data, GameShortName: cb.GameShortName, Date: time.Now().UnixMilli()}
 	if cb.Message != nil {
 		if cb.Message.ReceiverUser != nil || cb.Message.EphemeralMessageID != 0 {
-			return
+			return nil
 		}
 		e.ChatID = cb.Message.Chat.ID
 		e.MessageID = cb.Message.MessageID
-		b.trackChat(&cb.Message.Chat)
+		if err := b.trackChat(&cb.Message.Chat); err != nil {
+			return err
+		}
 	}
 	if e.CallbackID == "" {
-		return
+		return nil
 	}
 	id, _, err := b.store.SaveCallbackEvent(e)
 	if err != nil {
-		log.Printf("callback save failed: %v", err)
-		return
+		return fmt.Errorf("callback save: %w", err)
 	}
 	if e.ChatID == 0 {
-		return
+		return nil
 	} // Inline callbacks are available via the event API.
-	b.store.TrackUser(e.ChatID, e.FromID, e.FromUser)
+	if err := b.store.TrackUser(e.ChatID, e.FromID, e.FromUser); err != nil {
+		return err
+	}
 	// Negative IDs are local events, never actionable Telegram message IDs.
 	if err := b.store.SaveMessage(models.Message{ID: -int(id), BotID: b.botID, ChatID: e.ChatID, FromUser: e.FromUser, FromID: e.FromID, Text: e.Data, Date: e.Date, ReplyToID: e.MessageID, MediaType: "callback", CallbackID: e.CallbackID}); err != nil {
-		log.Printf("callback history save failed: %v", err)
+		return fmt.Errorf("callback history save: %w", err)
 	}
+	return nil
 }
 
 // FormatUsername formats a Telegram user's display name.
@@ -267,12 +315,16 @@ func FormatUsername(user *tgbotapi.User) string {
 	return name
 }
 
-func (b *Bot) handleMessage(msg *tgbotapi.Message) {
+func (b *Bot) handleMessage(msg *tgbotapi.Message) error {
 	if msg.EphemeralMessageID != 0 || msg.ReceiverUser != nil {
-		return // Ephemeral messages do not belong in the shared message feed.
+		return nil // Ephemeral messages do not belong in the shared message feed.
 	}
-	b.trackChat(&msg.Chat)
-	b.trackTopic(msg)
+	if err := b.trackChat(&msg.Chat); err != nil {
+		return err
+	}
+	if err := b.trackTopic(msg); err != nil {
+		return err
+	}
 
 	fromUser := ""
 	var fromID int64
@@ -281,13 +333,17 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 		fromUser = FormatUsername(msg.From)
 		fromID = msg.From.ID
 		fromIsBot = msg.From.IsBot
-		b.store.TrackUser(msg.Chat.ID, fromID, fromUser)
+		if err := b.store.TrackUser(msg.Chat.ID, fromID, fromUser); err != nil {
+			return err
+		}
 	}
 
 	if msg.NewChatMembers != nil {
 		for i := range msg.NewChatMembers {
 			u := &msg.NewChatMembers[i]
-			b.store.TrackUser(msg.Chat.ID, u.ID, FormatUsername(u))
+			if err := b.store.TrackUser(msg.Chat.ID, u.ID, FormatUsername(u)); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -333,16 +389,21 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 		SenderTag:    msg.SenderTag,
 	}
 	if err := b.store.SaveMessage(m); err != nil {
-		log.Printf("Error saving message: %v", err)
+		return fmt.Errorf("save message: %w", err)
 	}
+	return nil
 }
 
-func (b *Bot) handleChannelPost(msg *tgbotapi.Message) {
+func (b *Bot) handleChannelPost(msg *tgbotapi.Message) error {
 	if msg.EphemeralMessageID != 0 || msg.ReceiverUser != nil {
-		return
+		return nil
 	}
-	b.trackChat(&msg.Chat)
-	b.trackTopic(msg)
+	if err := b.trackChat(&msg.Chat); err != nil {
+		return err
+	}
+	if err := b.trackTopic(msg); err != nil {
+		return err
+	}
 
 	fromUser := "Channel"
 	if msg.AuthorSignature != "" {
@@ -383,23 +444,30 @@ func (b *Bot) handleChannelPost(msg *tgbotapi.Message) {
 		SenderTag:    msg.SenderTag,
 	}
 	if err := b.store.SaveMessage(m); err != nil {
-		log.Printf("Error saving channel post: %v", err)
+		return fmt.Errorf("save channel post: %w", err)
 	}
+	return nil
 }
 
-func (b *Bot) handleMyChatMember(update *tgbotapi.ChatMemberUpdated) {
-	b.trackChat(&update.Chat)
+func (b *Bot) handleMyChatMember(update *tgbotapi.ChatMemberUpdated) error {
+	if err := b.trackChat(&update.Chat); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (b *Bot) handleChatMember(update *tgbotapi.ChatMemberUpdated) {
+func (b *Bot) handleChatMember(update *tgbotapi.ChatMemberUpdated) error {
 	user := update.NewChatMember.User
 	if user != nil {
 		name := FormatUsername(user)
-		b.store.TrackUser(update.Chat.ID, user.ID, name)
+		if err := b.store.TrackUser(update.Chat.ID, user.ID, name); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (b *Bot) trackChat(chat *tgbotapi.Chat) {
+func (b *Bot) trackChat(chat *tgbotapi.Chat) error {
 	isAdmin := false
 	memberCount := 0
 
@@ -448,8 +516,9 @@ func (b *Bot) trackChat(chat *tgbotapi.Chat) {
 	}
 
 	if err := b.store.UpsertChat(b.botID, c); err != nil {
-		log.Printf("Error upserting chat: %v", err)
+		return fmt.Errorf("save chat: %w", err)
 	}
+	return nil
 }
 
 func (b *Bot) RefreshChat(chatID int64) (*models.Chat, error) {
@@ -505,7 +574,7 @@ func (b *Bot) SendMessage(chatID int64, text string) error {
 	}
 	// Save the sent message to DB
 	fromUser := "@" + b.api.Self.UserName
-	b.store.SaveMessage(models.Message{
+	if err := b.store.SaveMessage(models.Message{
 		ID:        sent.MessageID,
 		BotID:     b.botID,
 		ChatID:    sent.Chat.ID,
@@ -514,7 +583,9 @@ func (b *Bot) SendMessage(chatID int64, text string) error {
 		FromIsBot: true,
 		Text:      text,
 		Date:      int64(sent.Date) * 1000,
-	})
+	}); err != nil {
+		return fmt.Errorf("message sent but history save failed: %w", err)
+	}
 	if b.onMessageSent != nil {
 		b.onMessageSent(b.botID, chatID, text, sent.MessageID, 0)
 	}
@@ -530,11 +601,13 @@ func (b *Bot) SendMessageGetID(chatID int64, text string) (int, error) {
 		return 0, err
 	}
 	fromUser := "@" + b.api.Self.UserName
-	b.store.SaveMessage(models.Message{
+	if err := b.store.SaveMessage(models.Message{
 		ID: sent.MessageID, BotID: b.botID, ChatID: sent.Chat.ID,
 		FromUser: fromUser, FromID: b.api.Self.ID, FromIsBot: true,
 		Text: text, Date: int64(sent.Date) * 1000,
-	})
+	}); err != nil {
+		return sent.MessageID, fmt.Errorf("message sent but history save failed: %w", err)
+	}
 	if b.onMessageSent != nil {
 		b.onMessageSent(b.botID, chatID, text, sent.MessageID, 0)
 	}
@@ -551,12 +624,14 @@ func (b *Bot) SendMessageReply(chatID int64, text string, replyToMsgID int) (int
 		return 0, err
 	}
 	fromUser := "@" + b.api.Self.UserName
-	b.store.SaveMessage(models.Message{
+	if err := b.store.SaveMessage(models.Message{
 		ID: sent.MessageID, BotID: b.botID, ChatID: sent.Chat.ID,
 		FromUser: fromUser, FromID: b.api.Self.ID, FromIsBot: true,
 		Text: text, Date: int64(sent.Date) * 1000,
 		ReplyToID: replyToMsgID,
-	})
+	}); err != nil {
+		return sent.MessageID, fmt.Errorf("message sent but history save failed: %w", err)
+	}
 	if b.onMessageSent != nil {
 		b.onMessageSent(b.botID, chatID, text, sent.MessageID, replyToMsgID)
 	}

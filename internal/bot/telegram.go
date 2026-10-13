@@ -3,7 +3,6 @@ package bot
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"unicode/utf8"
 
@@ -19,9 +18,9 @@ func marshalOptional(value any) json.RawMessage {
 	return data
 }
 
-func (b *Bot) trackTopic(msg *tgbotapi.Message) {
+func (b *Bot) trackTopic(msg *tgbotapi.Message) error {
 	if msg.MessageThreadID == 0 {
-		return
+		return nil
 	}
 	name := ""
 	if msg.ForumTopicCreated != nil {
@@ -31,13 +30,14 @@ func (b *Bot) trackTopic(msg *tgbotapi.Message) {
 		name = msg.ForumTopicEdited.Name
 	}
 	if err := b.store.SaveTopic(b.botID, msg.Chat.ID, msg.MessageThreadID, name); err != nil {
-		log.Printf("topic save failed: %v", err)
+		return fmt.Errorf("topic save: %w", err)
 	}
 	if msg.ForumTopicClosed != nil || msg.ForumTopicReopened != nil {
 		if err := b.store.SetTopicClosed(b.botID, msg.Chat.ID, msg.MessageThreadID, msg.ForumTopicClosed != nil); err != nil {
-			log.Printf("topic state save failed: %v", err)
+			return fmt.Errorf("topic state save: %w", err)
 		}
 	}
+	return nil
 }
 
 // ValidateInlineMarkup preserves every Telegram button action while validating

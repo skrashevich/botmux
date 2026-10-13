@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/skrashevich/botmux/internal/bot"
 	"github.com/skrashevich/botmux/internal/bridge"
@@ -54,6 +55,12 @@ func main() {
 	tgAPIFiles := flag.String("tg-api-files", "", "Local filesystem root for Telegram Bot API --local files (TELEGRAM_API_FILES)")
 	demoMode := flag.Bool("demo", false, "Enable demo mode with separate database and seeded data")
 	showVersion := flag.Bool("version", false, "Print version information and exit")
+	queueDefaults := store.DefaultQueuePolicy()
+	queueMax := flag.Int("queue-max-updates", queueDefaults.MaxUpdates, "Maximum pending updates or route jobs per bot; pause intake when full")
+	queueBytes := flag.Int64("queue-max-bytes", queueDefaults.MaxBytes, "Maximum unread update or route payload bytes per bot")
+	queueWarn := flag.Int("queue-warn-updates", queueDefaults.WarnUpdates, "Queue depth warning threshold per bot")
+	queueAge := flag.Duration("queue-warn-age", time.Hour, "Oldest unread work warning threshold")
+	receipts := flag.Duration("queue-retention", queueDefaults.ReceiptRetention, "Completed delivery retention before receipt compaction")
 	flag.Parse()
 
 	if *showVersion {
@@ -100,6 +107,9 @@ func main() {
 		log.Fatalf("Failed to open database: %v", err)
 	}
 	defer st.Close()
+	if err := st.SetQueuePolicy(store.QueuePolicy{MaxUpdates: *queueMax, MaxBytes: *queueBytes, WarnUpdates: *queueWarn, WarnAge: *queueAge, ReceiptRetention: *receipts}); err != nil {
+		log.Fatal(err)
+	}
 
 	if *demoMode {
 		seedDemoData(st)

@@ -353,6 +353,7 @@ func (s *Server) BuildMux() *http.ServeMux {
 	mux.HandleFunc("/api/bots/description", s.authMiddleware(s.handleBotDescription))
 
 	// Long polling for updates — auth required
+	mux.HandleFunc("/api/queues/status", s.authMiddleware(s.handleQueueHealth))
 	mux.HandleFunc("/api/updates/poll", s.authMiddleware(s.handleUpdatesPoll))
 
 	// models.Message stream (SSE) — auth required

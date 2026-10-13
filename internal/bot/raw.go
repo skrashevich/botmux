@@ -1,30 +1,33 @@
 package bot
 
 import (
-	"log"
+	"fmt"
 	"time"
 
 	"github.com/skrashevich/botmux/internal/models"
 )
 
 // ProcessRawUpdate preserves Bot API fields not yet modeled by the Telegram SDK.
-func (b *Bot) ProcessRawUpdate(rawUpdate map[string]any) {
+func (b *Bot) ProcessRawUpdate(rawUpdate map[string]any) error {
 	for _, key := range []string{"message", "edited_message", "channel_post", "edited_channel_post", "business_message", "edited_business_message", "guest_message"} {
 		msg, ok := rawUpdate[key].(map[string]any)
 		if !ok {
 			continue
 		}
-		b.saveRawRichMessage(msg, key == "channel_post" || key == "edited_channel_post")
+		if err := b.saveRawRichMessage(msg, key == "channel_post" || key == "edited_channel_post"); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (b *Bot) saveRawRichMessage(msg map[string]any, channelPost bool) {
+func (b *Bot) saveRawRichMessage(msg map[string]any, channelPost bool) error {
 	if msg["ephemeral_message_id"] != nil || msg["receiver_user"] != nil {
-		return
+		return nil
 	}
 	rich, ok := msg["rich_message"]
 	if !ok {
-		return
+		return nil
 	}
 	richText := ExtractRichText(rich)
 
@@ -32,7 +35,7 @@ func (b *Bot) saveRawRichMessage(msg map[string]any, channelPost bool) {
 	chat := rawMap(msg["chat"])
 	chatID := rawMapInt64(chat["id"])
 	if messageID == 0 || chatID == 0 {
-		return
+		return nil
 	}
 
 	fromUser := ""
@@ -85,8 +88,9 @@ func (b *Bot) saveRawRichMessage(msg map[string]any, channelPost bool) {
 		Complete:     true,
 	}
 	if err := b.store.SaveMessage(m); err != nil {
-		log.Printf("Error saving raw rich message: %v", err)
+		return fmt.Errorf("save raw rich message: %w", err)
 	}
+	return nil
 }
 
 func rawMap(value any) map[string]any {

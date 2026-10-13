@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/skrashevich/botmux/internal/bot"
 )
@@ -315,4 +316,30 @@ func (s *Server) handleManageTopic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true, "message_thread_id": id})
+}
+
+// Queue status is isolated by bot access and contains no message payloads.
+func (s *Server) handleQueueHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "GET required", 405)
+		return
+	}
+	id, err := strconv.ParseInt(r.URL.Query().Get("bot_id"), 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "bot_id required", 400)
+		return
+	}
+	if !s.requireBotAccess(w, r, id) {
+		return
+	}
+	if _, err := s.store.GetBotConfig(id); err != nil {
+		http.Error(w, "bot not found", 404)
+		return
+	}
+	health, err := s.store.QueueHealth(id, time.Now())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, health)
 }

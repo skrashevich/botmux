@@ -131,8 +131,34 @@ func (s *Store) EnqueueTelegramUpdate(botID int64, update map[string]any) error 
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`INSERT INTO pending_updates(bot_id,update_id,data) SELECT ?,?,? WHERE ?>=COALESCE((SELECT confirmed_offset FROM update_consumers WHERE bot_id=?),0) ON CONFLICT(bot_id,update_id) DO NOTHING`, botID, int64(id), string(data), int64(id), botID)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var exists, confirmed int64
+	if err := tx.QueryRow("SELECT COUNT(*) FROM pending_updates WHERE bot_id=? AND update_id=?", botID, int64(id)).Scan(&exists); err != nil {
+		return err
+	}
+	if err := tx.QueryRow("SELECT COALESCE((SELECT confirmed_offset FROM update_consumers WHERE bot_id=?),0)", botID).Scan(&confirmed); err != nil {
+		return err
+	}
+	if exists > 0 || int64(id) < confirmed {
+		return tx.Commit()
+	}
+	var count, size int64
+	if err := tx.QueryRow("SELECT COUNT(*),COALESCE(SUM(size_bytes),0) FROM pending_updates WHERE bot_id=?", botID).Scan(&count, &size); err != nil {
+		return err
+	}
+	p := s.QueuePolicy()
+	if count >= int64(p.MaxUpdates) || size+int64(len(data)) > p.MaxBytes {
+		return ErrQueueFull
+	}
+	_, err = tx.Exec("INSERT INTO pending_updates(bot_id,update_id,data,created_at,size_bytes) VALUES(?,?,?,?,?)", botID, int64(id), string(data), time.Now().UnixMilli(), len(data))
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // PendingTelegramUpdates confirms and reads in one transaction. Offsets are durable.
@@ -142,6 +168,9 @@ func (s *Store) PendingTelegramUpdates(botID, offset int64, limit int) ([]models
 		return nil, err
 	}
 	defer tx.Rollback()
+	if _, err := tx.Exec("INSERT INTO update_consumers(bot_id,last_poll_at) VALUES(?,?) ON CONFLICT(bot_id) DO UPDATE SET last_poll_at=excluded.last_poll_at", botID, time.Now().UnixMilli()); err != nil {
+		return nil, err
+	}
 	if offset < 0 {
 		var earliest sql.NullInt64
 		if err := tx.QueryRow(`SELECT MIN(update_id) FROM (SELECT update_id FROM pending_updates WHERE bot_id=? ORDER BY update_id DESC LIMIT ?)`, botID, -offset).Scan(&earliest); err != nil {
@@ -328,11 +357,11 @@ func (s *Store) HasInlineCallback(botID int64, id string) bool {
 
 func (s *Store) HandledTelegramUpdate(botID, updateID int64) (bool, error) {
 	var n int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM handled_updates WHERE bot_id=? AND update_id=?", botID, updateID).Scan(&n)
+	err := s.db.QueryRow("SELECT (EXISTS(SELECT 1 FROM handled_updates WHERE bot_id=? AND update_id=?) OR EXISTS(SELECT 1 FROM handled_update_ranges WHERE bot_id=? AND start_id<=? AND end_id>=?))", botID, updateID, botID, updateID, updateID).Scan(&n)
 	return n > 0, err
 }
 func (s *Store) MarkTelegramUpdateHandled(botID, updateID int64) error {
-	_, err := s.db.Exec("INSERT INTO handled_updates(bot_id,update_id) VALUES(?,?) ON CONFLICT DO NOTHING", botID, updateID)
+	_, err := s.db.Exec("INSERT INTO handled_updates(bot_id,update_id,handled_at) VALUES(?,?,?) ON CONFLICT DO NOTHING", botID, updateID, time.Now().UnixMilli())
 	return err
 }
 func (s *Store) HasCallback(botID int64, id string) (bool, error) {

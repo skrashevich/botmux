@@ -22,6 +22,7 @@ import (
 
 // e2eHarness wires up a complete in-process test environment.
 type e2eHarness struct {
+	dbPath  string
 	t       *testing.T
 	fake    *fakeTG          // always present — fake Telegram HTTP server
 	fakeSlk *httptest.Server // only when withFakeSlack() opt is applied
@@ -104,6 +105,7 @@ func setupE2E(t *testing.T, opts ...e2eOpt) *e2eHarness {
 
 	// 2. Store — reuse the newTestStore helper from server_capture_test.go
 	dbPath := filepath.Join(t.TempDir(), "e2e.db")
+	h.dbPath = dbPath
 	store, err := store.NewStore(dbPath)
 	if err != nil {
 		t.Fatalf("setupE2E: NewStore: %v", err)
@@ -113,7 +115,8 @@ func setupE2E(t *testing.T, opts ...e2eOpt) *e2eHarness {
 
 	// 3. ProxyManager — point at fake TG
 	h.proxy = proxy.NewManager(store, h.fake.URL())
-	t.Cleanup(func() { h.proxy.StopAll() })
+	originalProxy := h.proxy
+	t.Cleanup(func() { originalProxy.StopAll() })
 
 	// 4. Server — point at fake TG
 	h.server = server.NewServer(store, h.proxy)
